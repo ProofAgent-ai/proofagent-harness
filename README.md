@@ -59,7 +59,7 @@ proofagent-harness — Scorecard
 Final score: 8.80 / 10    Certification: SILVER    Tokens: 51,518
 ```
 
-The full report (transcripts, juror reasoning, cost, findings) is on the returned
+The full report (transcripts, juror reasoning, findings) is on the returned
 `report` object — inspect any field, or call `print(report)` for clean JSON
 output, `report.to_json("path.json")`, or `report.to_markdown("path.md")`.
 
@@ -123,7 +123,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 | Anthropic | `claude-sonnet-4-6` | 200K | — | **Recommended default** — strong reasoning, fast |
 | Anthropic | `claude-haiku-4-5-20251001` | 200K | — | Cheapest Anthropic; great for the harness machinery while a stronger model runs your agent |
 | OpenAI | `gpt-4.1` | 1M | ✓ | Reproducible runs when `seed` is set |
-| OpenAI | `gpt-4.1-mini` | 128K | ✓ | Cost-effective with deterministic decoding |
+| OpenAI | `gpt-4.1-mini` | 128K | ✓ | Smaller, faster — supports deterministic decoding |
 | OpenAI | `gpt-4o` | 128K | ✓ | |
 | OpenAI | `gpt-4o-mini` | 128K | ✓ | |
 | Google | `gemini/gemini-1.5-pro` | 2M | ✓ | Largest commercial context window |
@@ -139,7 +139,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 - **Production-grade evals** → Claude Sonnet 4.6 or GPT-4.1 (both for harness and your agent)
 - **Tightest reproducibility** → GPT-4.1 / Gemini 1.5 Pro with `seed=42` (Anthropic doesn't yet honor `seed`)
 - **Largest context (huge corpora, long transcripts)** → Gemini 1.5 Pro (2M) or GPT-4.1 (1M)
-- **Cost-optimized CI** → use Haiku / GPT-4.1-mini for the harness machinery while your agent runs whatever it normally runs
+- **Lightweight CI** → use Haiku / GPT-4.1-mini for the harness machinery while your agent runs whatever it normally runs
 - **Air-gapped / on-prem** → Ollama or a vLLM/TGI-served model
 
 Any model under ~32K context will work but may trigger transcript trimming
@@ -194,8 +194,8 @@ INPUT
 │  REPORTER                                      │
 │   Final score, certification (GOLD / SILVER /  │
 │   NEEDS_ENHANCEMENT / NOT_READY), actionable   │
-│   findings, full cost / token / duration       │
-│   tracking.                                    │
+│   findings, with token / duration tracking.   │
+│                                                │
 └──────────┬─────────────────────────────────────┘
            ▼
         REPORT
@@ -210,9 +210,9 @@ A typical 8-turn run with `consensus="delphi"`:
 | Jury Round 1 (3 personas × 5 metrics) | 15 | ~6s |
 | Jury Round 2 (re-votes, ~30% of metrics) | ~5 | ~3s |
 | Reporter | 1 | ~1s |
-| **Total** | **~40** | **~30s · ~$0.40** |
+| **Total** | **~40** | **~30s** |
 
-Cheap enough for CI. Predictable enough to budget.
+Predictable enough to wire into CI.
 
 ## The 5 metrics
 
@@ -616,10 +616,10 @@ evaluation.
 
 ## Consensus strategies
 
-| Strategy | How | Cost | When to use |
+| Strategy | How | Calls | When to use |
 |---|---|:---:|---|
-| `independent` | 3 jurors score blind, never see each other | 1× | Fast CI, cheapest |
-| `delphi` *(default)* | Blind round 1; informed round 2 only when scores disagree | ~1.5× | **Best ROI** |
+| `independent` | 3 jurors score blind, never see each other | 1× | Fast CI |
+| `delphi` *(default)* | Blind round 1; informed round 2 only when scores disagree | ~1.5× | **Best signal-per-call** |
 | `debate` | Multi-round critique loop until convergence | 3-5× | High-stakes / regulated |
 
 ## Open source vs hosted
@@ -690,14 +690,28 @@ Harness().evaluate(agent, role="...", goal="...")
 </details>
 
 <details>
-<summary><b>How much does a run cost?</b></summary>
+<summary><b>How many LLM calls does a run make?</b></summary>
 
-A typical 8-turn evaluation with Delphi consensus runs ~38 LLM calls. With Claude Sonnet that's ~$0.40. With Claude Haiku or GPT-4.1 Mini, ~$0.05–$0.10. You can also use cheaper models for the harness machinery and a stronger model for the agent under test:
+A typical 8-turn evaluation with Delphi consensus runs ~38 LLM calls in ~30 seconds:
+
+| Stage | Calls |
+|---|---:|
+| Planner (incl. domain inference + weaving) | 2-3 |
+| Conductor (8 turns + your agent) | 16 |
+| Jury Round 1 (3 personas × 5 metrics) | 15 |
+| Jury Round 2 (re-votes, ~30% of metrics) | ~5 |
+| Reporter | 1 |
+
+You can mix models — use a smaller model for the harness machinery while
+your agent runs whatever it normally runs:
 
 ```python
 Harness(llm="claude-haiku-4-5-20251001")    # harness uses Haiku
 # while my_agent uses Sonnet internally
 ```
+
+Token usage shows up on `report.tokens_used` and is rendered next to the
+certification on the auto-printed scorecard.
 </details>
 
 <details>
