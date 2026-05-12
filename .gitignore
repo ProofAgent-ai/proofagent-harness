@@ -82,3 +82,6 @@ compliance_audit.*
 # Examples scratch dirs
 examples/my_agent_dir/
 examples/results/
+
+# Notebook execution artifacts (from scripts/test_notebooks.py --keep-output)
+notebooks/_executed_*.ipynb

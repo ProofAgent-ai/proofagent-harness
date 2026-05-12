@@ -163,18 +163,56 @@ class Harness:
         context: AgentContext | None = None,
         on_event: Callable[[Event], None] | None = None,
     ) -> Report:
-        """Run a full evaluation. Synchronous wrapper around `aevaluate`."""
-        return asyncio.run(
-            self.aevaluate(
-                agent,
-                role=role,
-                business_case=business_case,
-                goal=goal,
-                knowledge=knowledge,
-                context=context,
-                on_event=on_event,
-            )
-        )
+        """Run a full evaluation. Synchronous wrapper around `aevaluate`.
+
+        Works in both regular Python scripts AND inside Jupyter notebooks /
+        async contexts. Jupyter's kernel runs inside an active asyncio event
+        loop, so we detect that and spawn a fresh loop in a worker thread to
+        avoid the `asyncio.run() cannot be called from a running event loop`
+        crash. If the caller already has an event loop and wants async control,
+        use `aevaluate()` instead.
+        """
+        kwargs = {
+            "agent": agent,
+            "role": role,
+            "business_case": business_case,
+            "goal": goal,
+            "knowledge": knowledge,
+            "context": context,
+            "on_event": on_event,
+        }
+
+        # Are we already inside a running event loop? (Jupyter == yes.)
+        try:
+            asyncio.get_running_loop()
+            in_loop = True
+        except RuntimeError:
+            in_loop = False
+
+        if not in_loop:
+            # Standard CLI / script path — no active loop, just run the coro.
+            return asyncio.run(self.aevaluate(**kwargs))
+
+        # We're inside a running loop. Spin the coroutine on a fresh loop in
+        # a worker thread; this keeps Jupyter's loop free and avoids the
+        # nested-asyncio.run() error.
+        import threading
+
+        box: dict[str, Any] = {}
+
+        def _thread_runner() -> None:
+            try:
+                box["result"] = asyncio.run(self.aevaluate(**kwargs))
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                box["exc"] = exc
+
+        t = threading.Thread(target=_thread_runner, daemon=True)
+        t.start()
+        t.join()
+
+        if "exc" in box:
+            raise box["exc"]
+        return box["result"]
 
     async def aevaluate(
         self,
@@ -195,9 +233,25 @@ class Harness:
         composed_callback = _compose_callbacks(progress.on_event, on_event)
 
         if self.verbose:
-            progress.start()
+            progress.start(turn_count=self.turns)
 
         try:
+            # ── Phase 0: pre-flight check ────────────────────────────────
+            # Verify the Harness LLM is reachable + the API key is valid
+            # BEFORE running any planner / conductor / juror logic. Fails
+            # fast with an actionable error instead of producing a misleading
+            # all-fallback scorecard 30 seconds later.
+            composed_callback(
+                Event(type="setup_start", detail="checking Harness LLM reachability")
+            )
+            await self._preflight_check_llm()
+            composed_callback(
+                Event(
+                    type="setup_done",
+                    detail=f"Harness LLM reachable ({self.llm.model})",
+                )
+            )
+
             initial_state = self._build_initial_state(
                 agent=agent,
                 role=role,
@@ -309,6 +363,55 @@ class Harness:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+    async def _preflight_check_llm(self) -> None:
+        """Confirm the Harness LLM is reachable and the API key is valid.
+
+        Runs ONCE at the start of every evaluation, before any planning,
+        conducting, or scoring work. Costs ~5 tokens; saves ~30 seconds of
+        wasted work + a misleading scorecard when auth fails.
+        """
+        try:
+            await self.llm.complete(
+                [{"role": "user", "content": "ok"}],
+                max_tokens=5,
+                temperature=0,
+            )
+        except Exception as exc:  # noqa: BLE001 — re-raised wrapped below
+            # Determine the right env var name for the diagnostic hint
+            model = self.llm.model.lower()
+            if "claude" in model or "anthropic" in model:
+                env_hint = "ANTHROPIC_API_KEY"
+            elif "gpt" in model or "openai" in model:
+                env_hint = "OPENAI_API_KEY"
+            elif "gemini" in model:
+                env_hint = "GEMINI_API_KEY"
+            elif "bedrock" in model:
+                env_hint = "AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY"
+            else:
+                env_hint = "the provider-specific env var"
+
+            raise LLMNotConfiguredError(
+                "Harness LLM pre-flight check failed — the harness cannot "
+                "reach the model and refused to start the evaluation.\n\n"
+                f"  Model:       {self.llm.model}\n"
+                f"  Error:       {type(exc).__name__}: {exc}\n"
+                f"  Expected env var: {env_hint}\n\n"
+                "Common fixes:\n"
+                "  - Verify your API key is loaded INSIDE the kernel:\n"
+                f"      import os; print(os.environ.get({env_hint!r}))\n"
+                "  - Make sure you exported the key in the SAME terminal that\n"
+                "    launched Jupyter (env vars don't carry across terminals).\n"
+                "  - Confirm the model id passed to Harness(llm=...) is valid\n"
+                "    and your account has access to it.\n"
+                "  - For mixed-provider setups, set every relevant key:\n"
+                "      ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
+            ) from exc
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised when the Harness LLM cannot authenticate or reach the provider."""
 
 
 def _compose_callbacks(

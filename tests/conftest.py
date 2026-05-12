@@ -46,6 +46,7 @@ class FakeLLM(LLM):
         self.last_temperature_per_call.append(temperature)
         text = self.canned_text.pop(0) if self.canned_text else "ok"
         self.call_count += 1
+        self.total_tokens += 15
         return CompletionResult(text=text, prompt_tokens=10, completion_tokens=5, cost_usd=0.0)
 
     async def complete_json(  # type: ignore[override]
@@ -59,10 +60,37 @@ class FakeLLM(LLM):
         retries: int = 2,
     ) -> dict[str, Any]:
         self.last_temperature_per_call.append(temperature)
+        # Mirror the real LLM's accounting so the harness's "did the LLM
+        # actually run?" sanity check sees positive call_count + tokens.
+        self.call_count += 1
+        self.total_tokens += 15
         if self.canned_json:
             return self.canned_json.pop(0)
         # Default: a juror score
         return {"score": 7.5, "reasoning": "deterministic stub score"}
+
+
+class _AlwaysErrorLLM(FakeLLM):
+    """FakeLLM variant that simulates total auth failure — every call raises.
+
+    Used to verify the harness's `LLMNotConfiguredError` safety net fires
+    when juror calls all fail (the real-world cause: bad/missing API key).
+    """
+
+    async def complete(self, *args, **kwargs):  # type: ignore[override]
+        from proofagent_harness.llm import LLMError
+
+        raise LLMError("fake auth failure (test fixture)")
+
+    async def complete_json(self, *args, **kwargs):  # type: ignore[override]
+        from proofagent_harness.llm import LLMError
+
+        raise LLMError("fake auth failure (test fixture)")
+
+
+@pytest.fixture
+def always_error_llm() -> "_AlwaysErrorLLM":
+    return _AlwaysErrorLLM()
 
 
 @pytest.fixture

@@ -43,6 +43,20 @@ def test_user_llm_seed_wins_over_harness_seed() -> None:
     assert h.llm.seed == 999
 
 
+def test_litellm_drops_unsupported_params() -> None:
+    """`seed` must be passable for any provider — LiteLLM should silently drop
+    it for providers that don't support it (e.g. Anthropic), not raise.
+
+    This regression test guards against the LLMNotConfiguredError users hit
+    when LiteLLM's `drop_params` default flips to False between releases.
+    """
+    import litellm
+    assert litellm.drop_params is True, (
+        "litellm.drop_params must be True so seed= can be passed to any "
+        "provider safely. Set it in proofagent_harness.llm at import time."
+    )
+
+
 # ─── per-role temperature defaults ────────────────────────────────────────
 
 

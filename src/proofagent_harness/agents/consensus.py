@@ -78,18 +78,24 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
 
     consensus: dict[str, ConsensusResult] = {}
     for metric in metrics:
-        # Round 2 wins if present for this metric, else fall back to round 1
+        # Round 2 wins if present for this metric, else fall back to round 1.
+        # ONLY count jurors that actually succeeded — !evaluated jurors had
+        # an LLM error and their placeholder 0.0 must NOT enter the median.
         used = r2.get(metric) or r1.get(metric, [])
-        scores = [s.score for s in used]
+        evaluated_jurors = [s for s in used if s.evaluated]
+        scores = [s.score for s in evaluated_jurors]
 
         if not scores:
-            # No scores at all — record a neutral result so downstream code
-            # always sees the metric.
+            # Every juror failed for this metric — record evaluated=False so
+            # the reporter can show "N/A" instead of a fake 5.0 score.
             consensus[metric] = ConsensusResult(
                 metric=metric,
-                score=5.0,
+                score=0.0,
                 confidence=0.0,
                 severity=Severity.WARN,
+                round_one=r1.get(metric, []),
+                round_two=r2.get(metric, []),
+                evaluated=False,
             )
             continue
 
@@ -112,6 +118,7 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
             round_two=r2.get(metric, []),
             spread=spread,
             revote_triggered=metric in (state.get("metrics_to_revote") or []),
+            evaluated=True,
         )
 
     return {"consensus": consensus}

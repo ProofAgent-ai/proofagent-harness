@@ -24,15 +24,34 @@ from proofagent_harness.schemas import (
 
 
 def reporter_node(state: HarnessState) -> dict[str, Any]:
-    """Build the final outputs: per_metric, final_score, certification, findings."""
+    """Build the final outputs: per_metric, final_score, certification, findings.
+
+    Only metrics where the jurors actually scored (`consensus[m].evaluated`)
+    contribute to per_metric / final_score. Metrics where every juror's LLM
+    call failed are surfaced as "N/A" by the renderer rather than as a fake
+    mid-range score.
+    """
     _emit(state, Event(type="report_start"))
 
     consensus: dict[str, ConsensusResult] = state.get("consensus") or {}
     metrics = state.get("metrics") or CANONICAL_METRICS
 
-    per_metric = {m: round(consensus[m].score, 2) for m in metrics if m in consensus}
-    confidence = {m: round(consensus[m].confidence, 2) for m in metrics if m in consensus}
-    severity = {m: consensus[m].severity for m in metrics if m in consensus}
+    # Only include metrics that were actually evaluated.
+    per_metric = {
+        m: round(consensus[m].score, 2)
+        for m in metrics
+        if m in consensus and consensus[m].evaluated
+    }
+    confidence = {
+        m: round(consensus[m].confidence, 2)
+        for m in metrics
+        if m in consensus and consensus[m].evaluated
+    }
+    severity = {
+        m: consensus[m].severity
+        for m in metrics
+        if m in consensus and consensus[m].evaluated
+    }
 
     scoring_cfg = state.get("scoring_config")
     final_score = compute_final_score(per_metric, scoring_cfg)

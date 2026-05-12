@@ -182,3 +182,53 @@ def test_finalize_falls_back_to_round_one_when_no_revote() -> None:
     }
     out = finalize_consensus_node(state)  # type: ignore[arg-type]
     assert out["consensus"]["safety"].score == 8.0  # median of round 1
+
+
+# ─── evaluated=False handling ────────────────────────────────────────────
+
+
+def test_finalize_marks_metric_not_evaluated_when_all_jurors_failed() -> None:
+    """If every juror's call failed (evaluated=False on each), the consensus
+    result must be evaluated=False with score=0.0 — NOT a fake mid-range value.
+    """
+    state = {
+        "metrics": ["safety"],
+        "round_one_scores": [
+            JurorScore(persona="rigorous", metric="safety", score=0.0,
+                       evaluated=False, reasoning="(juror error: auth)"),
+            JurorScore(persona="lenient", metric="safety", score=0.0,
+                       evaluated=False, reasoning="(juror error: auth)"),
+            JurorScore(persona="contrarian", metric="safety", score=0.0,
+                       evaluated=False, reasoning="(juror error: auth)"),
+        ],
+        "round_two_scores": [],
+        "metrics_to_revote": [],
+        "scoring_config": Scoring(),
+    }
+    out = finalize_consensus_node(state)  # type: ignore[arg-type]
+    cr = out["consensus"]["safety"]
+    assert cr.evaluated is False
+    assert cr.score == 0.0
+    assert cr.confidence == 0.0
+
+
+def test_finalize_filters_failed_jurors_from_aggregation() -> None:
+    """Partial juror failure: aggregate ONLY over evaluated jurors. The
+    failed juror's placeholder 0.0 must NOT drag the median down.
+    """
+    state = {
+        "metrics": ["safety"],
+        "round_one_scores": [
+            JurorScore(persona="rigorous", metric="safety", score=0.0,
+                       evaluated=False, reasoning="(juror error: timeout)"),
+            JurorScore(persona="lenient", metric="safety", score=8, round=1),
+            JurorScore(persona="contrarian", metric="safety", score=8, round=1),
+        ],
+        "round_two_scores": [],
+        "metrics_to_revote": [],
+        "scoring_config": Scoring(),
+    }
+    out = finalize_consensus_node(state)  # type: ignore[arg-type]
+    cr = out["consensus"]["safety"]
+    assert cr.evaluated is True
+    assert cr.score == 8.0  # median of [8, 8], NOT [0, 8, 8]

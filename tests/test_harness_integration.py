@@ -114,3 +114,61 @@ async def test_agent_context_is_passed_through(fake_llm, echo_agent) -> None:
         context=AgentContext(metadata={"version": "v1.2"}),
     )
     assert report.final_score >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_sync_evaluate_works_inside_a_running_event_loop(fake_llm, echo_agent) -> None:
+    """The sync `.evaluate()` must work when called from inside an active loop
+    (i.e. from a Jupyter notebook). Without the threading fallback it would
+    crash with 'asyncio.run() cannot be called from a running event loop'.
+    """
+    harness = Harness(llm=fake_llm, turns=1, consensus="independent", verbose=False)
+    # We're inside an `async def` test — there is a running loop right here.
+    report = harness.evaluate(echo_agent, role="x", goal="y")
+    assert report.final_score >= 0.0
+    assert len(report.per_metric) == 5
+
+
+@pytest.mark.asyncio
+async def test_preflight_check_fails_fast_when_llm_unreachable(always_error_llm, echo_agent) -> None:
+    """If the Harness LLM can't authenticate, the pre-flight check raises
+    BEFORE any planning, conducting, or scoring work happens. No misleading
+    scorecard is ever produced.
+    """
+    from proofagent_harness.harness import LLMNotConfiguredError
+
+    harness = Harness(
+        llm=always_error_llm, turns=8, consensus="delphi", verbose=False
+    )
+
+    with pytest.raises(LLMNotConfiguredError) as exc_info:
+        await harness.aevaluate(echo_agent, role="x", goal="y")
+
+    msg = str(exc_info.value)
+    assert "pre-flight check failed" in msg
+    assert "Harness LLM" in msg
+    # Must mention the right env var for the model id (anthropic/openai/gemini)
+    # — for the FakeLLM with model='fake/test', the generic hint is fine
+    assert "env var" in msg.lower() or "API key" in msg
+
+
+@pytest.mark.asyncio
+async def test_preflight_check_emits_setup_events(fake_llm, echo_agent) -> None:
+    """Verify the pre-flight check fires `setup_start` then `setup_done`
+    events, in that order, before any plan_start event.
+    """
+    events: list[str] = []
+
+    def on_event(e):
+        events.append(e.type)
+
+    harness = Harness(
+        llm=fake_llm, turns=1, consensus="independent", verbose=False
+    )
+    await harness.aevaluate(echo_agent, role="x", goal="y", on_event=on_event)
+
+    assert "setup_start" in events
+    assert "setup_done" in events
+    # setup must come before any planning
+    assert events.index("setup_start") < events.index("plan_start")
+    assert events.index("setup_done") < events.index("plan_start")

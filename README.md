@@ -113,7 +113,7 @@ Requires Python 3.10+.
 ## Supported models
 
 The harness uses [LiteLLM](https://github.com/BerriAI/litellm) — anything
-LiteLLM supports works as the harness LLM (planner, conductor, jurors), and
+LiteLLM supports works as the Harness LLM (planner, conductor, jurors), and
 your agent under test is your own choice entirely. The table below is a
 non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/docs/providers) for the full set.
 
@@ -121,7 +121,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 |---|---|---:|:---:|---|
 | Anthropic | `claude-opus-4-7` | 200K (1M tier available) | — | Best reasoning; recommended for high-stakes evals |
 | Anthropic | `claude-sonnet-4-6` | 200K | — | **Recommended default** — strong reasoning, fast |
-| Anthropic | `claude-haiku-4-5-20251001` | 200K | — | Smallest Anthropic model; great for the harness machinery while a stronger model runs your agent |
+| Anthropic | `claude-haiku-4-5-20251001` | 200K | — | Smallest Anthropic model; great as the Harness LLM while a stronger model runs your agent |
 | OpenAI | `gpt-4.1` | 1M | ✓ | Reproducible runs when `seed` is set |
 | OpenAI | `gpt-4.1-mini` | 128K | ✓ | Smaller, faster — supports deterministic decoding |
 | OpenAI | `gpt-4o` | 128K | ✓ | |
@@ -139,7 +139,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 - **Production-grade evals** → Claude Sonnet 4.6 or GPT-4.1 (both for harness and your agent)
 - **Tightest reproducibility** → GPT-4.1 / Gemini 1.5 Pro with `seed=42` (Anthropic doesn't yet honor `seed`)
 - **Largest context (huge corpora, long transcripts)** → Gemini 1.5 Pro (2M) or GPT-4.1 (1M)
-- **Lightweight CI** → use Haiku / GPT-4.1-mini for the harness machinery while your agent runs whatever it normally runs
+- **Lightweight CI** → use Haiku / GPT-4.1-mini as the Harness LLM while your agent runs whatever it normally runs
 - **Air-gapped / on-prem** → Ollama or a vLLM/TGI-served model
 
 Any model under ~32K context will work but may trigger transcript trimming
@@ -405,7 +405,7 @@ catches juror disagreements.
 python examples/01_quickstart.py --turns 10 --llm claude-haiku-4-5-20251001
 ```
 
-The `--llm` flag controls the **harness machinery** (planner, conductor,
+The `--llm` flag controls the **Harness LLM** (planner, conductor,
 jurors) — your agent under test runs whatever YOU defined. Swapping Sonnet
 for Haiku here keeps the evaluation cheap during a prompt-engineering
 session without changing what's actually being tested.
@@ -461,7 +461,7 @@ exact phrasing will remain. Internal trap selection stays deterministic.
 ```
 --llm MODEL_ID
 ```
-Model id (LiteLLM target) for the **harness machinery only** — planner,
+Model id (LiteLLM target) for the **Harness LLM only** — planner,
 conductor, jurors. Your agent under test runs whatever model **you** chose in
 its callable; the harness flag doesn't touch it.
 
@@ -700,7 +700,7 @@ For richer grounding (system prompt + tools + memory + few-shots together), use
 
 > **Local-first guarantee:** all of the above stays on your machine. The
 > harness reads your traps, skills, and knowledge locally; the only network
-> traffic is to your chosen LLM provider for the harness machinery and your
+> traffic is to your chosen LLM provider for the Harness LLM and your
 > agent under test. Trade secrets in system prompts or knowledge corpora
 > never get uploaded to a third-party evaluation service.
 
@@ -875,7 +875,7 @@ Use the harness in CI. Use the hosted product in the boardroom. Both speak the s
 | [01_quickstart_local.ipynb](notebooks/01_quickstart_local.ipynb) | First evaluation end-to-end in a local Jupyter kernel — install, configure, evaluate, inspect, save. |
 | [02_quickstart_colab.ipynb](notebooks/02_quickstart_colab.ipynb) | Same flow, hosted on Google Colab. Includes a pandas DataFrame view of the scores and a consensus-log walkthrough. |
 | [03_compliance_traps.ipynb](notebooks/03_compliance_traps.ipynb) | Evaluating regulated agents — GDPR, CCPA, HIPAA, PCI, SOX. Strict scoring policy (weakest-link, high floors). |
-| [04_proxy_llm_for_harness.ipynb](notebooks/04_proxy_llm_for_harness.ipynb) | Run the harness machinery on a smaller model (Haiku / GPT-4.1-mini / Gemini Flash) while keeping your agent on its production model. Side-by-side comparison + calibration check. |
+| [04_proxy_llm_for_harness.ipynb](notebooks/04_proxy_llm_for_harness.ipynb) | Run the Harness LLM on a smaller model (Haiku / GPT-4.1-mini / Gemini Flash) while keeping your agent on its production model. Side-by-side comparison + calibration check. |
 
 ## FAQ
 
@@ -920,7 +920,7 @@ A typical 8-turn evaluation with Delphi consensus runs ~38 LLM calls in ~30 seco
 | Jury Round 2 (re-votes, ~30% of metrics) | ~5 |
 | Reporter | 1 |
 
-You can mix models — use a smaller model for the harness machinery while
+You can mix models — use a smaller Harness LLM while
 your agent runs whatever it normally runs:
 
 ```python

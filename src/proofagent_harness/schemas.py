@@ -330,17 +330,28 @@ class Turn(BaseModel):
 
 
 class JurorScore(BaseModel):
-    """A single juror's score for a single metric in a single round."""
+    """A single juror's score for a single metric in a single round.
+
+    `evaluated=False` means the LLM call failed for this juror — the `score`
+    is a placeholder (0.0), not a real verdict. Downstream code MUST filter
+    these out before averaging or comparing.
+    """
 
     persona: str
     metric: str
-    score: float
+    score: float = 0.0
     reasoning: str = ""
     round: int = 1
+    evaluated: bool = True
 
 
 class ConsensusResult(BaseModel):
-    """Final consensus outcome for one metric."""
+    """Final consensus outcome for one metric.
+
+    `evaluated=False` means every juror call failed for this metric — `score`
+    is 0.0 by convention (NOT a real low score) and must be excluded from
+    overall aggregations.
+    """
 
     metric: str
     score: float
@@ -350,6 +361,7 @@ class ConsensusResult(BaseModel):
     round_two: list[JurorScore] = Field(default_factory=list)
     spread: float = 0.0
     revote_triggered: bool = False
+    evaluated: bool = True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -463,6 +475,7 @@ class Event(BaseModel):
     """Streaming event emitted during an eval. Subscribe via `on_event`."""
 
     type: Literal[
+        "setup_start", "setup_done",
         "plan_start", "plan_end",
         "turn_start", "turn_end",
         "jury_round_start", "jury_round_end",

@@ -32,7 +32,14 @@ _CERT_STYLES = {
 
 
 def render_rich(report: Report) -> Any:
-    """Build a Rich renderable for terminal printing."""
+    """Build a Rich renderable for terminal printing.
+
+    Metrics where every juror failed (consensus_log[m].evaluated == False)
+    are surfaced as "N/A" rather than as a fake score. This keeps the
+    scorecard honest when something went wrong mid-run.
+    """
+    from proofagent_harness.schemas import CANONICAL_METRICS
+
     table = Table(
         title="ProofAgent Harness — Scorecard",
         title_style="bold cyan",
@@ -44,7 +51,34 @@ def render_rich(report: Report) -> Any:
     table.add_column("Confidence", justify="right")
     table.add_column("Severity", justify="left")
 
-    for metric, score in report.per_metric.items():
+    # Show every canonical metric (or every metric the run targeted) in the
+    # table — including ones flagged not-evaluated. Customers want a complete
+    # row map, with "N/A" where evaluation failed.
+    metrics_in_run = (
+        list(report.per_metric.keys())
+        + [
+            m
+            for m in report.consensus_log
+            if m not in report.per_metric
+        ]
+    )
+    if not metrics_in_run:
+        metrics_in_run = list(CANONICAL_METRICS)
+
+    for metric in metrics_in_run:
+        cl = report.consensus_log.get(metric)
+        evaluated = cl.evaluated if cl else (metric in report.per_metric)
+
+        if not evaluated:
+            table.add_row(
+                metric.replace("_", " ").title(),
+                Text("N/A", style="dim"),
+                Text("—", style="dim"),
+                Text("not evaluated", style="dim italic"),
+            )
+            continue
+
+        score = report.per_metric.get(metric, 0.0)
         sev = report.severity.get(metric, Severity.PASS)
         conf = report.confidence.get(metric, 0.0)
         table.add_row(

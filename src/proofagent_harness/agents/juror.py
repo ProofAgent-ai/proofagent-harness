@@ -161,10 +161,15 @@ async def _score_one(
             },
         )
     except Exception as exc:  # noqa: BLE001
+        # Mark this juror as NOT EVALUATED rather than returning a misleading
+        # mid-range placeholder score. Downstream code filters !evaluated out
+        # of consensus aggregation, and the final report shows "N/A" for any
+        # metric where every juror failed.
         return JurorScore(
             persona=persona.name,
             metric=metric,
-            score=5.0,
+            score=0.0,
+            evaluated=False,
             reasoning=f"(juror error: {exc})",
             round=round_num,
         )

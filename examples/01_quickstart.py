@@ -85,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llm", "-l",
         type=str, default="claude-sonnet-4-6",
-        help="Model id for the harness machinery (default: claude-sonnet-4-6).",
+        help="Harness LLM (model id) (default: claude-sonnet-4-6).",
     )
     return parser.parse_args()
 

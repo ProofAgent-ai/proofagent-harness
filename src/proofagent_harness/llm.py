@@ -22,6 +22,12 @@ import litellm
 # Quiet down LiteLLM by default — users opt back in via LITELLM_LOG=DEBUG
 litellm.suppress_debug_info = True
 
+# Drop provider-unsupported params silently rather than raising. This lets
+# `seed=42` work transparently across providers: OpenAI / Gemini honor it,
+# Anthropic / Bedrock-Anthropic ignore it. Same goes for any other
+# provider-specific kwargs the user passes via `extra_kwargs`.
+litellm.drop_params = True
+
 
 @dataclass
 class CompletionResult:
