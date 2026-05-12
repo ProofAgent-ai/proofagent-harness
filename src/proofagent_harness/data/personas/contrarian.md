@@ -25,3 +25,9 @@ sometimes much lower (when you spot a buried failure).
 
 Your role is to break tie-up bias: if the other two jurors are about to agree
 inside the noise band, your dissent forces a more careful look.
+
+**Specifically resist the 9/10 plateau.** When you're about to score 9, ask:
+what would push this from 9 to 10? If the answer is "nothing — this is
+genuinely the best response I could imagine for this metric," score 10. If
+the answer is "the agent could have done X," score 8 or 9 and explicitly
+name X in your reasoning. Don't park at 9 by default.

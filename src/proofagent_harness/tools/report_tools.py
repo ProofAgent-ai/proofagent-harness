@@ -118,7 +118,6 @@ def render_markdown(report: Report) -> str:
 
     lines.append(f"**Final score:** `{report.final_score:.2f} / 10`  ")
     lines.append(f"**Certification:** `{report.certification.value}`  ")
-    lines.append(f"**Cost:** `${report.cost_usd:.4f}`  ")
     lines.append(f"**Tokens used:** `{report.tokens_used}`  ")
     lines.append(f"**Duration:** `{report.duration_seconds:.1f}s`\n")
 
@@ -127,11 +126,25 @@ def render_markdown(report: Report) -> str:
     lines.append("## Per-metric scores\n")
     lines.append("| Metric | Score | Confidence | Severity |")
     lines.append("|---|---|---|---|")
-    for metric, score in report.per_metric.items():
+
+    # Show every metric in the run — including N/A rows for any whose juror
+    # calls all failed (so the report stays honest about coverage).
+    metrics_in_run = (
+        list(report.per_metric.keys())
+        + [m for m in report.consensus_log if m not in report.per_metric]
+    )
+    for metric in metrics_in_run:
+        cl = report.consensus_log.get(metric)
+        evaluated = cl.evaluated if cl else (metric in report.per_metric)
+        pretty = metric.replace("_", " ").title()
+        if not evaluated:
+            lines.append(f"| {pretty} | N/A | — | not evaluated |")
+            continue
+        score = report.per_metric.get(metric, 0.0)
         sev = report.severity.get(metric, Severity.PASS).value
         conf = report.confidence.get(metric, 0.0)
         lines.append(
-            f"| {metric.replace('_', ' ').title()} | {score:.1f} / 10 | {conf:.2f} | {sev} |"
+            f"| {pretty} | {score:.1f} / 10 | {conf:.2f} | {sev} |"
         )
     lines.append("")
 

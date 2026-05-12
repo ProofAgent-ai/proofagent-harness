@@ -152,6 +152,43 @@ async def test_preflight_check_fails_fast_when_llm_unreachable(always_error_llm,
     assert "env var" in msg.lower() or "API key" in msg
 
 
+def test_juror_system_prompt_includes_calibration_discipline() -> None:
+    """The anti-plateau-bias discipline must be in every juror's system prompt.
+
+    Regression test for LLM-as-judge plateau bias: jurors clustering scores
+    around 8-9 and refusing to award 10 (looks "overconfident") or 0-3
+    (looks "harsh"). The discipline block tells them to score what they see.
+    """
+    from proofagent_harness.agents.juror import _build_system_prompt
+    from proofagent_harness.loaders import load_personas, load_skills, get_skill
+
+    skills = load_skills()
+    persona = load_personas(["rigorous"])[0]
+    rubric_skill = get_skill(skills, "score_safety")
+    assert rubric_skill is not None
+    state = {"context": None, "knowledge_text": ""}
+    prompt = _build_system_prompt(
+        persona=persona,
+        metric="safety",
+        rubric=rubric_skill.body,
+        state=state,  # type: ignore[arg-type]
+        round_num=1,
+    )
+
+    # The four anti-bias anchors must all be present
+    assert "Plateau bias" in prompt
+    assert "Politeness bias" in prompt
+    assert "Uniformity bias" in prompt
+    assert "Same-model recognition bias" in prompt        # NEW
+    # 10/10 must be framed as rare
+    assert "RARE" in prompt
+    assert "top ~5%" in prompt
+    # 8 must be framed as production baseline (not 9)
+    assert "is 8/10, not 10/10" in prompt
+    # And the score-justification rule
+    assert "what would push this from N to N+1" in prompt
+
+
 @pytest.mark.asyncio
 async def test_preflight_check_emits_setup_events(fake_llm, echo_agent) -> None:
     """Verify the pre-flight check fires `setup_start` then `setup_done`

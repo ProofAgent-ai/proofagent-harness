@@ -34,7 +34,7 @@ def test_bundled_personas_load() -> None:
 
 def test_bundled_traps_load() -> None:
     traps = load_traps()
-    assert len(traps) >= 30, f"expected >=30 traps, got {len(traps)}"
+    assert len(traps) >= 35, f"expected >=35 traps, got {len(traps)}"
     families = {t.family for t in traps}
     # core families
     assert "compliance" in families
@@ -74,6 +74,18 @@ def test_compliance_traps_present() -> None:
     assert "hipaa_phi_exposure" in names
     assert "pci_card_data" in names
     assert "sox_financial_disclosure" in names
+
+
+def test_advanced_attack_traps_present() -> None:
+    """Traps that target modern-agent weak spots (sycophancy, hypothetical
+    framing, refusal-channel attacks, policy gaslighting, composition)."""
+    traps = load_traps()
+    names = {t.name for t in traps}
+    assert "hypothetical_role_play" in names
+    assert "refusal_channel_attack" in names
+    assert "sycophancy_exploit" in names
+    assert "policy_evolution_claim" in names
+    assert "compositional_disclosure" in names
 
 
 def test_select_traps_filters_by_metric() -> None:

@@ -831,13 +831,38 @@ If you need a stability number rather than a single score, run the eval N times
 and report median + IQR — this is the right pattern for any LLM-as-judge
 evaluation.
 
-## Consensus strategies
+## Consensus strategies — accuracy vs strictness vs cost
 
-| Strategy | How | Calls | When to use |
-|---|---|:---:|---|
-| `independent` | 3 jurors score blind, never see each other | 1× | Fast CI |
-| `delphi` *(default)* | Blind round 1; informed round 2 only when scores disagree | ~1.5× | **Best signal-per-call** |
-| `debate` | Multi-round critique loop until convergence | 3-5× | High-stakes / regulated |
+Three strategies, picked via `consensus="..."` on `Harness()` or `--consensus` on the CLI:
+
+| Strategy | Accuracy | Strictness | Calls | When to use |
+|---|---|---|:---:|---|
+| `independent` | medium | baseline | 1× | Smoke tests, fast CI iteration |
+| `delphi` *(default)* | high | slightly stricter on disputed metrics | ~1.5× | **Almost all production runs** — best signal-per-call |
+| `debate` | highest | strictest (catches more issues) | 3-5× | High-stakes / regulated; defending a verdict |
+
+### How they behave
+
+- **`independent`** — 3 jurors score blind, take the median. No information sharing. Fast and cheap; reduces single-judge noise but misses blind spots one juror would have caught from another's reasoning.
+- **`delphi`** *(default)* — Round 1 blind. **Round 2 fires only for metrics where jurors disagree by more than 2 points**; in round 2, jurors see peer scores + reasoning and re-vote. Catches "obvious-in-hindsight" failures one juror noticed and the others missed. Free when jurors agree (no round-2 calls); only pays for the disputed metrics.
+- **`debate`** — Round 1 blind, then jurors actively critique each other's reasoning over multiple rounds (configurable with `debate_rounds`, default 3). Surfaces gaps even Delphi misses. **Almost always lowers scores for borderline agents** because deeper critique finds more failure modes.
+
+### What to expect — same agent across strategies
+
+| Agent quality | independent | delphi | debate |
+|---|---|---|---|
+| **Strong** (~9.0 on independent) | 9.0 | 9.0 | 8.5–9.0 *(small drop — clean refusals, little for critique to attack)* |
+| **Borderline** (~7.0 on independent) | 7.0 | 6.5–7.0 | 5.5–6.5 *(critique surfaces the cracks)* |
+| **Weak** (~4.0 on independent) | 4.0 | 3.5–4.0 | 3.0–3.5 *(more failure modes catalogued)* |
+
+**Stronger agents are stable across strategies; weaker agents drop more under deeper critique.** That's a feature — `debate` doesn't punish good agents, it exposes bad ones.
+
+### Practical advice
+
+- **Daily CI** → `delphi` (default). Best ROI.
+- **Pre-commit smoke tests** → `independent`. Fastest.
+- **Release gate or compliance audit** → `debate` with `--turns 15`. Defensible verdict.
+- **Suspect a passing score is too lenient?** Re-run the same agent with `debate`. If it stays in the same certification tier (e.g. SILVER → SILVER), the verdict is real. If it drops a tier, your agent has hidden weaknesses worth investigating.
 
 ## Open source vs hosted
 

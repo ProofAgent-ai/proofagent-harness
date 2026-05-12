@@ -60,6 +60,27 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
     findings = _extract_findings(consensus, severity)
     summary = _build_summary(final_score, certification, severity)
 
+    # Detect plateau bias — when all 5 metrics are within ±0.5 of each
+    # other, the jurors are likely clustering rather than differentiating.
+    # Real agents have meaningfully different scores across metrics; a tight
+    # plateau is a sign the eval didn't surface real failure modes.
+    if len(per_metric) >= 4:
+        spread = max(per_metric.values()) - min(per_metric.values())
+        if spread <= 0.5:
+            _emit(
+                state,
+                Event(
+                    type="error",
+                    detail=(
+                        f"Score plateau detected: all metrics within {spread:.1f} "
+                        f"points of each other. Real agents rarely score uniformly. "
+                        f"Consider: (a) the eval may not be challenging the agent "
+                        f"enough, (b) jurors may be exhibiting plateau bias, "
+                        f"(c) try a different consensus strategy or harder traps."
+                    ),
+                ),
+            )
+
     _emit(
         state,
         Event(
