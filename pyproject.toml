@@ -1,0 +1,109 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "proofagent-harness"
+dynamic = ["version"]
+description = "The open-source test harness for AI agents. Adversarial multi-turn evaluation with jury-based scoring across 5 metrics. BYO LLM."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "ProofAgent" }]
+keywords = [
+    "ai-agents",
+    "agent-evaluation",
+    "llm-evaluation",
+    "ai-testing",
+    "test-harness",
+    "adversarial-testing",
+    "multi-turn-evaluation",
+    "ai-safety",
+    "hallucination-detection",
+    "llm-judge",
+    "red-teaming",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain>=0.3.0",
+    "litellm>=1.50.0",
+    "pydantic>=2.0",
+    "python-frontmatter>=1.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "jinja2>=3.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "ruff>=0.4.0",
+    "pyright>=1.1.350",
+    "pre-commit>=3.0",
+]
+notebooks = [
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
+]
+docs = [
+    "mkdocs-material>=9.0",
+    "mkdocstrings[python]>=0.24",
+]
+
+[project.urls]
+Homepage = "https://proofagent.com/harness"
+Documentation = "https://proofagent.com/harness/docs"
+Repository = "https://github.com/proofagent/proofagent-harness"
+Issues = "https://github.com/proofagent/proofagent-harness/issues"
+Changelog = "https://github.com/proofagent/proofagent-harness/blob/main/CHANGELOG.md"
+
+[project.scripts]
+proof = "proofagent_harness.cli:app"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.1.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/proofagent_harness"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/proofagent_harness/data" = "proofagent_harness/data"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501", "B008"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
