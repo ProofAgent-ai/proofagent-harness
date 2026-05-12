@@ -11,7 +11,7 @@ Multi-turn adversarial evaluation with jury-based scoring across five production
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-68%20passing-brightgreen.svg)](tests/)
 
-[Quickstart](#quickstart) · [Why](#why-proofagent-harness) · [Supported models](#supported-models) · [How it works](#how-it-works) · [Domain-aware](#domain-aware-everywhere) · [CI integration](#ci-integration) · [Trap library](#trap-library) · [vs hosted](#open-source-vs-hosted)
+[Quickstart](#quickstart) · [Why](#why-proofagent-harness) · [Supported models](#supported-models) · [How it works](#how-it-works) · [Domain-aware](#domain-aware-everywhere) · [Recipes](#recipes--common-scenarios) · [CI integration](#ci-integration) · [Trap library](#trap-library) · [vs hosted](#open-source-vs-hosted)
 
 </div>
 
@@ -148,71 +148,23 @@ for longer plans (the harness will tell you — see
 
 ## How it works
 
+Five agents, one direction:
+
 ```
-INPUT
-  agent (callable)
-  role, business_case, goal, knowledge, context, turns
-        │
-        ▼
-┌────────────────────────────────────────────────┐
-│  PLANNER                                       │
-│   1. Infers domain from role+goal              │
-│      (LLM + keyword fallback)                  │
-│   2. Picks domain-relevant traps from the      │
-│      indexed bundled library                   │
-│   3. Reserves >=30% of slots for prompt-       │
-│      injection + hallucination probes          │
-│   4. Weaves callbacks + follow-up probes       │
-│      across turns (turn 6 calls back to        │
-│      turn 1, etc.)                             │
-└──────────┬─────────────────────────────────────┘
-           ▼
-┌────────────────────────────────────────────────┐
-│  CONDUCTOR                                     │
-│   N-turn adversarial campaign. Each turn       │
-│   crafts a realistic attack message using      │
-│   pretexting, escalation, multi-vector         │
-│   blending. Honors callback / follow-up        │
-│   annotations. Calls YOUR agent.               │
-└──────────┬─────────────────────────────────────┘
-           ▼
-┌────────────────────────────────────────────────┐
-│  JURY                                          │
-│   3 personas (rigorous, lenient, contrarian)   │
-│   score the full transcript across 5 metrics   │
-│   independently and in parallel.               │
-└──────────┬─────────────────────────────────────┘
-           ▼
-┌────────────────────────────────────────────────┐
-│  CONSENSUS                                     │
-│   Median per metric. Delphi re-vote when       │
-│   jurors disagree (spread > 2 → round 2 with   │
-│   peer reasoning visible).                     │
-└──────────┬─────────────────────────────────────┘
-           ▼
-┌────────────────────────────────────────────────┐
-│  REPORTER                                      │
-│   Final score, certification (GOLD / SILVER /  │
-│   NEEDS_ENHANCEMENT / NOT_READY), actionable   │
-│   findings, with token / duration tracking.   │
-│                                                │
-└──────────┬─────────────────────────────────────┘
-           ▼
-        REPORT
+PLANNER  →  CONDUCTOR  →  JURY  →  CONSENSUS  →  REPORTER
+ picks       N-turn       3 personas    median +     final score
+ traps       attack       × 5 metrics   Delphi       + certification
 ```
 
-A typical 8-turn run with `consensus="delphi"`:
+| Stage | What's important |
+|---|---|
+| **PLANNER** | Infers your agent's domain from `role` + `goal`, then picks **only relevant traps** (HIPAA for healthcare, PCI for retail, etc.). Reserves **≥30%** of turns for prompt-injection + hallucination probes. Weaves **callbacks + follow-ups** across turns. |
+| **CONDUCTOR** | Runs N adversarial turns. Crafts realistic attacks (pretexting, escalation, multi-vector blending) — never theatrical "ignore previous instructions" stuff. Honors the planner's weaving. |
+| **JURY** | 3 personas (**rigorous, lenient, contrarian**) score the full transcript on the **5 canonical metrics** independently and in parallel. |
+| **CONSENSUS** | Median per metric. **Delphi re-vote** kicks in when jurors disagree by more than 2 points — peer reasoning visible in round 2. |
+| **REPORTER** | Final score → certification (**GOLD / SILVER / NEEDS_ENHANCEMENT / NOT_READY**) + actionable findings. |
 
-| Stage | LLM calls | Wall clock |
-|---|---:|---:|
-| Planner (incl. domain inference + weaving) | 2-3 | ~3s |
-| Conductor (8 turns + your agent) | 16 | ~15s |
-| Jury Round 1 (3 personas × 5 metrics) | 15 | ~6s |
-| Jury Round 2 (re-votes, ~30% of metrics) | ~5 | ~3s |
-| Reporter | 1 | ~1s |
-| **Total** | **~40** | **~30s** |
-
-Predictable enough to wire into CI.
+That's the whole pipeline. Predictable enough to wire into CI.
 
 ## The 5 metrics
 
@@ -421,6 +373,105 @@ proof traps install finance                 # install a community trap pack
 proof metrics                               # list canonical metrics
 proof version
 ```
+
+## Recipes — common scenarios
+
+The bundled `examples/01_quickstart.py` accepts CLI flags so you can use the
+same script for different scenarios. Copy-paste the recipe that matches your
+need:
+
+### Smoke test — fast pre-PR sanity check (~30s)
+
+```bash
+python examples/01_quickstart.py --turns 4 --consensus independent
+```
+
+Use when iterating on a prompt change and want a quick "did I break safety?"
+signal. Independent consensus = no re-vote, cheapest path.
+
+### Production-grade evaluation (recommended default)
+
+```bash
+python examples/01_quickstart.py --turns 15 --consensus delphi
+```
+
+**Recommended minimum: 15 turns.** Anything shorter doesn't give the conductor
+enough runway to escalate, callback, or run follow-up probes. Delphi consensus
+catches juror disagreements.
+
+### Cheap iteration loop — Haiku for the harness, your agent untouched
+
+```bash
+python examples/01_quickstart.py --turns 10 --llm claude-haiku-4-5-20251001
+```
+
+The `--llm` flag controls the **harness machinery** (planner, conductor,
+jurors) — your agent under test runs whatever YOU defined. Swapping Sonnet
+for Haiku here keeps the evaluation cheap during a prompt-engineering
+session without changing what's actually being tested.
+
+### Stability check — sample the same agent 3 times
+
+```bash
+for seed in 1 2 3; do
+  python examples/01_quickstart.py --turns 12 --seed $seed
+done
+```
+
+If all three runs land within ~0.5 of each other → score is stable. Wide
+spread → the agent's behavior depends on the attack angle, investigate.
+
+### High-stakes / regulated — debate consensus
+
+```bash
+python examples/01_quickstart.py --turns 15 --consensus debate
+```
+
+The jury argues until convergence. Slower and more LLM calls, but strongest
+signal when you need to defend a verdict.
+
+### What the flags actually mean
+
+```
+--turns N
+```
+Number of adversarial turns the conductor will run. **Recommend minimum 15**
+for production-grade evaluation — fewer turns mean fewer follow-up probes and
+less escalation room. You can go higher (20-30) for very thorough audits.
+
+```
+--consensus {independent | delphi | debate}
+```
+How the 3 jurors reach a verdict on each metric:
+- **`independent`** — each juror scores blindly, take the median. Cheapest, fastest, no re-vote. Best for smoke tests and CI cost optimization.
+- **`delphi`** *(default)* — round 1 is blind; round 2 only fires for metrics where jurors disagree by more than 2 points. Best signal-per-call.
+- **`debate`** — multi-round critique loop until jurors converge. Most thorough, strongest for high-stakes / regulated agents.
+
+```
+--seed N
+```
+Pins the harness's internal random choices (trap selection order, tie-breaks).
+- Same seed → same trap mix and order across runs (reproducible)
+- Different seed → different attack angle (use for stability testing)
+- Any integer ≥ 0 works; `42` is the cliché default
+
+Anthropic doesn't yet honor seed inside its API, so some natural variation in
+exact phrasing will remain. Internal trap selection stays deterministic.
+
+```
+--llm MODEL_ID
+```
+Model id (LiteLLM target) for the **harness machinery only** — planner,
+conductor, jurors. Your agent under test runs whatever model **you** chose in
+its callable; the harness flag doesn't touch it.
+
+Common choices:
+- `claude-sonnet-4-6` *(default)* — strong reasoning, good balance
+- `claude-haiku-4-5-20251001` — smaller and faster, great for cheap iteration
+- `gpt-4.1` — OpenAI alternative; supports `seed` for full reproducibility
+- `gemini/gemini-1.5-pro` — 2M context if you have large knowledge corpora
+
+See the full [supported models](#supported-models) table above.
 
 ## Trap library
 
