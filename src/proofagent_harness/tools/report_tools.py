@@ -99,8 +99,18 @@ def render_rich(report: Report) -> Any:
     cert_line.append(cert_text)
     cert_line.append(f"    Tokens: {report.tokens_used:,}", style="dim")
 
+    blocks: list[Any] = [table, Text(""), cert_line]
+
+    # Surface report-level warnings prominently — plateau detection,
+    # juror dissent, same-model bias hints, etc.
+    if report.warnings:
+        blocks.append(Text(""))
+        blocks.append(Text("Warnings:", style="bold yellow"))
+        for w in report.warnings:
+            blocks.append(Text(f"  - {w}", style="yellow"))
+
     return Panel(
-        Group(table, Text(""), cert_line),
+        Group(*blocks),
         title="proofagent-harness",
         border_style="cyan",
     )
@@ -122,6 +132,12 @@ def render_markdown(report: Report) -> str:
     lines.append(f"**Duration:** `{report.duration_seconds:.1f}s`\n")
 
     lines.append(f"> {report.summary}\n")
+
+    if report.warnings:
+        lines.append("## Warnings\n")
+        for w in report.warnings:
+            lines.append(f"- {w}")
+        lines.append("")
 
     lines.append("## Per-metric scores\n")
     lines.append("| Metric | Score | Confidence | Severity |")

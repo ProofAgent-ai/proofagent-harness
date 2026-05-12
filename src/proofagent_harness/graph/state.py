@@ -87,6 +87,7 @@ class HarnessState(TypedDict, total=False):
     final_score: float
     certification: str
     findings: list[Finding]
+    warnings: list[str]
     summary: str
 
     # ── config / observability ────────────────────────────────────────────

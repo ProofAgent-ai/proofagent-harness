@@ -345,6 +345,7 @@ class Harness:
             transcript=list(state.get("transcript") or []),
             consensus_log=consensus,
             findings=list(state.get("findings") or []),
+            warnings=list(state.get("warnings") or []),
             summary=str(state.get("summary") or ""),
             cost_usd=float(self.llm.total_cost_usd),
             duration_seconds=round(duration, 2),

@@ -390,6 +390,10 @@ class Report(BaseModel):
     transcript: list[Turn] = Field(default_factory=list)
     consensus_log: dict[str, ConsensusResult] = Field(default_factory=dict)
     findings: list[Finding] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    """Persistent warnings surfaced by the reporter (plateau detection, low
+    juror confidence, suspicious uniformity, etc.). Rendered prominently in
+    the scorecard so the user sees them without scrolling the transcript."""
     summary: str = ""
     cost_usd: float = 0.0
     duration_seconds: float = 0.0

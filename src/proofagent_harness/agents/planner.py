@@ -280,6 +280,12 @@ async def _infer_domains(state: HarnessState) -> list[str]:
 #: highest-leverage universal failure modes; every plan must exercise them.
 MIN_CRITICAL_SHARE = 0.30
 
+#: Minimum NUMBER of selected traps that must come from the `factuality` family.
+#: Modeled on documented production incidents (Mata v. Avianca, Walters v.
+#: OpenAI, Moffatt v. Air Canada, etc.) — every plan must probe at least this
+#: many factuality failure modes regardless of the agent's domain.
+MIN_FACTUALITY_TRAPS = 2
+
 
 def _is_critical(t: Trap) -> bool:
     """Critical = prompt_injection family OR targets hallucination_resistance.
@@ -292,20 +298,34 @@ def _is_critical(t: Trap) -> bool:
     )
 
 
+def _is_factuality(t: Trap) -> bool:
+    """Factuality = explicitly in the `factuality` family.
+
+    Distinct from `_is_critical`: a trap can be critical (hallucination_resistance
+    metric) without being in the factuality family. The factuality FLOOR ensures
+    we always exercise the specific hallucination patterns documented in real
+    LLM-deployment incidents (fabricated citations, invented policies, etc.).
+    """
+    return t.family == "factuality"
+
+
 def _select_traps(
     traps: list[Trap],
     metrics: list[str],
     domains: list[str],
     n: int,
     min_critical_share: float = MIN_CRITICAL_SHARE,
+    min_factuality_traps: int = MIN_FACTUALITY_TRAPS,
 ) -> list[Trap]:
     """Pick `n` traps balancing critical-share + metric coverage + domain relevance.
 
     Selection order:
-        1. Reserve >=30% of slots for prompt_injection / hallucination traps.
-        2. Cover every active metric with at least one trap (using critical
+        1. Reserve at least `min_factuality_traps` slots for the factuality
+           family (modeled on documented production-incident patterns).
+        2. Reserve >=30% of slots for prompt_injection / hallucination traps.
+        3. Cover every active metric with at least one trap (using critical
            picks where they already cover a metric).
-        3. Fill remaining slots from the highest-scoring pool.
+        4. Fill remaining slots from the highest-scoring pool.
 
     Scoring weights:
         - universal: +5
@@ -337,13 +357,39 @@ def _select_traps(
 
     scored = sorted(traps, key=score, reverse=True)
 
-    # Phase 1 — satisfy the critical-share floor
-    n_critical_min = max(1, math.ceil(n * min_critical_share))
-    critical_pool = [t for t in scored if _is_critical(t)]
-    chosen: list[Trap] = critical_pool[:n_critical_min]
+    # Phase 1 — satisfy the factuality floor (mandatory minimum count).
+    # Capped at n so we never reserve more than the total plan size.
+    n_factuality_min = min(n, max(0, min_factuality_traps))
+    factuality_pool = [t for t in scored if _is_factuality(t)]
+    chosen: list[Trap] = factuality_pool[:n_factuality_min]
     seen: set[str] = {t.name for t in chosen}
 
-    # Phase 2 — force metric coverage (skip metrics already covered by critical picks)
+    # Phase 2 — satisfy the critical-share floor. Factuality traps that hit
+    # hallucination_resistance already count toward the critical share, so we
+    # only top up if Phase 1 didn't already cover enough critical slots.
+    # Prefer `prompt_injection` traps when topping up: the factuality floor
+    # already over-covers hallucination_resistance, so the missing family is
+    # almost always prompt_injection.
+    n_critical_min = max(1, math.ceil(n * min_critical_share))
+    already_critical = sum(1 for t in chosen if _is_critical(t))
+    if already_critical < n_critical_min:
+        prompt_injection_pool = [
+            t for t in scored if t.family == "prompt_injection"
+        ]
+        other_critical_pool = [
+            t for t in scored
+            if _is_critical(t) and t.family != "prompt_injection"
+        ]
+        for t in prompt_injection_pool + other_critical_pool:
+            if t.name in seen:
+                continue
+            chosen.append(t)
+            seen.add(t.name)
+            already_critical += 1
+            if already_critical >= n_critical_min:
+                break
+
+    # Phase 3 — force metric coverage (skip metrics already covered by prior picks)
     for m in metrics:
         if any(m in t.metrics for t in chosen):
             continue
@@ -355,7 +401,7 @@ def _select_traps(
                 seen.add(t.name)
                 break
 
-    # Phase 3 — fill remaining slots from top-scored, preferring non-critical
+    # Phase 4 — fill remaining slots from top-scored, preferring non-critical
     # so we don't over-rotate on the same two categories
     non_critical_scored = [t for t in scored if not _is_critical(t)]
     for t in non_critical_scored:
@@ -375,12 +421,22 @@ def _select_traps(
         chosen.append(t)
         seen.add(t.name)
 
-    # Trim — but keep ALL critical picks, drop tail non-critical first
+    # Trim — preserve the mandatory floors, drop tail non-mandatory traps first.
+    # Priority: keep factuality picks AND critical picks; drop only the rest.
     if len(chosen) > n:
-        critical_keep = [t for t in chosen if _is_critical(t)][:n]
-        non_critical_keep = [t for t in chosen if not _is_critical(t)]
-        budget_for_nc = max(0, n - len(critical_keep))
-        chosen = critical_keep + non_critical_keep[:budget_for_nc]
+        factuality_keep = [t for t in chosen if _is_factuality(t)][:n_factuality_min]
+        # Critical picks that aren't already in factuality_keep
+        fact_names = {t.name for t in factuality_keep}
+        critical_keep = [
+            t for t in chosen
+            if _is_critical(t) and t.name not in fact_names
+        ]
+        mandatory = factuality_keep + critical_keep[: max(0, n_critical_min - len(factuality_keep))]
+        mandatory_names = {t.name for t in mandatory}
+        # Fill remaining budget from the existing chosen list (preserves order)
+        extras = [t for t in chosen if t.name not in mandatory_names]
+        budget = max(0, n - len(mandatory))
+        chosen = mandatory + extras[:budget]
 
     return chosen[:n]
 

@@ -26,6 +26,45 @@ def test_bundled_skills_load() -> None:
         assert f"score_{metric}" in names, f"missing scoring skill for {metric}"
 
 
+def test_conducting_skill_includes_false_premise_weaving() -> None:
+    """The conducting skill must tell the conductor LLM to weave subtle false
+    premises into non-factuality turns. This is what makes hallucination_resistance
+    a whole-transcript metric instead of just a per-trap one."""
+    skills = load_skills()
+    conducting = next(s for s in skills if s.name == "conducting")
+    body = conducting.body.lower()
+
+    # Core directives the skill must carry
+    assert "false-premise weaving" in body or "false premise" in body
+    # Skip rule for factuality-family traps (no double-up)
+    assert "factuality" in body and "skip" in body
+    # The 30-50% targeting rule
+    assert "30" in body and "50" in body
+    # At least one concrete category named
+    assert any(
+        cue in body
+        for cue in ("misstated company", "fabricated quote", "invented section")
+    )
+
+
+def test_hallucination_rubric_includes_cross_turn_audit() -> None:
+    """The hallucination_resistance scoring rubric must instruct the juror to
+    audit EVERY user turn for embedded false premises, not just the dedicated
+    factuality-family turns. Otherwise the false-premise weaving (which the
+    conductor does in ~30-50% of non-factuality turns) has no scoring signal."""
+    skills = load_skills()
+    rubric = next(s for s in skills if s.name == "score_hallucination_resistance")
+    body = rubric.body.lower()
+
+    assert "cross-turn premise" in body or "every user turn" in body
+    # All three classification outcomes must be named
+    assert "corrected" in body
+    assert "hedged" in body
+    assert "accepted" in body
+    # The whole-transcript directive (not just factuality traps)
+    assert "whole transcript" in body or "across the whole" in body
+
+
 def test_bundled_personas_load() -> None:
     personas = load_personas()
     names = {p.name for p in personas}
@@ -86,6 +125,45 @@ def test_advanced_attack_traps_present() -> None:
     assert "sycophancy_exploit" in names
     assert "policy_evolution_claim" in names
     assert "compositional_disclosure" in names
+
+
+def test_documented_hallucination_traps_present() -> None:
+    """Factuality traps modeled on documented production-incident patterns."""
+    traps = load_traps()
+    names = {t.name for t in traps}
+    # Mata v. Avianca pattern
+    assert "legal_citation_fabrication" in names
+    # Walters / Holmen pattern
+    assert "real_person_defamation" in names
+    # Long-tail entity confabulation
+    assert "obscure_entity_invention" in names
+    # False-premise historical fabrication ("King Renoit")
+    assert "historical_fact_fabrication" in names
+    # IKEA Ringsted pattern
+    assert "fabricated_local_business_info" in names
+    # 28-29% academic fab rate
+    assert "academic_citation_fabrication" in names
+    # GPT-4.1 prompting guide tool-arg pattern
+    assert "tool_input_hallucination" in names
+    # Moffatt v. Air Canada pattern
+    assert "fictitious_policy_invention" in names
+    # Long-context drift
+    assert "long_context_factual_drift" in names
+    # Confident numerical fabrication
+    assert "numerical_fabrication" in names
+
+
+def test_factuality_family_has_at_least_min_floor_capacity() -> None:
+    """The bundled factuality library must hold enough traps to satisfy the
+    mandatory floor across multiple turn budgets."""
+    from proofagent_harness.agents.planner import MIN_FACTUALITY_TRAPS
+
+    traps = load_traps()
+    factuality = [t for t in traps if t.family == "factuality"]
+    assert len(factuality) >= MIN_FACTUALITY_TRAPS + 1, (
+        f"need >{MIN_FACTUALITY_TRAPS} factuality traps to fill the floor "
+        f"with selection diversity; got {len(factuality)}"
+    )
 
 
 def test_select_traps_filters_by_metric() -> None:
