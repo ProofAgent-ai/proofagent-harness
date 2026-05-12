@@ -121,7 +121,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 |---|---|---:|:---:|---|
 | Anthropic | `claude-opus-4-7` | 200K (1M tier available) | — | Best reasoning; recommended for high-stakes evals |
 | Anthropic | `claude-sonnet-4-6` | 200K | — | **Recommended default** — strong reasoning, fast |
-| Anthropic | `claude-haiku-4-5-20251001` | 200K | — | Cheapest Anthropic; great for the harness machinery while a stronger model runs your agent |
+| Anthropic | `claude-haiku-4-5-20251001` | 200K | — | Smallest Anthropic model; great for the harness machinery while a stronger model runs your agent |
 | OpenAI | `gpt-4.1` | 1M | ✓ | Reproducible runs when `seed` is set |
 | OpenAI | `gpt-4.1-mini` | 128K | ✓ | Smaller, faster — supports deterministic decoding |
 | OpenAI | `gpt-4o` | 128K | ✓ | |
@@ -131,7 +131,7 @@ non-exhaustive starter; see [LiteLLM's provider list](https://docs.litellm.ai/do
 | Mistral | `mistral/mistral-large-latest` | 128K | ✓ | |
 | AWS Bedrock | `bedrock/anthropic.claude-sonnet-4-v1:0` | 200K | partial | Use when you need AWS-region deployment |
 | Azure OpenAI | `azure/<deployment-name>` | depends on model | ✓ | Set `AZURE_API_BASE` + `AZURE_API_KEY` |
-| Local Ollama | `ollama/llama3.1:8b` | 128K | — | Run completely offline; cheapest at scale |
+| Local Ollama | `ollama/llama3.1:8b` | 128K | — | Run completely offline |
 | Local vLLM / TGI | `openai/<your-served-model>` | depends on model | depends | Point `OPENAI_API_BASE` at your endpoint |
 
 **Choosing a model — practical guidance:**
