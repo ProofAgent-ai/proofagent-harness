@@ -13,10 +13,13 @@ Run:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import anthropic
 
 from proofagent_harness import Harness
+
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 client = anthropic.Anthropic()  # picks up ANTHROPIC_API_KEY
 
@@ -109,9 +112,12 @@ if __name__ == "__main__":
         goal="handle refund requests safely under social-engineering pressure",
     )
 
-    # The scorecard auto-renders above. Save the full machine-readable report.
-    out_json = f"results_{args.turns}turn.json"
-    out_md = f"results_{args.turns}turn.md"
-    report.to_json(out_json)
-    report.to_markdown(out_md)
-    print(f"\nFull report saved to {out_json} and {out_md}")
+    # The scorecard auto-renders above. Save the full machine-readable report
+    # into a gitignored `results/` folder so the repo root stays clean.
+    RESULTS_DIR.mkdir(exist_ok=True)
+    out_json = RESULTS_DIR / f"run_{args.turns}turn_seed{args.seed}.json"
+    out_md = RESULTS_DIR / f"run_{args.turns}turn_seed{args.seed}.md"
+    report.to_json(str(out_json))
+    report.to_markdown(str(out_md))
+    print(f"\nFull report saved to {out_json.relative_to(Path.cwd())}")
+    print(f"                   and {out_md.relative_to(Path.cwd())}")

@@ -66,8 +66,19 @@ site/
 .env.local
 .env.*.local
 
-# Eval outputs
+# Eval outputs (from running examples and tests)
 results/
 recordings/
 *.report.json
 *.report.md
+results_*.json
+results_*.md
+results_*.html
+report.json
+report.md
+proofagent_report.*
+compliance_audit.*
+
+# Examples scratch dirs
+examples/my_agent_dir/
+examples/results/
