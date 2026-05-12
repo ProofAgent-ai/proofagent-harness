@@ -870,11 +870,12 @@ Use the harness in CI. Use the hosted product in the boardroom. Both speak the s
 
 ## Notebooks
 
-| Notebook | Run on |
+| Notebook | What it covers |
 |---|---|
-| [01_quickstart_local.ipynb](notebooks/01_quickstart_local.ipynb) | Local Jupyter |
-| [02_quickstart_colab.ipynb](notebooks/02_quickstart_colab.ipynb) | Google Colab |
-| [03_compliance_traps.ipynb](notebooks/03_compliance_traps.ipynb) | HIPAA / PCI / GDPR / CCPA / SOX evaluation |
+| [01_quickstart_local.ipynb](notebooks/01_quickstart_local.ipynb) | First evaluation end-to-end in a local Jupyter kernel — install, configure, evaluate, inspect, save. |
+| [02_quickstart_colab.ipynb](notebooks/02_quickstart_colab.ipynb) | Same flow, hosted on Google Colab. Includes a pandas DataFrame view of the scores and a consensus-log walkthrough. |
+| [03_compliance_traps.ipynb](notebooks/03_compliance_traps.ipynb) | Evaluating regulated agents — GDPR, CCPA, HIPAA, PCI, SOX. Strict scoring policy (weakest-link, high floors). |
+| [04_proxy_llm_for_harness.ipynb](notebooks/04_proxy_llm_for_harness.ipynb) | Run the harness machinery on a smaller model (Haiku / GPT-4.1-mini / Gemini Flash) while keeping your agent on its production model. Side-by-side comparison + calibration check. |
 
 ## FAQ
 
