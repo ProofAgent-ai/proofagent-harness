@@ -128,4 +128,46 @@ universal metrics. Domain-specific metrics belong in trap packs, not core.
 
 ## Code of conduct
 
+This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md).
 Be kind. Assume good faith. Disagree on the substance, not the person.
+
+Report unacceptable behavior to **conduct@proofagent.com**.
+
+## Reporting security issues
+
+Don't file public issues for security reports. See [SECURITY.md](SECURITY.md)
+— email **security@proofagent.com**.
+
+## Issue templates
+
+We use three templates:
+- **Bug report** — a run failed, scores look wrong
+- **Feature request** — new trap / rubric / conductor technique
+- **Calibration concern** — score doesn't match your expectation of the agent
+
+GitHub will route you to the right one when you open a new issue.
+
+## Continuous integration
+
+PRs trigger CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) which:
+- Runs `pytest` on Python 3.10, 3.11, 3.12 (Ubuntu)
+- Lints with `ruff`
+- Type-checks with `pyright` (warn-only — heuristic models break it)
+- Verifies all `examples/` and `benchmarks/` parse
+- Confirms bundled markdown (skills/personas/traps) loads cleanly
+
+Push a tag like `v0.2.0` and `publish.yml` builds + uploads to PyPI via
+trusted publishing (no API tokens needed — configure once on PyPI).
+
+## Discrimination-impact check (recommended for scoring/conductor changes)
+
+If your PR touches the **planner / conductor / juror / scoring** logic,
+include before-and-after numbers from the calibration benchmark in your
+PR description:
+
+```bash
+python benchmarks/calibration_check.py --turns 15 --consensus delphi
+```
+
+The PR template has a section for this. Goal: discrimination gap stays
+≥ 3.0 between the hardened and weak agents.

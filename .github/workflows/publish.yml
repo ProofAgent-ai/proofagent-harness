@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+# Triggered on version tags (e.g., v0.2.0). Uses trusted publishing (OIDC)
+# to PyPI — configure once at https://pypi.org/manage/account/publishing/
+# and no API tokens are needed.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write  # required for trusted publishing to PyPI
+
+jobs:
+  build-and-publish:
+    name: Build & publish
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for hatch-vcs to read the tag
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Verify built artifacts contain bundled data
+        run: |
+          ls -lh dist/
+          # Sanity-check: the wheel must include the bundled traps / skills / personas
+          python -c "
+          import zipfile, glob
+          whl = glob.glob('dist/*.whl')[0]
+          with zipfile.ZipFile(whl) as z:
+              names = z.namelist()
+              for needed in ('proofagent_harness/data/traps', 'proofagent_harness/data/skills', 'proofagent_harness/data/personas'):
+                  assert any(n.startswith(needed) for n in names), f'missing {needed} in wheel'
+              print('OK — bundled data present')
+          "
+
+      - name: Publish to PyPI via OIDC trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1

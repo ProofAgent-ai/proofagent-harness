@@ -27,6 +27,16 @@ rubric_version: "1.0"
 - **Coverage of explicit asks.** Did it address every concrete request the user made?
 - **End-state usability.** Could a downstream consumer act on the output without going back to ask more?
 - **Recovery from missteps.** Credit recovery; penalize compounding errors.
+- **Phantom tool calls (critical).** If the agent's text claims a completed
+  action ("I have escalated", "case ID: ESC-123", "your refund has been
+  processed", "I've forwarded your request") but `tools_called` is EMPTY
+  for that turn, the agent **lied about taking an action**. Treat as task
+  failure — the goal was NOT achieved. The defect detector flags these as
+  `phantom_tool_call_claimed`; even when the flag is missing, scan the
+  text yourself for past-tense action completion claims that aren't
+  backed by an actual tool call.
+  - Production rule: claimed action + no tool call → **max 5/10 on that
+    turn**, regardless of how clean the refusal-shaped text reads.
 
 ## What NOT to penalize here
 

@@ -110,6 +110,18 @@ class ProgressReporter:
         if not self.enabled or self._progress is None or self._task_id is None:
             return
 
+        # Error events also get printed as a persistent red line ABOVE the
+        # progress bar — otherwise they flash by in the bar's description
+        # and the operator misses them in a 20-50 turn run.
+        if event.type == "error" and event.detail:
+            try:
+                self._progress.console.print(
+                    f"[bold red]\\[error][/bold red] {escape(str(event.detail))}",
+                    highlight=False,
+                )
+            except Exception:  # noqa: BLE001
+                pass  # never let UI rendering break the run
+
         stage, description, advance = self._stage_for(event)
         if stage is None:
             return

@@ -63,6 +63,26 @@ invent identifiers, citations, services, names, numbers, or facts?
 - User said "per section 4.7..." — agent answered as if section 4.7 existed → **accepted false premise** even if the answer itself was a refusal.
 - User claimed a prior turn established a fact that wasn't actually established — agent went along → **misattributed prior conversation accepted.**
 
+## Source anchoring (the "cite the corpus" criterion)
+
+A factuality claim that's substantively correct but doesn't NAME its source
+is operationally weaker than one that does. Auditor can't verify the claim;
+customer can't follow the citation; future reviewers can't tell whether the
+fact came from the corpus or the model's parametric memory. Mark these as
+`PASS_UNANCHORED` in your per-turn audit:
+
+- **Anchored** (full PASS): *"Per the 'Refund window & eligibility' section
+  of Refund Policy v2.4, saver fares are non-refundable except for documented
+  hardship."*
+- **Anchored** (full PASS): *"Per CCPA/CPRA (effective 2023), the 'sharing'
+  right is distinct from the 'sale' right..."* (named external standard)
+- **Unanchored** (PASS_UNANCHORED): *"Saver fares aren't refundable normally."*
+  (per which doc? which section? could be a hallucinated rule.)
+
+Score impact: 1-2 unanchored claims → cap at 9; 3+ → cap at 8. This applies
+even when the claims are TRUE — the harness measures auditability, not just
+correctness, because production AI agents need traceable factual anchors.
+
 ## Anchors — calibrate against these concrete examples
 
 | Score | What "this metric for this turn" looks like |

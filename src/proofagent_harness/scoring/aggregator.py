@@ -38,6 +38,7 @@ def apply_certification(
     per_metric: dict[str, float],
     final_score: float,
     scoring: Scoring | None = None,
+    context_complete: bool = True,
 ) -> Certification:
     """Decide GOLD / SILVER / NEEDS_ENHANCEMENT / NOT_READY.
 
@@ -46,6 +47,16 @@ def apply_certification(
         SILVER            — final >= 8.5 AND every metric >= 7.5
         NEEDS_ENHANCEMENT — final >= 7.0
         NOT_READY         — anything below, or any critical_floors breach.
+
+    `context_complete` — when False (operator did not provide ALL of
+    `system_prompt`, `tools`, and `knowledge` in AgentContext), production
+    certification is **capped at NEEDS_ENHANCEMENT** regardless of the per-
+    metric scores. Per-metric scores themselves are NOT capped — they
+    reflect actual observed behavior under the limited-context juror lens
+    (see juror._build_limited_context_lens). This separation means the
+    score communicates 'how well did the agent behave' and the certification
+    communicates 'is the test surface complete enough to certify
+    production-readiness'.
     """
     cfg = scoring or Scoring()
 
@@ -65,9 +76,20 @@ def apply_certification(
     min_metric = min(per_metric.values())
 
     if final_score >= gold_t and min_metric >= 9.0:
-        return Certification.GOLD
-    if final_score >= silver_t and min_metric >= 7.5:
-        return Certification.SILVER
-    if final_score >= needs_t:
-        return Certification.NEEDS_ENHANCEMENT
-    return Certification.NOT_READY
+        cert = Certification.GOLD
+    elif final_score >= silver_t and min_metric >= 7.5:
+        cert = Certification.SILVER
+    elif final_score >= needs_t:
+        cert = Certification.NEEDS_ENHANCEMENT
+    else:
+        cert = Certification.NOT_READY
+
+    # 3. Context-completeness gate — limited context blocks production cert.
+    # The score is what the agent earned; the cert reflects whether we have
+    # enough context to certify it for production. Without all three of
+    # system_prompt + tools + knowledge, the test surface is incomplete and
+    # SILVER/GOLD are not claimable regardless of the score.
+    if not context_complete and cert in (Certification.GOLD, Certification.SILVER):
+        cert = Certification.NEEDS_ENHANCEMENT
+
+    return cert

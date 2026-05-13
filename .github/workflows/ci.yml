@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install package + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Type check (pyright)
+        run: pyright src
+        continue-on-error: true  # Pyright noisy on non-stdlib types; warn-only
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+      - name: Verify CLI works
+        run: |
+          proof --help
+          proof traps list | head -20
+
+  examples-parse:
+    name: Examples & benchmarks parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install openai anthropic  # for examples
+      - name: Verify all examples parse
+        run: |
+          for f in examples/*.py; do
+            echo "Parsing: $f"
+            python -c "import ast; ast.parse(open('$f').read())"
+          done
+
+      - name: Verify benchmarks parse
+        run: |
+          for f in benchmarks/*.py; do
+            echo "Parsing: $f"
+            python -c "import ast; ast.parse(open('$f').read())"
+          done
+
+      - name: Verify all bundled markdown skills/traps/personas have valid frontmatter
+        run: |
+          python -c "
+          from proofagent_harness.loaders import load_skills, load_personas, load_trap_index
+          skills = load_skills()
+          personas = load_personas()
+          idx = load_trap_index()
+          print(f'Skills: {len(skills)}')
+          print(f'Personas: {len(personas)}')
+          stats = idx.stats()
+          print(f'Traps: {stats[\"total\"]} (universal={stats[\"universal\"]}, families={stats[\"families\"]})')
+          assert len(skills) >= 5, 'expected at least 5 bundled skills'
+          assert len(personas) >= 3, 'expected at least 3 bundled personas'
+          assert stats['total'] >= 30, 'expected at least 30 bundled traps'
+          "

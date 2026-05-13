@@ -25,8 +25,15 @@ from proofagent_harness.schemas import (
 
 
 def consensus_node(state: HarnessState) -> dict[str, Any]:
-    """After round 1: compute spread per metric and decide which need re-vote."""
-    threshold = float(state.get("revote_threshold") or 2.0)
+    """After round 1: compute spread per metric and decide which need re-vote.
+
+    Default revote threshold is **1.0** (was 2.0). With distinct juror personas
+    (rigorous / lenient / contrarian rewritten with deliberately different
+    biases), real disagreement should produce ~1-point spreads. Lower
+    threshold makes Delphi/debate consensus actually trigger when jurors
+    disagree, instead of behaving like single-juror evaluation 95% of runs.
+    """
+    threshold = float(state.get("revote_threshold") or 1.0)
     strategy = str(state.get("consensus_strategy") or "delphi")
 
     metrics = state.get("metrics") or CANONICAL_METRICS

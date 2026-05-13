@@ -69,7 +69,13 @@ class Harness:
         # ── Jury ──
         consensus: str = "delphi",
         personas: list[str] | None = None,
-        revote_threshold: float = 2.0,
+        # Lowered from 2.0 to 1.0 alongside the distinct-personas rewrite —
+        # rigorous/lenient/contrarian now produce real ~1pt spreads on
+        # contested metrics, so a 2.0 threshold meant debate almost never
+        # fired. With 1.0, spread > 1.0 (i.e., >= 1.1, or any spread of
+        # 2+ points) triggers re-vote — captures real disagreement without
+        # firing on every persona-bias divergence.
+        revote_threshold: float = 1.0,
         debate_rounds: int = 3,
         # ── Scoring ──
         scoring: Scoring | None = None,
