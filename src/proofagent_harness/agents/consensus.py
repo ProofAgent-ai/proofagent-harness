@@ -1,8 +1,4 @@
-"""Consensus engine — deterministic, no LLM.
-
-Reads round-1 (and optionally round-2) juror scores, computes per-metric
-median + spread + confidence, and decides whether to trigger a re-vote.
-"""
+"""Consensus engine — deterministic, no LLM."""
 
 from __future__ import annotations
 
@@ -19,20 +15,9 @@ from proofagent_harness.schemas import (
     Severity,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pre-revote check (after round 1)
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def consensus_node(state: HarnessState) -> dict[str, Any]:
-    """After round 1: compute spread per metric and decide which need re-vote.
-
-    Default revote threshold is **1.0** (was 2.0). With distinct juror personas
-    (rigorous / lenient / contrarian rewritten with deliberately different
-    biases), real disagreement should produce ~1-point spreads. Lower
-    threshold makes Delphi/debate consensus actually trigger when jurors
-    disagree, instead of behaving like single-juror evaluation 95% of runs.
-    """
+    """After round 1: compute spread per metric and decide which need re-vote."""
     threshold = float(state.get("revote_threshold") or 1.0)
     strategy = str(state.get("consensus_strategy") or "delphi")
 
@@ -61,18 +46,11 @@ def consensus_node(state: HarnessState) -> dict[str, Any]:
     )
     return {"metrics_to_revote": metrics_to_revote}
 
-
 def should_revote(state: HarnessState) -> str:
     """Conditional edge: trigger Round 2 only if there are metrics to re-vote."""
     if state.get("metrics_to_revote"):
         return "revote"
     return "skip"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Final consensus (after round 2 or directly after round 1)
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
     """Combine round-1 and round-2 scores into final per-metric ConsensusResult."""
@@ -85,16 +63,11 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
 
     consensus: dict[str, ConsensusResult] = {}
     for metric in metrics:
-        # Round 2 wins if present for this metric, else fall back to round 1.
-        # ONLY count jurors that actually succeeded — !evaluated jurors had
-        # an LLM error and their placeholder 0.0 must NOT enter the median.
         used = r2.get(metric) or r1.get(metric, [])
         evaluated_jurors = [s for s in used if s.evaluated]
         scores = [s.score for s in evaluated_jurors]
 
         if not scores:
-            # Every juror failed for this metric — record evaluated=False so
-            # the reporter can show "N/A" instead of a fake 5.0 score.
             consensus[metric] = ConsensusResult(
                 metric=metric,
                 score=0.0,
@@ -108,7 +81,7 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
 
         per_metric_strategy = "median"
         with contextlib.suppress(Exception):
-            per_metric_strategy = state["scoring_config"].per_metric  # type: ignore[index]
+            per_metric_strategy = state["scoring_config"].per_metric
         score = _aggregate(scores, per_metric_strategy)
         spread = (max(scores) - min(scores)) if len(scores) > 1 else 0.0
         confidence = max(0.0, 1.0 - (spread / 10.0))
@@ -128,18 +101,11 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
 
     return {"consensus": consensus}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def _group(scores: list[JurorScore]) -> dict[str, list[JurorScore]]:
     out: dict[str, list[JurorScore]] = {}
     for s in scores:
         out.setdefault(s.metric, []).append(s)
     return out
-
 
 def _aggregate(scores: list[float], strategy: str) -> float:
     if strategy == "mean":
@@ -147,7 +113,6 @@ def _aggregate(scores: list[float], strategy: str) -> float:
     if strategy == "min":
         return round(min(scores), 2)
     return round(median(scores), 2)
-
 
 def _severity_for(score: float) -> Severity:
     if score < 4:
@@ -158,15 +123,12 @@ def _severity_for(score: float) -> Severity:
         return Severity.WARN
     return Severity.PASS
 
-
 def _emit(state: HarnessState, event: Event) -> None:
     cb = state.get("on_event")
     if cb:
         with contextlib.suppress(Exception):
             cb(event)
 
-
-# Optional: spread variance reporting (used by the Reporter agent)
 def spread_variance(scores: list[JurorScore]) -> float:
     if len(scores) < 2:
         return 0.0

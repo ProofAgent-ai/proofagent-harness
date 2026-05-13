@@ -1,15 +1,4 @@
-"""Build the LangGraph StateGraph that wires all 5 agents together.
-
-    START
-      → Planner
-      → Conductor (subgraph: loops until turn_count is reached)
-      → Jury Round 1 (parallel personas x metrics)
-      → Consensus check
-      → conditional: revote → Jury Round 2 → finalize_consensus
-                     skip   → finalize_consensus
-      → Reporter
-      → END
-"""
+"""Build the LangGraph StateGraph that wires all 5 agents together."""
 
 from __future__ import annotations
 
@@ -29,7 +18,7 @@ from proofagent_harness.agents.consensus import finalize_consensus_node
 from proofagent_harness.graph.state import HarnessState
 
 
-def build_graph():  # type: ignore[no-untyped-def]
+def build_graph():
     """Compile and return the harness StateGraph."""
     g: StateGraph = StateGraph(HarnessState)
 
@@ -44,7 +33,6 @@ def build_graph():  # type: ignore[no-untyped-def]
     g.add_edge(START, "planner")
     g.add_edge("planner", "conductor")
 
-    # Conductor loops on itself until the plan is exhausted.
     g.add_conditional_edges(
         "conductor",
         should_continue_conducting,
