@@ -14,6 +14,36 @@ litellm.suppress_debug_info = True
 
 litellm.drop_params = True
 
+# Per-model parameter strip table — for newer Anthropic models that reject
+# parameters older models accepted (e.g. Opus 4.7 deprecated `temperature`).
+# Match by substring: any model id containing the key strips the listed params.
+_DEPRECATED_PARAMS_BY_MODEL: dict[str, set[str]] = {
+    "claude-opus-4-7": {"temperature"},
+    "claude-opus-4-8": {"temperature"},  # forward-compat: assume same trend
+}
+
+
+def _strip_deprecated_params(model: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop params known to be rejected by `model`. Returns a new dict."""
+    out = dict(kwargs)
+    for needle, drops in _DEPRECATED_PARAMS_BY_MODEL.items():
+        if needle in model:
+            for p in drops:
+                out.pop(p, None)
+    return out
+
+
+def _is_deprecated_param_error(exc: Exception) -> str | None:
+    """Detect 'param X is deprecated/unsupported' errors. Return param name or None."""
+    msg = str(exc).lower()
+    if "deprecated" not in msg and "not supported" not in msg and "not allowed" not in msg:
+        return None
+    for p in ("temperature", "top_p", "top_k", "seed", "max_tokens"):
+        if f"`{p}`" in msg or f"'{p}'" in msg or f' {p} ' in msg:
+            return p
+    return None
+
+
 @dataclass
 class CompletionResult:
     """Outcome of a single LLM call."""
@@ -54,19 +84,42 @@ class LLM:
         call_kwargs: dict[str, Any] = dict(self.extra_kwargs)
         if self.seed is not None:
             call_kwargs.setdefault("seed", self.seed)
+        call_kwargs["temperature"] = (
+            temperature if temperature is not None else self.temperature
+        )
+        call_kwargs["max_tokens"] = max_tokens or self.max_tokens
+
+        # Pre-strip params known-deprecated for this model (Opus 4.7 etc.).
+        call_kwargs = _strip_deprecated_params(self.model, call_kwargs)
 
         try:
             resp = await litellm.acompletion(
                 model=self.model,
                 messages=msgs,
-                temperature=temperature if temperature is not None else self.temperature,
-                max_tokens=max_tokens or self.max_tokens,
                 **call_kwargs,
             )
         except Exception as exc:
-            raise LLMError(
-                f"LLM call failed for model={self.model!r}: {exc}"
-            ) from exc
+            # Runtime fallback: if the provider returns a "param X deprecated"
+            # error, drop X and retry once. Catches any future deprecation
+            # before the model is added to _DEPRECATED_PARAMS_BY_MODEL.
+            offender = _is_deprecated_param_error(exc)
+            if offender and offender in call_kwargs:
+                call_kwargs.pop(offender, None)
+                _DEPRECATED_PARAMS_BY_MODEL.setdefault(self.model, set()).add(offender)
+                try:
+                    resp = await litellm.acompletion(
+                        model=self.model,
+                        messages=msgs,
+                        **call_kwargs,
+                    )
+                except Exception as exc2:
+                    raise LLMError(
+                        f"LLM call failed for model={self.model!r}: {exc2}"
+                    ) from exc2
+            else:
+                raise LLMError(
+                    f"LLM call failed for model={self.model!r}: {exc}"
+                ) from exc
 
         text = _extract_text(resp)
         prompt_tokens, completion_tokens = _extract_tokens(resp)

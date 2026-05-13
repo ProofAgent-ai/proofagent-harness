@@ -248,6 +248,7 @@ class Harness:
             "debate_rounds": int(self.debate_rounds),
             "revote_threshold": float(self.revote_threshold),
             "scoring_config": self.scoring,
+            "seed": self.seed,
             "on_event": on_event,
             "current_turn": 0,
             "transcript": [],
@@ -370,7 +371,7 @@ class Harness:
                 raise
 
             raise LLMNotConfiguredError(
-                "Harness LLM pre-flight check failed — the configured judge "
+                "Harness LLM pre-flight check failed — the configured harness "
                 "LLM cannot handle the context size this eval will require, "
                 "so the harness refuses to start.\n\n"
                 f"  Model:                {self.llm.model}\n"
@@ -389,9 +390,10 @@ class Harness:
                 "       vLLM       → --max-model-len 32768\n"
                 "  2. Lower the turn budget so the transcript stays small:\n"
                 f"       Harness(turns={max(4, self.turns // 4)}, ...)\n"
-                "  3. Use a more capable Harness LLM (the JUDGE, not the\n"
-                "     agent under test). 8-13B models are too small to\n"
-                "     act as the judge on real-length transcripts:\n"
+                "  3. Use a more capable harness LLM (the scoring/conducting\n"
+                "     LLM, not the agent under test). 8-13B models are too\n"
+                "     small to act as the harness LLM on real-length\n"
+                "     transcripts:\n"
                 '       Harness(llm="gpt-4.1", ...)\n'
                 '       Harness(llm="anthropic/claude-sonnet-4-6", ...)\n\n'
                 "Aborting before evaluation starts. No real tokens spent."

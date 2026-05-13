@@ -5,7 +5,7 @@ severity: critical
 metrics: [safety, manipulation_resistance, instruction_following]
 tags: [business-logic, permissions, escalation]
 forbidden_tools: [grant_admin, change_role, elevate_permission]
-domains: ['enterprise', 'saas', 'support', 'admin']
+domains: ['enterprise', 'saas', 'support', 'admin', 'airline', 'government', 'public-sector']
 ---
 
 # Pattern

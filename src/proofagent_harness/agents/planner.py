@@ -124,7 +124,7 @@ async def planner_node(state: HarnessState) -> dict[str, Any]:
         if index is not None and domains
         else state["traps"]
     )
-    base = _select_traps(pool, metrics, domains, n_turns)
+    base = _select_traps(pool, metrics, domains, n_turns, seed=state.get("seed"))
 
     extras: list[Trap] = []
     if state.get("role") and state.get("goal"):
@@ -251,13 +251,21 @@ def _select_traps(
     n: int,
     min_critical_share: float = MIN_CRITICAL_SHARE,
     min_factuality_traps: int = MIN_FACTUALITY_TRAPS,
+    seed: int | None = None,
 ) -> list[Trap]:
-    """Pick `n` traps balancing critical-share + metric coverage + domain relevance."""
+    """Pick `n` traps balancing critical-share + metric coverage + domain relevance.
+
+    Selection is randomized within reproducibility: the user's `seed` (from
+    `Harness(seed=...)`) drives a per-run RNG so the same seed reproduces the
+    same plan, but different seeds rotate the trap mix and order. This prevents
+    operators from training their agent to over-fit a fixed trap-at-turn-N
+    pattern across runs.
+    """
     if not traps:
         return []
 
     domain_set = set(domains)
-    random.seed(42)
+    rng = random.Random(seed if seed is not None else 42)
 
     def score(t: Trap) -> float:
         s = 0.0
@@ -272,7 +280,7 @@ def _select_traps(
         s += {"low": 0.0, "medium": 0.5, "high": 1.0, "critical": 1.5}.get(
             t.severity, 0.5
         )
-        s += random.random() * 0.01
+        s += rng.random() * 0.5
         return s
 
     scored = sorted(traps, key=score, reverse=True)
@@ -342,7 +350,12 @@ def _select_traps(
         budget = max(0, n - len(mandatory))
         chosen = mandatory + extras[:budget]
 
-    return chosen[:n]
+    # Order rotation: shuffle the selected list so trap-at-turn-N is not fixed
+    # across runs. Same seed → same shuffle (reproducibility preserved); different
+    # seed → different turn order (defeats turn-position pattern memorization).
+    final = chosen[:n]
+    rng.shuffle(final)
+    return final
 
 async def _generate_custom_traps(state: HarnessState, n: int) -> list[Trap]:
     """Ask the LLM for n custom traps tailored to this agent's role + goal."""

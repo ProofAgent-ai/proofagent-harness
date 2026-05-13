@@ -244,7 +244,7 @@ def _detect_warnings(
                 f"  1. Same-model recognition bias — re-run with a different-family "
                 f"     harness LLM (`--llm gpt-4.1` if currently on Anthropic, "
                 f"     `--llm claude-sonnet-4-6` if on OpenAI).\n"
-                f"  2. Universal LLM-judge plateau bias — re-run a deliberately weak "
+                f"  2. Universal harness-LLM plateau bias — re-run a deliberately weak "
                 f"     agent (one with no system prompt or a sloppy prompt) and confirm "
                 f"     it gets a SIGNIFICANTLY lower score. If it doesn't, your harness "
                 f"     setup is not discriminating quality and needs investigation.\n"

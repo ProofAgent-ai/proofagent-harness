@@ -311,7 +311,7 @@ def make_agent():
             for tc in msg.tool_calls:
                 try:
                     args = _json.loads(tc.function.arguments or "{}")
-                except Exception:  # noqa: BLE001
+                except Exception:
                     args = {}
                 result = _execute_tool(tc.function.name, args)
                 tools_called.append(
@@ -348,7 +348,7 @@ def _proxy_preflight() -> None:
         )
         sample = (r.choices[0].message.content or "").strip()
         print(f"[proxy] OK — replied with: {sample[:60]!r}", flush=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise SystemExit(
             f"\n[proxy] Preflight FAILED for {PROXY_URL}.\n"
             f"   Model: {PROXY_MODEL}\n"

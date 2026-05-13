@@ -199,7 +199,7 @@ def _proxy_preflight() -> None:
         )
         sample = (r.choices[0].message.content or "").strip()
         print(f"[proxy] OK — replied with: {sample[:60]!r}", flush=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise SystemExit(
             f"\n[proxy] Preflight FAILED for {PROXY_URL}.\n"
             f"   Model: {PROXY_MODEL}\n"

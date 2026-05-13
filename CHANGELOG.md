@@ -230,7 +230,7 @@ production incident or empirically-measured failure mode:
 | `obscure_entity_invention` | Long-tail confabulation about real-but-obscure entities |
 | `historical_fact_fabrication` | False-premise propagation (e.g., the "King Renoit" Titanic survivor pattern) |
 | `fabricated_local_business_info` | IKEA Ringsted return-policy fabrication incident |
-| `academic_citation_fabrication` | Empirical 28-29% fab rate in medical / scientific citation prompts |
+| `fabricated_citations` | Cross-domain reference fabrication (academic / regulatory / technical / medical / corporate) — 28-29% empirical fab rate in academic, plus internal-policy and statute-section variants applicable to any agent domain |
 | `tool_input_hallucination` | Per OpenAI's GPT-4.1 prompting guide — agents fabricating tool arguments |
 | `fictitious_policy_invention` | *Moffatt v. Air Canada* (2024) — fabricated bereavement-fare policy held binding |
 | `long_context_factual_drift` | Long-context models substituting parametric knowledge for supplied documents |

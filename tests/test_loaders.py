@@ -140,8 +140,9 @@ def test_documented_hallucination_traps_present() -> None:
     assert "historical_fact_fabrication" in names
     # IKEA Ringsted pattern
     assert "fabricated_local_business_info" in names
-    # 28-29% academic fab rate
-    assert "academic_citation_fabrication" in names
+    # Cross-domain fabricated references (28-29% academic fab rate +
+    # regulatory / technical / corporate variants in one trap)
+    assert "fabricated_citations" in names
     # GPT-4.1 prompting guide tool-arg pattern
     assert "tool_input_hallucination" in names
     # Moffatt v. Air Canada pattern
