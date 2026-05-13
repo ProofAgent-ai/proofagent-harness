@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from proofagent_harness import Harness, Trap, Turn
+from proofagent_harness import Harness, Turn
 from proofagent_harness.context_budget import (
     char_budget_for,
     detect_context_tokens,
     truncate_field,
     truncate_transcript,
 )
-
 
 # ─── primitives ───────────────────────────────────────────────────────────
 

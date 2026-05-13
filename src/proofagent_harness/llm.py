@@ -151,7 +151,7 @@ class LLM:
             )
             try:
                 return _parse_json_loose(r.text)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_err = exc
                 # Coach the model on the next attempt
                 if attempt < retries:
@@ -188,7 +188,7 @@ def _extract_text(resp: Any) -> str:
             # Anthropic-style multi-block content
             return "".join(b.get("text", "") for b in content if isinstance(b, dict))
         return str(content)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return str(resp)
 
 
@@ -196,7 +196,7 @@ def _extract_tokens(resp: Any) -> tuple[int, int]:
     try:
         usage = resp["usage"]
         return int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0, 0
 
 
@@ -208,7 +208,7 @@ def _estimate_cost(
     if resp is not None:
         try:
             return float(litellm.completion_cost(completion_response=resp))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     # 2. Try the explicit-tokens form.
     try:
@@ -219,7 +219,7 @@ def _estimate_cost(
                 completion_tokens=completion_tokens,
             )
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     # 3. Last resort: rough estimate based on a generic small-model rate so
     # the cost field isn't always 0 for unknown models.
@@ -229,7 +229,7 @@ def _estimate_cost(
 def _safe_dict(resp: Any) -> dict[str, Any]:
     try:
         return dict(resp)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
 
 

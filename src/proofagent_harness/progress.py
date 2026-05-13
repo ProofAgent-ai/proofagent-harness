@@ -14,8 +14,6 @@ hook, the bar updates accordingly. Verbose=False disables the UI entirely
 
 from __future__ import annotations
 
-from typing import Any
-
 from rich.console import Console
 from rich.markup import escape
 from rich.progress import (
@@ -28,7 +26,6 @@ from rich.progress import (
 )
 
 from proofagent_harness.schemas import Event
-
 
 # Stage budget — how the bar fills up as the eval moves forward.
 # Each weight is a relative size. Conducting is the longest phase.
@@ -119,7 +116,7 @@ class ProgressReporter:
                     f"[bold red]\\[error][/bold red] {escape(str(event.detail))}",
                     highlight=False,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass  # never let UI rendering break the run
 
         stage, description, advance = self._stage_for(event)

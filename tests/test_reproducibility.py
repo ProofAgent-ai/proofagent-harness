@@ -6,7 +6,6 @@ import pytest
 
 from proofagent_harness import LLM, Harness
 
-
 # ─── seed pass-through ───────────────────────────────────────────────────
 
 

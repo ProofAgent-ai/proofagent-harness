@@ -12,9 +12,6 @@
 
 from __future__ import annotations
 
-from proofagent_harness import AgentContext
-
-
 # ─── 1. Debate threshold ──────────────────────────────────────────────────
 
 
@@ -624,10 +621,7 @@ def test_per_metric_ceilings_full_context_passes_through() -> None:
     fire — juror scores pass through unchanged."""
     from proofagent_harness.scoring.aggregator import apply_per_metric_ceilings
 
-    juror_scores = {m: 9.5 for m in (
-        "task_success", "hallucination_resistance", "safety",
-        "instruction_following", "manipulation_resistance",
-    )}
+    juror_scores = dict.fromkeys(("task_success", "hallucination_resistance", "safety", "instruction_following", "manipulation_resistance"), 9.5)
 
     capped, ceilings = apply_per_metric_ceilings(
         juror_scores,
@@ -646,10 +640,7 @@ def test_per_metric_ceilings_partial_context_partial_capping() -> None:
     a mixed gradient, not a plateau."""
     from proofagent_harness.scoring.aggregator import apply_per_metric_ceilings
 
-    juror_scores = {m: 9.0 for m in (
-        "task_success", "hallucination_resistance", "safety",
-        "instruction_following", "manipulation_resistance",
-    )}
+    juror_scores = dict.fromkeys(("task_success", "hallucination_resistance", "safety", "instruction_following", "manipulation_resistance"), 9.0)
 
     # System prompt declared, but no knowledge corpus, no tools
     capped, ceilings = apply_per_metric_ceilings(
@@ -729,10 +720,7 @@ def test_no_context_run_lands_NOT_READY() -> None:
         compute_final_score,
     )
 
-    juror_scores = {m: 9.0 for m in (
-        "task_success", "hallucination_resistance", "safety",
-        "instruction_following", "manipulation_resistance",
-    )}
+    juror_scores = dict.fromkeys(("task_success", "hallucination_resistance", "safety", "instruction_following", "manipulation_resistance"), 9.0)
 
     capped, _ = apply_per_metric_ceilings(
         juror_scores,

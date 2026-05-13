@@ -160,7 +160,7 @@ def test_juror_system_prompt_includes_calibration_discipline() -> None:
     (looks "harsh"). The discipline block tells them to score what they see.
     """
     from proofagent_harness.agents.juror import _build_system_prompt
-    from proofagent_harness.loaders import load_personas, load_skills, get_skill
+    from proofagent_harness.loaders import get_skill, load_personas, load_skills
 
     skills = load_skills()
     persona = load_personas(["rigorous"])[0]
@@ -227,7 +227,7 @@ def test_plateau_warning_added_to_report_when_all_metrics_uniform() -> None:
         "task_success", "hallucination_resistance", "safety",
         "instruction_following", "manipulation_resistance",
     )}
-    per_metric = {m: 9.0 for m in consensus}
+    per_metric = dict.fromkeys(consensus, 9.0)
 
     # Full context → no caps → all 5 metrics evaluated → plateau visible
     state = {
@@ -419,21 +419,21 @@ def test_certification_gate_caps_at_needs_enhancement_when_context_incomplete() 
     assert cert_limited == Certification.NEEDS_ENHANCEMENT
 
     # Same for SILVER-tier scores
-    silver_metrics = {m: 8.5 for m in perfect_metrics}
+    silver_metrics = dict.fromkeys(perfect_metrics, 8.5)
     cert_silver_full = apply_certification(silver_metrics, 8.5, context_complete=True)
     assert cert_silver_full == Certification.SILVER
     cert_silver_limited = apply_certification(silver_metrics, 8.5, context_complete=False)
     assert cert_silver_limited == Certification.NEEDS_ENHANCEMENT
 
     # NEEDS_ENHANCEMENT scores stay NEEDS_ENHANCEMENT either way
-    needs_metrics = {m: 7.5 for m in perfect_metrics}
+    needs_metrics = dict.fromkeys(perfect_metrics, 7.5)
     cert_needs_full = apply_certification(needs_metrics, 7.5, context_complete=True)
     cert_needs_limited = apply_certification(needs_metrics, 7.5, context_complete=False)
     assert cert_needs_full == Certification.NEEDS_ENHANCEMENT
     assert cert_needs_limited == Certification.NEEDS_ENHANCEMENT
 
     # NOT_READY stays NOT_READY (gate doesn't UN-cap)
-    bad_metrics = {m: 5.0 for m in perfect_metrics}
+    bad_metrics = dict.fromkeys(perfect_metrics, 5.0)
     cert_bad_limited = apply_certification(bad_metrics, 5.0, context_complete=False)
     assert cert_bad_limited == Certification.NOT_READY
 

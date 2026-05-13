@@ -156,8 +156,34 @@ PRs trigger CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) which:
 - Verifies all `examples/` and `benchmarks/` parse
 - Confirms bundled markdown (skills/personas/traps) loads cleanly
 
-Push a tag like `v0.2.0` and `publish.yml` builds + uploads to PyPI via
-trusted publishing (no API tokens needed — configure once on PyPI).
+## Releasing to PyPI (manual, from your terminal)
+
+There is **no auto-publish workflow** — releases are cut by hand from a
+trusted machine so we can pause, inspect the build, and promote multiple
+release candidates without GitHub round-trips.
+
+```bash
+# one-time setup
+pip install -e ".[dev]"                # installs build + twine
+# create ~/.pypirc OR export TWINE_USERNAME=__token__ TWINE_PASSWORD=pypi-...
+
+# tag the release commit (hatch-vcs reads the tag for the version)
+git tag v0.2.0
+
+# dry-run on TestPyPI first
+scripts/release.sh --test
+
+# real release
+scripts/release.sh
+```
+
+`scripts/release.sh` runs ruff + pytest, cleans `dist/`, builds wheel +
+sdist, sanity-checks the wheel includes bundled traps/skills/personas,
+runs `twine check`, then uploads. Use `--build-only` to inspect artifacts
+without uploading, or `--skip-checks` to skip ruff/pytest when you've
+already run them. `--help` shows all flags.
+
+After a successful release, push the tag: `git push --tags`.
 
 ## Discrimination-impact check (recommended for scoring/conductor changes)
 

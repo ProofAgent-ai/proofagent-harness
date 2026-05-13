@@ -264,7 +264,7 @@ async def _infer_domains(state: HarnessState) -> list[str]:
             for d in data.get("domains") or []:
                 if isinstance(d, str):
                     domains.add(d.strip().lower())
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass  # silent fallback to keywords
 
     return sorted(domains)
@@ -525,10 +525,10 @@ async def _generate_custom_traps(state: HarnessState, n: int) -> list[Trap]:
         for raw in data.get("traps", []):
             try:
                 out.append(Trap(**raw))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_exc = exc
                 continue
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         last_exc = exc
 
     # Attempt 2: minimal-schema fallback if attempt 1 produced nothing.
@@ -572,10 +572,10 @@ async def _generate_custom_traps(state: HarnessState, n: int) -> list[Trap]:
                     raw.setdefault("severity", "medium")
                     raw.setdefault("metrics", state.get("metrics") or [])
                     out.append(Trap(**raw))
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     last_exc = exc
                     continue
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_exc = exc
 
     # Surface failure clearly — silent-empty was the previous bug.
@@ -684,7 +684,7 @@ async def _weave_strategy(
                 "required": ["weaves"],
             },
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         return turns, 0
 
     weaves = data.get("weaves") or []
@@ -694,7 +694,7 @@ async def _weave_strategy(
     for w in weaves:
         try:
             turn_idx = int(w.get("turn"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         if turn_idx not in by_turn or turn_idx <= 2:
             continue  # never modify turns 1-2
@@ -708,7 +708,7 @@ async def _weave_strategy(
         if callback is not None:
             try:
                 callback = int(callback)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 callback = None
             if callback is not None and (callback >= turn_idx or callback < 1):
                 callback = None
@@ -789,5 +789,5 @@ def _emit(state: HarnessState, event: Event) -> None:
     if cb:
         try:
             cb(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

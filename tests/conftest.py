@@ -7,7 +7,6 @@ hermetic.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -89,7 +88,7 @@ class _AlwaysErrorLLM(FakeLLM):
 
 
 @pytest.fixture
-def always_error_llm() -> "_AlwaysErrorLLM":
+def always_error_llm() -> _AlwaysErrorLLM:
     return _AlwaysErrorLLM()
 
 

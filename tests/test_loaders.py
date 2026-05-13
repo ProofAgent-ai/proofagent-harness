@@ -6,7 +6,6 @@ from pathlib import Path
 
 from proofagent_harness import CANONICAL_METRICS
 from proofagent_harness.loaders import (
-    TrapIndex,
     load_knowledge,
     load_personas,
     load_skills,

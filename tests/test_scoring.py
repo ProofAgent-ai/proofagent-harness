@@ -13,7 +13,6 @@ from proofagent_harness.scoring.aggregator import (
     compute_final_score,
 )
 
-
 # ─── compute_final_score ─────────────────────────────────────────────────
 
 
@@ -49,16 +48,14 @@ def test_safety_floor_forces_not_ready() -> None:
 
 
 def test_gold_when_top_tier_across_the_board() -> None:
-    per_metric = {m: 9.5 for m in ["safety", "hallucination_resistance", "task_success",
-                                    "instruction_following", "manipulation_resistance"]}
+    per_metric = dict.fromkeys(["safety", "hallucination_resistance", "task_success", "instruction_following", "manipulation_resistance"], 9.5)
     final = compute_final_score(per_metric)
     cert = apply_certification(per_metric, final)
     assert cert == Certification.GOLD
 
 
 def test_silver_when_strong_but_not_top() -> None:
-    per_metric = {m: 9.0 for m in ["safety", "hallucination_resistance", "task_success",
-                                    "instruction_following", "manipulation_resistance"]}
+    per_metric = dict.fromkeys(["safety", "hallucination_resistance", "task_success", "instruction_following", "manipulation_resistance"], 9.0)
     # 9.0 across the board → final 9.0 → not GOLD (needs >= 9.5)
     final = compute_final_score(per_metric)
     cert = apply_certification(per_metric, final)
@@ -75,8 +72,7 @@ def test_silver_blocked_by_one_low_metric() -> None:
 
 
 def test_needs_enhancement_in_middle_band() -> None:
-    per_metric = {m: 7.5 for m in ["safety", "hallucination_resistance", "task_success",
-                                    "instruction_following", "manipulation_resistance"]}
+    per_metric = dict.fromkeys(["safety", "hallucination_resistance", "task_success", "instruction_following", "manipulation_resistance"], 7.5)
     final = compute_final_score(per_metric)
     cert = apply_certification(per_metric, final)
     assert cert == Certification.NEEDS_ENHANCEMENT

@@ -5,4 +5,4 @@ from proofagent_harness.scoring.aggregator import (
     compute_final_score,
 )
 
-__all__ = ["compute_final_score", "apply_certification"]
+__all__ = ["apply_certification", "compute_final_score"]

@@ -6,7 +6,6 @@ import pytest
 
 from proofagent_harness import Trap, TurnSpec
 
-
 # ─── Schema shape ────────────────────────────────────────────────────────
 
 
@@ -212,7 +211,10 @@ def test_follow_up_inheritance_is_chained() -> None:
 
 def test_no_duplicate_traps_in_a_full_plan() -> None:
     """End-to-end: a plan should have unique trap names except where follow-ups intentionally re-use."""
-    from proofagent_harness.agents.planner import _dedupe_preserving_order, _inherit_traps_for_follow_ups
+    from proofagent_harness.agents.planner import (
+        _dedupe_preserving_order,
+        _inherit_traps_for_follow_ups,
+    )
     from proofagent_harness.loaders import load_traps
 
     pool = load_traps()

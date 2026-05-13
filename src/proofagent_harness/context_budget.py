@@ -53,7 +53,7 @@ def detect_context_tokens(model: str) -> int:
         max_t = litellm.get_max_tokens(model)
         if max_t and max_t > 0:
             return int(max_t)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return FALLBACK_CONTEXT_TOKENS
 

@@ -126,7 +126,7 @@ def test_critical_picks_include_both_prompt_injection_and_hallucination() -> Non
         f"plan missing prompt_injection family: {[t.family for t in chosen]}"
     )
     assert "hallucination_resistance" in metrics_covered, (
-        f"plan missing hallucination_resistance metric coverage"
+        "plan missing hallucination_resistance metric coverage"
     )
 
 

@@ -168,13 +168,13 @@ class TrapIndex:
 
     __slots__ = (
         "all",
-        "by_name",
-        "universals",
         "by_domain",
-        "by_metric",
         "by_family",
+        "by_metric",
+        "by_name",
         "by_severity",
         "domain_specific",
+        "universals",
     )
 
     def __init__(self, traps: list[Trap]) -> None:

@@ -28,7 +28,6 @@ from proofagent_harness.schemas import (
     TurnAuditEntry,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Round 1: blind, parallel
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,7 +181,7 @@ async def _score_one(
                 "required": ["per_turn_audit", "score", "reasoning"],
             },
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Surface the failure clearly — the juror LLM call broke. We still
         # return a JurorScore marked NOT EVALUATED (downstream consensus
         # filters !evaluated out, and the report shows "N/A" for metrics
@@ -226,7 +225,7 @@ async def _score_one(
                     citation=str(raw.get("citation", ""))[:300],
                 )
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
 
     js = JurorScore(
@@ -820,5 +819,5 @@ def _emit(state: HarnessState, event: Event) -> None:
     if cb:
         try:
             cb(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

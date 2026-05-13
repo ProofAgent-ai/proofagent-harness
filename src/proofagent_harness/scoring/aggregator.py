@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from proofagent_harness.schemas import Certification, Scoring
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-metric context ceilings — applied AFTER juror scoring.
 #

@@ -11,12 +11,12 @@ from proofagent_harness.agents.planner import planner_node
 from proofagent_harness.agents.reporter import reporter_node
 
 __all__ = [
-    "planner_node",
     "conductor_node",
-    "should_continue_conducting",
+    "consensus_node",
     "jury_round_one_node",
     "jury_round_two_node",
-    "consensus_node",
-    "should_revote",
+    "planner_node",
     "reporter_node",
+    "should_continue_conducting",
+    "should_revote",
 ]

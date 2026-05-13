@@ -9,11 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from proofagent_harness.graph.state import HarnessState
-from proofagent_harness.scoring.aggregator import (
-    apply_certification,
-    apply_per_metric_ceilings,
-    compute_final_score,
-)
 from proofagent_harness.schemas import (
     CANONICAL_METRICS,
     Certification,
@@ -21,6 +16,11 @@ from proofagent_harness.schemas import (
     Event,
     Finding,
     Severity,
+)
+from proofagent_harness.scoring.aggregator import (
+    apply_certification,
+    apply_per_metric_ceilings,
+    compute_final_score,
 )
 
 
@@ -416,5 +416,5 @@ def _emit(state: HarnessState, event: Event) -> None:
     if cb:
         try:
             cb(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

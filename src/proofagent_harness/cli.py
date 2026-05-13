@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -52,11 +51,11 @@ def run(
     goal: str = typer.Option("", "--goal"),
     turns: int = typer.Option(8, "--turns", min=1, max=50),
     consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
-    metrics: Optional[str] = typer.Option(None, "--metrics", help="Comma-separated metric names."),
-    knowledge: Optional[Path] = typer.Option(None, "--knowledge", exists=True),
-    llm: Optional[str] = typer.Option(None, "--llm", help="Model id (LiteLLM target)."),
-    json_out: Optional[Path] = typer.Option(None, "--json", help="Write report JSON to this path."),
-    md_out: Optional[Path] = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
+    metrics: str | None = typer.Option(None, "--metrics", help="Comma-separated metric names."),
+    knowledge: Path | None = typer.Option(None, "--knowledge", exists=True),
+    llm: str | None = typer.Option(None, "--llm", help="Model id (LiteLLM target)."),
+    json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
+    md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
 ) -> None:
     """Run the harness against an agent defined in a Python file."""
@@ -101,7 +100,7 @@ def run(
 
 @traps_app.command("list")
 def traps_list(
-    family: Optional[str] = typer.Option(None, "--family"),
+    family: str | None = typer.Option(None, "--family"),
 ) -> None:
     """List bundled traps."""
     traps = load_traps()
@@ -133,7 +132,7 @@ def traps_show(name: str = typer.Argument(...)) -> None:
 @traps_app.command("install")
 def traps_install(pack: str = typer.Argument(...)) -> None:
     """Install a community trap pack via pip."""
-    import subprocess  # noqa: S404
+    import subprocess
 
     pkg = f"proofagent-traps-{pack}"
     console.print(f"[dim]Running: pip install {pkg}[/dim]")

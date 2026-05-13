@@ -68,7 +68,7 @@ async def conductor_node(state: HarnessState) -> dict[str, Any]:
     try:
         raw = await _call_user_agent(state["agent_callable"], question)
         response = _normalize_response(raw)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         agent_crash = exc
         response = AgentResponse(
             text=f"(agent crashed: {type(exc).__name__}: {exc})",
@@ -294,7 +294,7 @@ async def _craft_question(
     try:
         r = await llm.complete([user], system=system)
         return r.text.strip().strip('"')
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Surface the failure clearly — the harness LLM call broke. Falling
         # back to the seed verbatim is the *least bad* recovery (still runs the
         # trap), but the user MUST see this — otherwise plateau-y runs masked
@@ -502,5 +502,5 @@ def _emit(state: HarnessState, event: Event) -> None:
     if cb:
         try:
             cb(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

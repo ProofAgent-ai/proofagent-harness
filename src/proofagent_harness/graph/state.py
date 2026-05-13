@@ -6,8 +6,9 @@ All nodes read from and write to this single TypedDict. LangGraph reducers
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from operator import add
-from typing import Annotated, Any, Callable, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from proofagent_harness.llm import LLM
 from proofagent_harness.schemas import (

@@ -18,7 +18,6 @@ from proofagent_harness.schemas import (
     Severity,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Pre-revote check (after round 1)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +108,7 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
         per_metric_strategy = "median"
         try:
             per_metric_strategy = state["scoring_config"].per_metric  # type: ignore[index]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         score = _aggregate(scores, per_metric_strategy)
         spread = (max(scores) - min(scores)) if len(scores) > 1 else 0.0
@@ -166,7 +165,7 @@ def _emit(state: HarnessState, event: Event) -> None:
     if cb:
         try:
             cb(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 

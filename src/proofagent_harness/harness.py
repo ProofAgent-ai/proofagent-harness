@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rich.console import Console
 
@@ -209,7 +210,7 @@ class Harness:
         def _thread_runner() -> None:
             try:
                 box["result"] = asyncio.run(self.aevaluate(**kwargs))
-            except BaseException as exc:  # noqa: BLE001 - re-raised below
+            except BaseException as exc:
                 box["exc"] = exc
 
         t = threading.Thread(target=_thread_runner, daemon=True)
@@ -385,7 +386,7 @@ class Harness:
                 max_tokens=5,
                 temperature=0,
             )
-        except Exception as exc:  # noqa: BLE001 — re-raised wrapped below
+        except Exception as exc:
             # Determine the right env var name for the diagnostic hint
             model = self.llm.model.lower()
             if "claude" in model or "anthropic" in model:
@@ -430,7 +431,7 @@ def _compose_callbacks(
         for cb in real:
             try:
                 cb(event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     return _fan
