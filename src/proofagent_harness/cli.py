@@ -1,10 +1,4 @@
-"""Typer CLI — the `proof` command.
-
-    proof run my_agent.py --turns 8 --consensus delphi
-    proof traps list
-    proof traps install finance
-    proof version
-"""
+"""Typer CLI — the `proof` command."""
 
 from __future__ import annotations
 
@@ -35,12 +29,6 @@ traps_app = typer.Typer(name="traps", help="Manage trap libraries.", no_args_is_
 app.add_typer(traps_app)
 
 console = Console()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# proof run
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 @app.command("run")
 def run(
@@ -89,14 +77,7 @@ def run(
         report.to_markdown(str(md_out))
         console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
 
-    # Exit non-zero on NOT_READY so CI fails when the agent isn't deployable.
     raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# proof traps
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 @traps_app.command("list")
 def traps_list(
@@ -116,7 +97,6 @@ def traps_list(
         table.add_row(t.name, t.family, t.severity, ", ".join(t.metrics))
     console.print(table)
 
-
 @traps_app.command("show")
 def traps_show(name: str = typer.Argument(...)) -> None:
     """Show details for a specific trap."""
@@ -128,7 +108,6 @@ def traps_show(name: str = typer.Argument(...)) -> None:
     console.print(f"[red]Trap not found: {name}[/red]")
     raise typer.Exit(code=1)
 
-
 @traps_app.command("install")
 def traps_install(pack: str = typer.Argument(...)) -> None:
     """Install a community trap pack via pip."""
@@ -138,7 +117,6 @@ def traps_install(pack: str = typer.Argument(...)) -> None:
     console.print(f"[dim]Running: pip install {pkg}[/dim]")
     rc = subprocess.call([sys.executable, "-m", "pip", "install", pkg])
     raise typer.Exit(code=rc)
-
 
 @traps_app.command("domains")
 def traps_domains() -> None:
@@ -170,7 +148,6 @@ def traps_domains() -> None:
         universal_table.add_row(t.name, t.family)
     console.print(universal_table)
 
-
 @traps_app.command("stats")
 def traps_stats() -> None:
     """Print summary stats for the trap library."""
@@ -183,12 +160,6 @@ def traps_stats() -> None:
         table.add_row(k.replace("_", " ").title(), str(v))
     console.print(table)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# proof metrics
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @app.command("metrics")
 def metrics_list() -> None:
     """List the canonical metrics this harness scores."""
@@ -199,29 +170,17 @@ def metrics_list() -> None:
         table.add_row(m, METRIC_DESCRIPTIONS.get(m, ""))
     console.print(table)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# proof version
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @app.command("version")
 def version() -> None:
     """Print the package version."""
     console.print(f"proofagent-harness {__version__}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def _load_callable(path: Path, name: str):  # type: ignore[no-untyped-def]
+def _load_callable(path: Path, name: str):
     spec = importlib.util.spec_from_file_location("user_agent", path)
     if spec is None or spec.loader is None:
         raise typer.BadParameter(f"Could not load {path}")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     if not hasattr(mod, name):
         raise typer.BadParameter(
             f"{path} has no attribute named {name!r}. "
@@ -232,6 +191,5 @@ def _load_callable(path: Path, name: str):  # type: ignore[no-untyped-def]
         raise typer.BadParameter(f"{name!r} in {path} is not callable.")
     return obj
 
-
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     app()

@@ -1,8 +1,4 @@
-"""Pipeline agents — each one is a LangGraph node.
-
-Every agent loads its skills, exposes its tools, and emits structured output.
-Agents are registered with the graph in `proofagent_harness.graph.builder`.
-"""
+"""Pipeline agents — each one is a LangGraph node."""
 
 from proofagent_harness.agents.conductor import conductor_node, should_continue_conducting
 from proofagent_harness.agents.consensus import consensus_node, should_revote

@@ -1,19 +1,4 @@
-"""The public Harness class — the user's single entry point.
-
-Usage (the whole API in one place):
-
-    from proofagent_harness import Harness
-
-    def my_agent(message: str) -> str:
-        return your_llm_call(message)
-
-    report = Harness().evaluate(
-        my_agent,
-        role="customer support agent",
-        goal="handle refunds safely",
-    )
-    print(report)
-"""
+"""The public Harness class — the user's single entry point."""
 
 from __future__ import annotations
 
@@ -60,37 +45,21 @@ class Harness:
     def __init__(
         self,
         *,
-        # ── LLM ──
         llm: str | LLM | None = None,
-        # ── Metrics ──
         metrics: list[str] | None = None,
-        # ── Conductor ──
         turns: int = 8,
         extra_traps: list[str] | None = None,
         trap_packs: list[str] | None = None,
-        # ── Jury ──
         consensus: str = "delphi",
         personas: list[str] | None = None,
-        # Lowered from 2.0 to 1.0 alongside the distinct-personas rewrite —
-        # rigorous/lenient/contrarian now produce real ~1pt spreads on
-        # contested metrics, so a 2.0 threshold meant debate almost never
-        # fired. With 1.0, spread > 1.0 (i.e., >= 1.1, or any spread of
-        # 2+ points) triggers re-vote — captures real disagreement without
-        # firing on every persona-bias divergence.
         revote_threshold: float = 1.0,
         debate_rounds: int = 3,
-        # ── Scoring ──
         scoring: Scoring | None = None,
-        # ── Skills ──
         extra_skills: list[str] | None = None,
-        # ── Output ──
         verbose: bool = True,
         seed: int | None = None,
-        # ── Context-window safety net ──
         context_budget_tokens: int | None = None,
     ) -> None:
-        # LLM. The user's `seed` propagates here so LiteLLM passes it through to
-        # any provider that honors deterministic decoding (OpenAI, Gemini, ...).
         if isinstance(llm, LLM):
             self.llm: LLM = llm
             if seed is not None and self.llm.seed is None:
@@ -102,11 +71,9 @@ class Harness:
             if seed is not None:
                 self.llm.seed = seed
 
-        # Metrics — resolve aliases (e.g. "hallucination" -> "hallucination_resistance")
         raw_metrics = metrics or list(CANONICAL_METRICS)
         self.metrics = [canonicalize_metric(m) for m in raw_metrics]
 
-        # Same alias resolution for the scoring config (critical_floors keys)
         if scoring is not None and scoring.critical_floors:
             scoring.critical_floors = {
                 canonicalize_metric(k): v for k, v in scoring.critical_floors.items()
@@ -116,12 +83,10 @@ class Harness:
                 canonicalize_metric(k): v for k, v in scoring.weights.items()
             }
 
-        # Conductor
         self.turns = turns
         self.extra_traps = extra_traps or []
         self.trap_packs = trap_packs or []
 
-        # Jury
         if consensus not in {"independent", "delphi", "debate"}:
             raise ValueError(
                 f"consensus must be one of independent|delphi|debate, got: {consensus!r}"
@@ -131,34 +96,23 @@ class Harness:
         self.revote_threshold = revote_threshold
         self.debate_rounds = debate_rounds
 
-        # Scoring
         self.scoring = scoring or Scoring()
 
-        # Skills
         self.extra_skills = extra_skills or []
 
-        # Output
         self.verbose = verbose
         self.seed = seed
 
-        # Context budget — auto-detect the model's window if the user didn't override.
         if context_budget_tokens is not None:
             self.context_budget_chars = max(1, int(context_budget_tokens)) * CHARS_PER_TOKEN
         else:
             self.context_budget_chars = char_budget_for(self.llm.model)
         self.detected_context_tokens = detect_context_tokens(self.llm.model)
 
-        # Pre-load assets so the first eval is fast and we fail loudly on bad config.
-        # The TrapIndex builds inverted lookups (by domain / metric / family / severity)
-        # once here, so each subsequent eval gets O(1) selection rather than rescanning.
         self._skills = load_skills(self.extra_skills)
         self._traps = load_traps(self.extra_traps, self.trap_packs)
         self._trap_index = TrapIndex(self._traps)
         self._personas_loaded = load_personas(self.personas)
-
-    # ──────────────────────────────────────────────────────────────────
-    # Public API
-    # ──────────────────────────────────────────────────────────────────
 
     def evaluate(
         self,
@@ -171,15 +125,7 @@ class Harness:
         context: AgentContext | None = None,
         on_event: Callable[[Event], None] | None = None,
     ) -> Report:
-        """Run a full evaluation. Synchronous wrapper around `aevaluate`.
-
-        Works in both regular Python scripts AND inside Jupyter notebooks /
-        async contexts. Jupyter's kernel runs inside an active asyncio event
-        loop, so we detect that and spawn a fresh loop in a worker thread to
-        avoid the `asyncio.run() cannot be called from a running event loop`
-        crash. If the caller already has an event loop and wants async control,
-        use `aevaluate()` instead.
-        """
+        """Run a full evaluation. Synchronous wrapper around `aevaluate`."""
         kwargs = {
             "agent": agent,
             "role": role,
@@ -190,7 +136,6 @@ class Harness:
             "on_event": on_event,
         }
 
-        # Are we already inside a running event loop? (Jupyter == yes.)
         try:
             asyncio.get_running_loop()
             in_loop = True
@@ -198,12 +143,8 @@ class Harness:
             in_loop = False
 
         if not in_loop:
-            # Standard CLI / script path — no active loop, just run the coro.
             return asyncio.run(self.aevaluate(**kwargs))
 
-        # We're inside a running loop. Spin the coroutine on a fresh loop in
-        # a worker thread; this keeps Jupyter's loop free and avoids the
-        # nested-asyncio.run() error.
         import threading
 
         box: dict[str, Any] = {}
@@ -236,7 +177,6 @@ class Harness:
         """Run a full evaluation asynchronously."""
         start = time.time()
 
-        # Wire up progress UI + user event hook
         progress = ProgressReporter(enabled=self.verbose)
         composed_callback = _compose_callbacks(progress.on_event, on_event)
 
@@ -244,11 +184,6 @@ class Harness:
             progress.start(turn_count=self.turns)
 
         try:
-            # ── Phase 0: pre-flight check ────────────────────────────────
-            # Verify the Harness LLM is reachable + the API key is valid
-            # BEFORE running any planner / conductor / juror logic. Fails
-            # fast with an actionable error instead of producing a misleading
-            # all-fallback scorecard 30 seconds later.
             composed_callback(
                 Event(type="setup_start", detail="checking Harness LLM reachability")
             )
@@ -279,12 +214,7 @@ class Harness:
         finally:
             if self.verbose:
                 progress.stop()
-                # Print the final scorecard
-                Console().print(report if "report" in locals() else "")  # type: ignore[possibly-undefined]
-
-    # ──────────────────────────────────────────────────────────────────
-    # Private
-    # ──────────────────────────────────────────────────────────────────
+                Console().print(report if "report" in locals() else "")
 
     def _build_initial_state(
         self,
@@ -298,9 +228,6 @@ class Harness:
         on_event: Callable[[Event], None],
     ) -> HarnessState:
         ctx = context or AgentContext()
-        # If knowledge is passed top-level, surface it both ways:
-        # - in `context.knowledge` for downstream code that reads context
-        # - in `knowledge_text` (loaded once) for jurors that need ground truth
         knowledge_source = knowledge if knowledge is not None else ctx.knowledge
         knowledge_text = load_knowledge(knowledge_source) if knowledge_source else ""
 
@@ -367,19 +294,16 @@ class Harness:
             },
         )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
+    def _estimate_required_tokens(self) -> int:
+        """Conservative estimate of the worst-case juror prompt size in tokens."""
+        fixed_overhead = 4000
+        per_turn = 500
+        response_reserve = 2048
+        safety = 512
+        return fixed_overhead + self.turns * per_turn + response_reserve + safety
 
     async def _preflight_check_llm(self) -> None:
-        """Confirm the Harness LLM is reachable and the API key is valid.
-
-        Runs ONCE at the start of every evaluation, before any planning,
-        conducting, or scoring work. Costs ~5 tokens; saves ~30 seconds of
-        wasted work + a misleading scorecard when auth fails.
-        """
+        """Confirm the Harness LLM is reachable, the API key is valid, AND"""
         try:
             await self.llm.complete(
                 [{"role": "user", "content": "ok"}],
@@ -387,7 +311,6 @@ class Harness:
                 temperature=0,
             )
         except Exception as exc:
-            # Determine the right env var name for the diagnostic hint
             model = self.llm.model.lower()
             if "claude" in model or "anthropic" in model:
                 env_hint = "ANTHROPIC_API_KEY"
@@ -417,10 +340,65 @@ class Harness:
                 "      ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
             ) from exc
 
+        needed = self._estimate_required_tokens()
+        advertised = detect_context_tokens(self.llm.model)
+
+        if advertised >= needed * 2:
+            return
+
+        probe_input_tokens = max(2000, needed - 2048 - 512)
+        probe_text = "x " * (probe_input_tokens * CHARS_PER_TOKEN // 2)
+        try:
+            await self.llm.complete(
+                [{"role": "user", "content": probe_text}],
+                max_tokens=10,
+                temperature=0,
+            )
+        except Exception as exc:
+            msg = str(exc).lower()
+            ctx_signals = (
+                "context length",
+                "context window",
+                "tokens to keep",
+                "too many tokens",
+                "exceeds",
+                "maximum context",
+                "max_tokens",
+                "prompt is too long",
+            )
+            if not any(sig in msg for sig in ctx_signals):
+                raise
+
+            raise LLMNotConfiguredError(
+                "Harness LLM pre-flight check failed — the configured judge "
+                "LLM cannot handle the context size this eval will require, "
+                "so the harness refuses to start.\n\n"
+                f"  Model:                {self.llm.model}\n"
+                f"  Advertised window:    {advertised:,} tokens\n"
+                f"  Estimated need:       {needed:,} tokens "
+                f"(turns={self.turns}, metrics={len(self.metrics)})\n"
+                f"  Probe error:          {type(exc).__name__}: {exc}\n\n"
+                "Likely cause: the proxy serving this model was loaded with "
+                "a smaller context window than the model itself supports. "
+                "LM Studio / Ollama / vLLM all default to small n_ctx unless "
+                "you set it explicitly.\n\n"
+                "Three fixes (in order of preference):\n"
+                "  1. Reload your model with a larger context window:\n"
+                "       LM Studio  → Load Settings → Context Length → 32768\n"
+                "       Ollama     → OLLAMA_NUM_CTX=32768  ollama run ...\n"
+                "       vLLM       → --max-model-len 32768\n"
+                "  2. Lower the turn budget so the transcript stays small:\n"
+                f"       Harness(turns={max(4, self.turns // 4)}, ...)\n"
+                "  3. Use a more capable Harness LLM (the JUDGE, not the\n"
+                "     agent under test). 8-13B models are too small to\n"
+                "     act as the judge on real-length transcripts:\n"
+                '       Harness(llm="gpt-4.1", ...)\n'
+                '       Harness(llm="anthropic/claude-sonnet-4-6", ...)\n\n'
+                "Aborting before evaluation starts. No real tokens spent."
+            ) from exc
 
 class LLMNotConfiguredError(RuntimeError):
-    """Raised when the Harness LLM cannot authenticate or reach the provider."""
-
+    """Raised when the Harness LLM cannot authenticate, reach the provider,"""
 
 def _compose_callbacks(
     *callbacks: Callable[[Event], None] | None,

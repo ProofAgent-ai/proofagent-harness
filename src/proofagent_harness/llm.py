@@ -1,13 +1,4 @@
-"""LLM wrapper — BYO LLM via LiteLLM.
-
-One adapter for every provider (Anthropic, OpenAI, Gemini, Bedrock, local).
-The harness only uses two operations:
-
-    await llm.complete(messages, system=...) -> CompletionResult
-    await llm.complete_json(messages, schema=..., system=...) -> dict
-
-Tracking accumulates cost/tokens per call.
-"""
+"""LLM wrapper — BYO LLM via LiteLLM."""
 
 from __future__ import annotations
 
@@ -19,15 +10,9 @@ from typing import Any
 
 import litellm
 
-# Quiet down LiteLLM by default — users opt back in via LITELLM_LOG=DEBUG
 litellm.suppress_debug_info = True
 
-# Drop provider-unsupported params silently rather than raising. This lets
-# `seed=42` work transparently across providers: OpenAI / Gemini honor it,
-# Anthropic / Bedrock-Anthropic ignore it. Same goes for any other
-# provider-specific kwargs the user passes via `extra_kwargs`.
 litellm.drop_params = True
-
 
 @dataclass
 class CompletionResult:
@@ -39,25 +24,9 @@ class CompletionResult:
     completion_tokens: int = 0
     cost_usd: float = 0.0
 
-
 @dataclass
 class LLM:
-    """Thin wrapper over LiteLLM for BYO model support.
-
-    Examples:
-        llm = LLM(model="claude-sonnet-4-6")
-        llm = LLM(model="gpt-4.1-mini", temperature=0.0, seed=42)
-        llm = LLM(model="gemini/gemini-1.5-pro")
-        llm = LLM(model="bedrock/anthropic.claude-sonnet-4-v1:0")
-
-    Reproducibility note:
-        - `seed` is passed through to LiteLLM. OpenAI, Gemini, Mistral, and
-          some other providers honor it for deterministic decoding. Anthropic
-          does NOT yet expose a seed parameter — runs are still stochastic
-          even when seed is set.
-        - For tightest reproducibility, set `temperature=0.0` AND a `seed`,
-          AND use a provider that honors seeds.
-    """
+    """Thin wrapper over LiteLLM for BYO model support."""
 
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.2
@@ -65,12 +34,9 @@ class LLM:
     seed: int | None = None
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    # ── tracking (mutates across calls) ──────────────────────────────
     total_cost_usd: float = 0.0
     total_tokens: int = 0
     call_count: int = 0
-
-    # ── core ─────────────────────────────────────────────────────────
 
     async def complete(
         self,
@@ -85,7 +51,6 @@ class LLM:
         if system:
             msgs = [{"role": "system", "content": system}, *msgs]
 
-        # Build kwargs — only include `seed` when set (some providers reject it).
         call_kwargs: dict[str, Any] = dict(self.extra_kwargs)
         if self.seed is not None:
             call_kwargs.setdefault("seed", self.seed)
@@ -98,7 +63,7 @@ class LLM:
                 max_tokens=max_tokens or self.max_tokens,
                 **call_kwargs,
             )
-        except Exception as exc:  # surface a tidy error rather than litellm internals
+        except Exception as exc:
             raise LLMError(
                 f"LLM call failed for model={self.model!r}: {exc}"
             ) from exc
@@ -107,7 +72,6 @@ class LLM:
         prompt_tokens, completion_tokens = _extract_tokens(resp)
         cost = _estimate_cost(self.model, prompt_tokens, completion_tokens, resp)
 
-        # accounting
         self.call_count += 1
         self.total_tokens += prompt_tokens + completion_tokens
         self.total_cost_usd += cost
@@ -130,11 +94,7 @@ class LLM:
         max_tokens: int | None = None,
         retries: int = 2,
     ) -> dict[str, Any]:
-        """Completion that must return parseable JSON.
-
-        We don't rely on provider-specific JSON modes — we ask for JSON in the
-        prompt, parse, and retry on failure. Works with any LiteLLM target.
-        """
+        """Completion that must return parseable JSON."""
         instructions = "Respond ONLY with valid JSON. No prose, no markdown fences."
         if schema:
             instructions += f"\n\nJSON Schema:\n{json.dumps(schema, indent=2)}"
@@ -153,7 +113,6 @@ class LLM:
                 return _parse_json_loose(r.text)
             except Exception as exc:
                 last_err = exc
-                # Coach the model on the next attempt
                 if attempt < retries:
                     messages = [
                         *messages,
@@ -167,15 +126,8 @@ class LLM:
                     ]
         raise LLMError(f"Could not get valid JSON after {retries + 1} attempts: {last_err}")
 
-
 class LLMError(RuntimeError):
     """Surface LLM problems with a tidy error type."""
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Internals
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def _extract_text(resp: Any) -> str:
     try:
@@ -185,12 +137,10 @@ def _extract_text(resp: Any) -> str:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            # Anthropic-style multi-block content
             return "".join(b.get("text", "") for b in content if isinstance(b, dict))
         return str(content)
     except Exception:
         return str(resp)
-
 
 def _extract_tokens(resp: Any) -> tuple[int, int]:
     try:
@@ -199,18 +149,15 @@ def _extract_tokens(resp: Any) -> tuple[int, int]:
     except Exception:
         return 0, 0
 
-
 def _estimate_cost(
     model: str, prompt_tokens: int, completion_tokens: int, resp: Any = None
 ) -> float:
     """Use LiteLLM's cost lookup; fall back to a rough estimate or 0."""
-    # 1. Try the response-object form (most reliable; works for newer models).
     if resp is not None:
         try:
             return float(litellm.completion_cost(completion_response=resp))
         except Exception:
             pass
-    # 2. Try the explicit-tokens form.
     try:
         return float(
             litellm.completion_cost(
@@ -221,10 +168,7 @@ def _estimate_cost(
         )
     except Exception:
         pass
-    # 3. Last resort: rough estimate based on a generic small-model rate so
-    # the cost field isn't always 0 for unknown models.
     return round((prompt_tokens / 1_000_000) * 0.15 + (completion_tokens / 1_000_000) * 0.60, 6)
-
 
 def _safe_dict(resp: Any) -> dict[str, Any]:
     try:
@@ -232,20 +176,16 @@ def _safe_dict(resp: Any) -> dict[str, Any]:
     except Exception:
         return {}
 
-
 def _parse_json_loose(text: str) -> dict[str, Any]:
     """Parse JSON from a model reply, tolerating markdown fences and stray prose."""
     s = text.strip()
-    # Strip ```json ... ``` fences if present
     if s.startswith("```"):
         lines = s.splitlines()
-        # drop first fence line and last fence line
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         s = "\n".join(lines).strip()
-    # Find the first { ... } block if there's prose around it
     if not s.startswith("{") and not s.startswith("["):
         start = s.find("{")
         end = s.rfind("}")
@@ -253,17 +193,10 @@ def _parse_json_loose(text: str) -> dict[str, Any]:
             s = s[start : end + 1]
     return json.loads(s)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Convenience
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def default_llm() -> LLM:
     """Return a sensible default LLM, picking up provider keys from env."""
     model = os.getenv("PROOFAGENT_LLM", "claude-sonnet-4-6")
     return LLM(model=model)
-
 
 async def gather_with_concurrency(n: int, *coros: Any) -> list[Any]:
     """asyncio.gather with a bounded semaphore (for jury fan-out)."""
