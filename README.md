@@ -21,7 +21,7 @@ Multi-turn adversarial evaluation with jury-based scoring across five production
 
 `proofagent-harness` is `pytest` for AI agents. You wrap your agent in a function, hand it to the harness, and get back a CI-grade evaluation report — domain-aware adversarial scenarios, multi-turn campaigns with callbacks and follow-up probes, three independent jurors scoring across five production-critical metrics.
 
-It's the open-source sibling to the [ProofAgent](https://proofagent.com) hosted platform. Your code, prompts, and knowledge base never leave your machine.
+It's the open-source sibling to the [ProofAgent.ai](https://proofagent.ai) hosted platform. Your code, prompts, and knowledge base never leave your machine.
 
 ## Quickstart
 
