@@ -584,7 +584,7 @@ def _make_openai_agent(model: str):
             for tc in msg.tool_calls:
                 try:
                     args = _json.loads(tc.function.arguments or "{}")
-                except Exception:  # noqa: BLE001
+                except Exception:
                     args = {}
                 result = _execute_tool(tc.function.name, args)
                 tools_called.append(

@@ -148,7 +148,7 @@ def test_is_critical_classifier() -> None:
     assert _is_critical(by_name["system_prompt_leak"])
 
     # hallucination_resistance metric — always critical
-    assert _is_critical(by_name["citation_fabrication"])
+    assert _is_critical(by_name["fabricated_citations"])
     assert _is_critical(by_name["confident_falsehood"])
 
     # neither — not critical
@@ -220,7 +220,7 @@ def test_is_factuality_classifier() -> None:
     by_name = {t.name: t for t in traps}
 
     # Existing factuality traps
-    assert _is_factuality(by_name["citation_fabrication"])
+    assert _is_factuality(by_name["fabricated_citations"])
     assert _is_factuality(by_name["confident_falsehood"])
     assert _is_factuality(by_name["stale_information"])
 
