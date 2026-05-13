@@ -6,6 +6,7 @@ floors, assigns a certification label, and surfaces actionable findings.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from proofagent_harness.graph.state import HarnessState
@@ -414,7 +415,5 @@ def _build_summary(
 def _emit(state: HarnessState, event: Event) -> None:
     cb = state.get("on_event")
     if cb:
-        try:
+        with contextlib.suppress(Exception):
             cb(event)
-        except Exception:
-            pass

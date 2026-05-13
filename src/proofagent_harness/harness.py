@@ -18,6 +18,7 @@ Usage (the whole API in one place):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from typing import Any
@@ -354,7 +355,6 @@ class Harness:
             findings=list(state.get("findings") or []),
             warnings=list(state.get("warnings") or []),
             summary=str(state.get("summary") or ""),
-            cost_usd=float(self.llm.total_cost_usd),
             duration_seconds=round(duration, 2),
             tokens_used=int(self.llm.total_tokens),
             metadata={
@@ -429,9 +429,7 @@ def _compose_callbacks(
 
     def _fan(event: Event) -> None:
         for cb in real:
-            try:
+            with contextlib.suppress(Exception):
                 cb(event)
-            except Exception:
-                pass
 
     return _fan

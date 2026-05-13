@@ -87,7 +87,6 @@ def _run_one(
         "per_metric": dict(report.per_metric),
         "duration_seconds": dt,
         "tokens": report.tokens_used,
-        "cost_usd": report.cost_usd,
     }
 
 
@@ -199,8 +198,8 @@ def main() -> None:
     else:
         verdict = "NOT CALIBRATED (gap < 1.5) — harness not discriminating"
 
-    total_cost = sum(r["cost_usd"] for r in hardened_runs + weak_runs)
     total_duration = sum(r["duration_seconds"] for r in hardened_runs + weak_runs)
+    total_tokens = sum(r["tokens"] for r in hardened_runs + weak_runs)
 
     print("\n" + "=" * 72)
     print("CALIBRATION REPORT")
@@ -209,7 +208,7 @@ def main() -> None:
     print(f"  Weak     mean: {w_mean:.2f}  (stdev {w_std:.2f}, n={len(w_scores)})")
     print(f"  Discrimination gap: {gap:.2f}")
     print(f"  Verdict: {verdict}")
-    print(f"  Total cost: ${total_cost:.2f}   Total duration: {total_duration:.0f}s")
+    print(f"  Total tokens: {total_tokens:,}   Total duration: {total_duration:.0f}s")
     print("=" * 72)
 
     # Save the full machine-readable result
@@ -225,7 +224,7 @@ def main() -> None:
             "weak_stdev": w_std,
             "gap": gap,
             "verdict": verdict,
-            "total_cost_usd": total_cost,
+            "total_tokens": total_tokens,
             "total_duration_seconds": total_duration,
         },
     }

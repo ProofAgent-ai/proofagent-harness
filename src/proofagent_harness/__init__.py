@@ -44,32 +44,32 @@ from proofagent_harness.schemas import (
 __version__ = "0.1.0"
 
 __all__ = [
-    # primary
-    "Harness",
+    # constants
+    "CANONICAL_METRICS",
     # config
     "LLM",
-    "Scoring",
+    "METRIC_DESCRIPTIONS",
+    "AgentCallable",
     # inputs
     "AgentContext",
     "AgentResponse",
-    "AgentCallable",
-    # data
-    "Trap",
-    "Skill",
-    "Persona",
-    "EvaluationPlan",
-    "TurnSpec",
-    "Turn",
-    "JurorScore",
+    "Certification",
     "ConsensusResult",
+    "EvaluationPlan",
+    "Event",
+    "Finding",
+    # primary
+    "Harness",
+    "JurorScore",
+    "Persona",
     # output
     "Report",
-    "Finding",
+    "Scoring",
     "Severity",
-    "Certification",
-    "Event",
-    # constants
-    "CANONICAL_METRICS",
-    "METRIC_DESCRIPTIONS",
+    "Skill",
+    # data
+    "Trap",
+    "Turn",
+    "TurnSpec",
     "__version__",
 ]

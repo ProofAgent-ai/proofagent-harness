@@ -429,7 +429,6 @@ class Report(BaseModel):
     juror confidence, suspicious uniformity, etc.). Rendered prominently in
     the scorecard so the user sees them without scrolling the transcript."""
     summary: str = ""
-    cost_usd: float = 0.0
     duration_seconds: float = 0.0
     tokens_used: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)

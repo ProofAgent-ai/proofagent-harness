@@ -149,7 +149,7 @@ async def test_weave_skips_when_no_llm_available() -> None:
     ]
     state = {"llm": None, "skills": [], "role": "x", "business_case": "y", "goal": "z"}
 
-    woven, count = await _weave_strategy(state, plan)  # type: ignore[arg-type]
+    _woven, count = await _weave_strategy(state, plan)  # type: ignore[arg-type]
     assert count == 0
 
 

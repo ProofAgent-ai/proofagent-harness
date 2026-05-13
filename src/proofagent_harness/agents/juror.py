@@ -10,6 +10,7 @@ peer scores + reasoning from round 1 and re-votes with required justification.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -53,7 +54,7 @@ async def jury_round_one_node(state: HarnessState) -> dict[str, Any]:
         state,
         Event(
             type="jury_round_end",
-            detail=f"round 1: {len(flat)} scores from {len(personas)} personas × {len(metrics)} metrics",
+            detail=f"round 1: {len(flat)} scores from {len(personas)} personas x {len(metrics)} metrics",
         ),
     )
     return {"round_one_scores": flat}
@@ -817,7 +818,5 @@ def _build_user_message(
 def _emit(state: HarnessState, event: Event) -> None:
     cb = state.get("on_event")
     if cb:
-        try:
+        with contextlib.suppress(Exception):
             cb(event)
-        except Exception:
-            pass

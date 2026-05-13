@@ -3,7 +3,7 @@
     START
       → Planner
       → Conductor (subgraph: loops until turn_count is reached)
-      → Jury Round 1 (parallel personas × metrics)
+      → Jury Round 1 (parallel personas x metrics)
       → Consensus check
       → conditional: revote → Jury Round 2 → finalize_consensus
                      skip   → finalize_consensus

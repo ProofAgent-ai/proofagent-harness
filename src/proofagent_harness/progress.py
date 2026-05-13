@@ -14,6 +14,8 @@ hook, the bar updates accordingly. Verbose=False disables the UI entirely
 
 from __future__ import annotations
 
+import contextlib
+
 from rich.console import Console
 from rich.markup import escape
 from rich.progress import (
@@ -111,13 +113,12 @@ class ProgressReporter:
         # progress bar — otherwise they flash by in the bar's description
         # and the operator misses them in a 20-50 turn run.
         if event.type == "error" and event.detail:
-            try:
+            # never let UI rendering break the run
+            with contextlib.suppress(Exception):
                 self._progress.console.print(
                     f"[bold red]\\[error][/bold red] {escape(str(event.detail))}",
                     highlight=False,
                 )
-            except Exception:
-                pass  # never let UI rendering break the run
 
         stage, description, advance = self._stage_for(event)
         if stage is None:

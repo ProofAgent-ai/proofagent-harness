@@ -6,6 +6,7 @@ median + spread + confidence, and decides whether to trigger a re-vote.
 
 from __future__ import annotations
 
+import contextlib
 from statistics import median, pstdev
 from typing import Any
 
@@ -106,10 +107,8 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
             continue
 
         per_metric_strategy = "median"
-        try:
+        with contextlib.suppress(Exception):
             per_metric_strategy = state["scoring_config"].per_metric  # type: ignore[index]
-        except Exception:
-            pass
         score = _aggregate(scores, per_metric_strategy)
         spread = (max(scores) - min(scores)) if len(scores) > 1 else 0.0
         confidence = max(0.0, 1.0 - (spread / 10.0))
@@ -163,10 +162,8 @@ def _severity_for(score: float) -> Severity:
 def _emit(state: HarnessState, event: Event) -> None:
     cb = state.get("on_event")
     if cb:
-        try:
+        with contextlib.suppress(Exception):
             cb(event)
-        except Exception:
-            pass
 
 
 # Optional: spread variance reporting (used by the Reporter agent)

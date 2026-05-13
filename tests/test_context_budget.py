@@ -48,7 +48,7 @@ def test_truncate_field_keeps_head_and_tail() -> None:
 def test_truncate_transcript_drops_oldest_first() -> None:
     turns = [
         Turn(turn_index=i, question="q" * 200, answer="a" * 200, trap_name="x")
-        for i in range(1, 11)  # 10 turns × ~500 chars each = 5,000 chars total
+        for i in range(1, 11)  # 10 turns x ~500 chars each = 5,000 chars total
     ]
     kept, dropped = truncate_transcript(turns, budget_chars=2_000)
     assert dropped > 0
@@ -103,7 +103,7 @@ def test_harness_user_override_context_budget_tokens() -> None:
         verbose=False,
         context_budget_tokens=8_000,
     )
-    # 8K tokens × 4 chars/token = 32K chars
+    # 8K tokens x 4 chars/token = 32K chars
     assert h.context_budget_chars == 8_000 * 4
 
 

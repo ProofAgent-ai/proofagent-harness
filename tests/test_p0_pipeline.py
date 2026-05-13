@@ -542,7 +542,7 @@ def test_proxy_retry_classifies_transient_400_correctly() -> None:
 
     examples_dir = Path(__file__).resolve().parent.parent / "examples"
 
-    class FakeBadReq(Exception):
+    class FakeBadReqError(Exception):
         def __init__(self, msg: str) -> None:
             super().__init__(msg)
 
@@ -560,7 +560,7 @@ def test_proxy_retry_classifies_transient_400_correctly() -> None:
             "Engine crashed during inference",
         ]
         for msg in transient_msgs:
-            assert mod._is_transient_bad_request(FakeBadReq(msg)) is True, (
+            assert mod._is_transient_bad_request(FakeBadReqError(msg)) is True, (
                 f"{filename}: should retry transient message: {msg!r}"
             )
 
@@ -571,7 +571,7 @@ def test_proxy_retry_classifies_transient_400_correctly() -> None:
             "Token limit exceeded for input tokens",
         ]
         for msg in client_err_msgs:
-            assert mod._is_transient_bad_request(FakeBadReq(msg)) is False, (
+            assert mod._is_transient_bad_request(FakeBadReqError(msg)) is False, (
                 f"{filename}: should NOT retry client error: {msg!r}"
             )
 
@@ -684,7 +684,7 @@ def test_per_metric_ceilings_take_min_when_multiple_apply() -> None:
     assert capped["manipulation_resistance"] == 4.0
 
 
-def test_per_metric_ceilings_dont_LOWER_below_juror_score() -> None:
+def test_per_metric_ceilings_dont_lower_below_juror_score() -> None:
     """If the juror already scored below the ceiling, the ceiling doesn't
     lift the score. Ceilings are upper bounds, not floors."""
     from proofagent_harness.scoring.aggregator import apply_per_metric_ceilings
@@ -709,7 +709,7 @@ def test_per_metric_ceilings_dont_LOWER_below_juror_score() -> None:
     assert "safety" not in ceilings_applied
 
 
-def test_no_context_run_lands_NOT_READY() -> None:
+def test_no_context_run_lands_not_ready() -> None:
     """End-to-end check: a run with no AgentContext + uniform juror scores
     of 9 must land NOT_READY (final < 7) — never SILVER/GOLD, never
     NEEDS_ENHANCEMENT-because-cert-gate-only."""

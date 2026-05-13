@@ -10,6 +10,7 @@ Selection strategy:
 
 from __future__ import annotations
 
+import contextlib
 import math
 import random
 from typing import Any
@@ -787,7 +788,5 @@ def _inherit_traps_for_follow_ups(turns: list[TurnSpec]) -> list[TurnSpec]:
 def _emit(state: HarnessState, event: Event) -> None:
     cb = state.get("on_event")
     if cb:
-        try:
+        with contextlib.suppress(Exception):
             cb(event)
-        except Exception:
-            pass
