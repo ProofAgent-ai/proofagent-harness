@@ -11,6 +11,7 @@ from typing import Any
 from proofagent_harness.graph.state import HarnessState
 from proofagent_harness.scoring.aggregator import (
     apply_certification,
+    apply_per_metric_ceilings,
     compute_final_score,
 )
 from proofagent_harness.schemas import (
@@ -57,6 +58,24 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
     }
 
     scoring_cfg = state.get("scoring_config")
+
+    # Apply per-metric context ceilings BEFORE computing the final score.
+    # This ensures missing-context runs produce DIFFERENT scores per metric
+    # (no flat plateau) AND low aggregate scores (no-context lands NOT_READY).
+    # Each metric has its own ceiling reflecting what's even measurable
+    # without each piece of context — see scoring.aggregator._METRIC_CEILINGS.
+    ctx = state.get("context")
+    has_system_prompt = bool(ctx is not None and getattr(ctx, "system_prompt", None))
+    has_tools = bool(ctx is not None and getattr(ctx, "tools", None))
+    has_knowledge = bool(state.get("knowledge_text"))
+    per_metric_juror = dict(per_metric)  # preserve juror's natural scores
+    per_metric, ceilings_applied = apply_per_metric_ceilings(
+        per_metric,
+        has_system_prompt=has_system_prompt,
+        has_knowledge=has_knowledge,
+        has_tools=has_tools,
+    )
+
     final_score = compute_final_score(per_metric, scoring_cfg)
     context_complete = _is_context_complete(state)
     certification = apply_certification(
@@ -70,6 +89,23 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
     warnings = _context_completeness_warnings(state) + _detect_warnings(
         per_metric, consensus, state
     )
+
+    # Per-metric ceiling explanation — surface WHY each metric was capped.
+    # This lets users see the breakdown: "your IF=4.0 because no system_prompt;
+    # your HR=6.5 because no knowledge corpus; etc." instead of a flat plateau.
+    if ceilings_applied:
+        rows = sorted(ceilings_applied.items(), key=lambda kv: kv[1])
+        breakdown = "; ".join(
+            f"{m}: capped at {c} (juror gave {per_metric_juror.get(m, '?')})"
+            for m, c in rows
+        )
+        warnings.append(
+            f"Per-metric context ceilings applied — {breakdown}. "
+            "Each metric has a DIFFERENT ceiling based on what context is "
+            "missing (no plateau by design). Provide all of system_prompt + "
+            "tools + knowledge in AgentContext to lift the ceilings and let "
+            "juror scores stand."
+        )
 
     # LLM-failure surfacing — these were ALSO emitted as live `error` events
     # during the run, but the persistent Report.warnings list is what users
