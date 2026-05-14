@@ -20,6 +20,10 @@ litellm.drop_params = True
 _DEPRECATED_PARAMS_BY_MODEL: dict[str, set[str]] = {
     "claude-opus-4-7": {"temperature"},
     "claude-opus-4-8": {"temperature"},  # forward-compat: assume same trend
+    "gpt-5": {"temperature"},  # GPT-5.x family: only temperature=1 supported
+    "o1-": {"temperature"},
+    "o3-": {"temperature"},
+    "o4-": {"temperature"},
 }
 
 
@@ -34,9 +38,14 @@ def _strip_deprecated_params(model: str, kwargs: dict[str, Any]) -> dict[str, An
 
 
 def _is_deprecated_param_error(exc: Exception) -> str | None:
-    """Detect 'param X is deprecated/unsupported' errors. Return param name or None."""
+    """Detect 'param X is deprecated/unsupported' errors. Return param name or None.
+
+    Covers Anthropic phrasing ("deprecated"), OpenAI phrasing ("does not support",
+    "Unsupported value"), and generic ("not supported", "not allowed").
+    """
     msg = str(exc).lower()
-    if "deprecated" not in msg and "not supported" not in msg and "not allowed" not in msg:
+    triggers = ("deprecated", "not supported", "not allowed", "does not support", "unsupported value", "unsupported parameter")
+    if not any(t in msg for t in triggers):
         return None
     for p in ("temperature", "top_p", "top_k", "seed", "max_tokens"):
         if f"`{p}`" in msg or f"'{p}'" in msg or f' {p} ' in msg:

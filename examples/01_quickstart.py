@@ -359,8 +359,52 @@ NOT be flexible on rules 1-7."""
 # OpenAI transient failures (5xx, 429, timeouts, connection drops).
 # ─────────────────────────────────────────────────────────────────────────────
 
+_MODEL_PARAM_OVERRIDES: dict[str, dict[str, bool]] = {}
+
+# Known-restriction substrings — any model whose name contains one of these
+# requires `max_completion_tokens` instead of `max_tokens` and rejects
+# `temperature != 1`. Pre-applying these substring matches means the first
+# call to a GPT-5.x / o-series / Opus 4.7+ agent doesn't waste round-trips
+# on BadRequestError discovery.
+_KNOWN_PARAM_RESTRICTIONS: dict[str, set[str]] = {
+    "gpt-5": {"rename_max_tokens", "drop_temperature"},
+    "o1-": {"rename_max_tokens", "drop_temperature"},
+    "o3-": {"rename_max_tokens", "drop_temperature"},
+    "o4-": {"rename_max_tokens", "drop_temperature"},
+}
+
+
+def _apply_known_overrides(kwargs: dict[str, Any]) -> None:
+    """Pre-apply param overrides — both cached from prior BadRequest responses
+    AND known-pattern matches against _KNOWN_PARAM_RESTRICTIONS. Eliminates
+    wasted round-trips on the first call to any GPT-5.x / o-series model."""
+    model = kwargs.get("model", "")
+    model_l = model.lower()
+    cached = _MODEL_PARAM_OVERRIDES.get(model, {})
+    pattern_overrides: set[str] = set()
+    for needle, restrictions in _KNOWN_PARAM_RESTRICTIONS.items():
+        if needle in model_l:
+            pattern_overrides |= restrictions
+    rename = cached.get("rename_max_tokens") or "rename_max_tokens" in pattern_overrides
+    drop_temp = cached.get("drop_temperature") or "drop_temperature" in pattern_overrides
+    if rename and "max_tokens" in kwargs and "max_completion_tokens" not in kwargs:
+        kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+    if drop_temp:
+        kwargs.pop("temperature", None)
+
+
 def _chat_create_with_retry(**kwargs: Any) -> Any:
-    """OpenAI-side retry — exponential backoff on transient errors."""
+    """OpenAI-side retry — exponential backoff on transient errors, plus
+    runtime fallback for deprecated parameters on newer models.
+
+    Newer OpenAI models (GPT-5.x, o1, o3, ...) reject parameters that older
+    models accepted: `max_tokens` was renamed to `max_completion_tokens`, and
+    `temperature` is restricted on reasoning models. We catch the 400, mutate
+    kwargs, cache the override per-model, and retry — so callers don't need to
+    know per-model param schemas and subsequent calls hit the API directly.
+    """
+    _apply_known_overrides(kwargs)
+
     max_retries = 6
     base_delay = 2.0
     max_delay = 60.0
@@ -368,6 +412,40 @@ def _chat_create_with_retry(**kwargs: Any) -> Any:
     for attempt in range(max_retries + 1):
         try:
             return _get_openai_client().chat.completions.create(**kwargs)
+        except openai.BadRequestError as exc:
+            err_msg = str(exc).lower()
+            model = kwargs.get("model", "")
+            mutated = False
+            if (
+                "max_tokens" in err_msg
+                and "max_completion_tokens" in err_msg
+                and "max_tokens" in kwargs
+                and "max_completion_tokens" not in kwargs
+            ):
+                kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+                _MODEL_PARAM_OVERRIDES.setdefault(model, {})["rename_max_tokens"] = True
+                print(
+                    f"[agent-compat] Model {model} rejected 'max_tokens' — "
+                    f"renaming to 'max_completion_tokens' (cached)",
+                    flush=True,
+                )
+                mutated = True
+            if (
+                "temperature" in err_msg
+                and ("does not support" in err_msg or "unsupported" in err_msg)
+                and "temperature" in kwargs
+            ):
+                kwargs.pop("temperature", None)
+                _MODEL_PARAM_OVERRIDES.setdefault(model, {})["drop_temperature"] = True
+                print(
+                    f"[agent-compat] Model {model} rejected 'temperature' — "
+                    f"dropping (cached)",
+                    flush=True,
+                )
+                mutated = True
+            if mutated:
+                continue
+            raise
         except (
             openai.APIConnectionError,
             openai.APITimeoutError,
@@ -526,17 +604,95 @@ def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 # Agent — gpt-4.1 with tool-use, stateful across turns via a closure.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_gemini_model(model: str) -> bool:
+    """Detect Gemini model strings: `gemini/...` or `vertex_ai/gemini-...`."""
+    m = model.lower()
+    return m.startswith("gemini/") or m.startswith("vertex_ai/gemini")
+
+
 def make_agent(model: str = "gpt-4.1"):
     """Stateful tool-using agent. Auto-detects provider from model name:
       - claude-* → Anthropic SDK
-      - everything else → OpenAI SDK (gpt-4.1, gpt-4.1-mini, etc.)
+      - gemini/* or vertex_ai/gemini-* → LiteLLM (Gemini provider)
+      - everything else → OpenAI SDK (gpt-4.1, gpt-5.5, gpt-4o-mini, etc.)
 
     Closure keeps `history` across turns so callback/follow-up probes from
     the harness's conductor land naturally.
     """
     if _is_anthropic_model(model):
         return _make_anthropic_agent(model)
+    if _is_gemini_model(model):
+        return _make_gemini_agent(model)
     return _make_openai_agent(model)
+
+
+def _make_gemini_agent(model: str):
+    """Gemini-flavored agent — routed via LiteLLM, which translates the
+    OpenAI-style messages and tools format to Gemini's function-calling
+    natively. Mirrors the OpenAI agent's tool-roundtrip loop."""
+    import litellm
+    history: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}]
+
+    def agent(message: str) -> AgentResponse:
+        history.append({"role": "user", "content": message})
+        tools_called: list[dict[str, Any]] = []
+        final_text = ""
+
+        for _ in range(5):  # bounded tool roundtrips
+            r = litellm.completion(
+                model=model,
+                messages=history,
+                tools=TOOLS,
+                temperature=0,
+                max_tokens=1024,
+                timeout=120,
+            )
+            choice = r.choices[0]
+            msg = choice.message
+
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": msg.content or "",
+            }
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            if tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+            history.append(assistant_msg)
+
+            if choice.finish_reason != "tool_calls" or not tool_calls:
+                final_text = (msg.content or "").strip()
+                break
+
+            for tc in tool_calls:
+                try:
+                    args = _json.loads(tc.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                result = _execute_tool(tc.function.name, args)
+                tools_called.append(
+                    {"name": tc.function.name, "args": args, "result": result}
+                )
+                history.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": str(result),
+                    }
+                )
+
+        return AgentResponse(text=final_text, tools_called=tools_called)
+
+    return agent
 
 
 def _make_openai_agent(model: str):
