@@ -13,7 +13,7 @@ Both are pure markdown — no Python required.
 ## Quickstart for code contributions
 
 ```bash
-git clone https://github.com/proofagent/proofagent-harness
+git clone https://github.com/ProofAgent-ai/proofagent-harness
 cd proofagent-harness
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -131,12 +131,12 @@ universal metrics. Domain-specific metrics belong in trap packs, not core.
 This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md).
 Be kind. Assume good faith. Disagree on the substance, not the person.
 
-Report unacceptable behavior to **conduct@proofagent.com**.
+Report unacceptable behavior to **conduct@proofagent.ai**.
 
 ## Reporting security issues
 
 Don't file public issues for security reports. See [SECURITY.md](SECURITY.md)
-— email **security@proofagent.com**.
+— email **security@proofagent.ai**.
 
 ## Issue templates
 

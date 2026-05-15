@@ -8,10 +8,10 @@ Multi-turn adversarial evaluation with jury-based scoring across five production
 
 [![PyPI version](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/proofagent/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/proofagent/proofagent-harness/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-148%20passing-brightgreen.svg)](tests/)
-[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/ProofAgent-ai/proofagent-harness/blob/main/LICENSE)
+[![CI](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen.svg)](https://github.com/ProofAgent-ai/proofagent-harness/tree/main/tests)
+[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://github.com/ProofAgent-ai/proofagent-harness/blob/main/CODE_OF_CONDUCT.md)
 
 [Quickstart](#quickstart) · [Why](#why-proofagent-harness) · [Supported models](#supported-models) · [How it works](#how-it-works) · [Domain-aware](#domain-aware-everywhere) · [Recipes](#recipes--common-scenarios) · [Traps & skills](#traps--skills) · [Bring your own](#bring-your-own--three-concrete-recipes) · [CI integration](#ci-integration) · [vs hosted](#open-source-vs-hosted)
 
@@ -917,7 +917,7 @@ Three strategies, picked via `consensus="..."` on `Harness()` or `--consensus` o
 
 ## Open source vs hosted
 
-`proofagent-harness` is the local OSS test harness. The [ProofAgent](https://proofagent.com) hosted platform adds:
+`proofagent-harness` is the local OSS test harness. The [ProofAgent](https://proofagent.ai) hosted platform adds:
 
 | | OSS harness *(this repo)* | Hosted |
 |---|:---:|:---:|
@@ -1054,5 +1054,5 @@ Code contributions: clone, install with `pip install -e ".[dev]"`, and run `pyte
 ---
 
 <div align="center">
-<sub>Built by the team behind <a href="https://proofagent.com">ProofAgent</a>. Star us on GitHub if this saved you an incident.</sub>
+<sub>Built by the team behind <a href="https://proofagent.ai">ProofAgent</a>. Star us on GitHub if this saved you an incident.</sub>
 </div>

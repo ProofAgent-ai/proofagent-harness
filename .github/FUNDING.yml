@@ -1,7 +1,7 @@
 # Optional: enables the "Sponsor" button on the GitHub repo page.
 # Uncomment and fill in the platform(s) you accept funding through.
 
-# github: [proofagent]
+# github: [ProofAgent-ai]
 # open_collective: proofagent
 # patreon: proofagent
-# custom: ["https://proofagent.com/sponsor"]
+# custom: ["https://proofagent.ai/sponsor"]

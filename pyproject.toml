@@ -70,11 +70,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://proofagent.com/harness"
-Documentation = "https://proofagent.com/harness/docs"
-Repository = "https://github.com/proofagent/proofagent-harness"
-Issues = "https://github.com/proofagent/proofagent-harness/issues"
-Changelog = "https://github.com/proofagent/proofagent-harness/blob/main/CHANGELOG.md"
+Homepage = "https://proofagent.ai/harness"
+Documentation = "https://proofagent.ai/harness/docs"
+Repository = "https://github.com/ProofAgent-ai/proofagent-harness"
+Issues = "https://github.com/ProofAgent-ai/proofagent-harness/issues"
+Changelog = "https://github.com/ProofAgent-ai/proofagent-harness/blob/main/CHANGELOG.md"
 
 [project.scripts]
 proof = "proofagent_harness.cli:app"
@@ -85,9 +85,7 @@ fallback-version = "0.1.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/proofagent_harness"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/proofagent_harness/data" = "proofagent_harness/data"
+include = ["src/proofagent_harness/**"]
 
 [tool.ruff]
 line-length = 100
