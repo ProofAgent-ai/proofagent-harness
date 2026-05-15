@@ -26,7 +26,12 @@ from proofagent_harness.schemas import (
     TurnSpec,
 )
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("proofagent-harness")
+except Exception:
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "CANONICAL_METRICS",

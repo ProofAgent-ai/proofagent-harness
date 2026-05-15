@@ -15,7 +15,7 @@ reports seriously, including:
 - Supply-chain issues with our dependencies
 
 **Do not file public issues for security reports.** Please email
-`security@proofagent.com` with:
+`security@proofagent.ai` with:
 
 - A description of the vulnerability and its impact
 - A minimal reproduction (transcript, trap file, code snippet)
