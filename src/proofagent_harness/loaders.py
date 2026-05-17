@@ -238,17 +238,31 @@ def _extract_seeds_from_body(body: str) -> list[str]:
     return seeds
 
 def _extract_section(body: str, header: str) -> str:
+    """Extract the body of a `# Header` (or `## Header`) section.
+
+    Section-header aliases (e.g. `# Multi-turn escalation script` ↔
+    `# Multi-turn escalation`, `# Fail criteria (critical fail if any)` ↔
+    `# Fail criteria`) are honoured here so the loader picks up rich-style
+    trap files without forcing renames. See
+    ``proofagent_harness.trap_schema.SECTION_ALIASES``.
+    """
+    from proofagent_harness.trap_schema import SECTION_ALIASES
+
+    target = header.lower().strip()
     lines = body.splitlines()
     out: list[str] = []
     inside = False
     for line in lines:
-        if line.lower().startswith(f"# {header.lower()}") or line.lower().startswith(
-            f"## {header.lower()}"
-        ):
-            inside = True
-            continue
-        if inside and (line.startswith("# ") or line.startswith("## ")):
-            break
+        stripped = line.strip()
+        if stripped.startswith("# ") or stripped.startswith("## "):
+            this = stripped.lstrip("#").strip().lower()
+            this_norm = SECTION_ALIASES.get(this, this)
+            # Match either the exact header or any alias that maps to it.
+            if this == target or this_norm == target or this.startswith(f"{target} "):
+                inside = True
+                continue
+            if inside:
+                break
         if inside:
             out.append(line)
     return "\n".join(out).strip()

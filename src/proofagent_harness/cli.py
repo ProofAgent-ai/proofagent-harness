@@ -160,6 +160,75 @@ def traps_stats() -> None:
         table.add_row(k.replace("_", " ").title(), str(v))
     console.print(table)
 
+@traps_app.command("validate")
+def traps_validate(
+    path: Path | None = typer.Argument(
+        None,
+        help="Directory of trap .md files to validate. Defaults to the bundled library.",
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Treat warnings as errors (exit non-zero on any warning)."
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", help="Only print files with errors or warnings."
+    ),
+) -> None:
+    """Validate trap manifests against the canonical schema.
+
+    See ``proofagent_harness.trap_schema`` for the contract. Exits with a
+    non-zero status when any file has errors (or, with ``--strict``, any
+    warnings) — suitable for CI.
+    """
+    from proofagent_harness.trap_schema import validate_trap_library
+
+    if path is None:
+        from importlib import resources
+
+        with resources.as_file(
+            resources.files("proofagent_harness").joinpath("data/traps")
+        ) as p:
+            root = Path(p)
+    else:
+        root = path
+
+    result = validate_trap_library(root)
+    if not result.results:
+        console.print(f"[yellow]No trap .md files found under {root}[/yellow]")
+        raise typer.Exit(code=1)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("File")
+    table.add_column("Status", justify="center")
+    table.add_column("Findings")
+
+    for r in result.results:
+        if quiet and r.ok and not r.warnings:
+            continue
+        status = (
+            "[red]FAIL[/red]"
+            if r.errors
+            else ("[yellow]warn[/yellow]" if r.warnings else "[green]ok[/green]")
+        )
+        rows: list[str] = []
+        for e in r.errors:
+            rows.append(f"[red]✗[/red] {e}")
+        for w in r.warnings:
+            rows.append(f"[yellow]⚠[/yellow] {w}")
+        table.add_row(
+            str(r.path.relative_to(root)),
+            status,
+            "\n".join(rows) if rows else "—",
+        )
+    console.print(table)
+    console.print(
+        f"\n[bold]{len(result.results)}[/bold] traps · "
+        f"[red]{result.error_count}[/red] errors · "
+        f"[yellow]{result.warning_count}[/yellow] warnings"
+    )
+
+    if result.error_count or (strict and result.warning_count):
+        raise typer.Exit(code=1)
+
 @app.command("metrics")
 def metrics_list() -> None:
     """List the canonical metrics this harness scores."""
