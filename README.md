@@ -8,6 +8,8 @@ Run multi-turn adversarial evaluations with jury-based scoring across production
 
 Bring your own LLM. Bring your own traps. Run locally, in CI, or scale through [ProofAgent Platform](https://proofagent.ai/platform).
 
+_Open-source harness. Open evaluation ecosystem._
+
 [![PyPI version](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/ProofAgent-ai/proofagent-harness/blob/main/LICENSE)
@@ -1072,7 +1074,13 @@ for attribution requirements when you redistribute.
   [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) with each library's
   license and project link.
 
-`ProofAgent` and `ProofAgent Harness` are trademarks of ProofAI LLC.
+## Trademark Notice
+
+"ProofAgent" and "ProofAgent Harness" are trademarks of ProofAI LLC.
+
+The Apache 2.0 license grants rights to use, modify, and distribute the software,
+but does not grant rights to use the ProofAgent name, logo, branding, or identity
+for competing hosted services or commercial branding purposes.
 
 ---
 
