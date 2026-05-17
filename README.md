@@ -4,7 +4,9 @@
 
 **The open-source, domain-aware test harness for AI agents.**
 
-Multi-turn adversarial evaluation with jury-based scoring across five production-critical metrics. The planner picks **adversarial traps** based on your agent's domain — healthcare gets HIPAA, finance gets PCI/SOX, code gets malware probes. Bring your own LLM, your own traps, your own skills.
+Run multi-turn adversarial evaluations with jury-based scoring across production-critical metrics. The harness uses domain-specific traps, red-team scenarios, and expert-curated edge cases to test hallucination, policy compliance, drift, tool use, and manipulation resistance.
+
+Bring your own LLM. Bring your own traps. Run locally, in CI, or scale through [ProofAgent Platform](https://proofagent.ai/platform).
 
 [![PyPI version](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
@@ -1047,9 +1049,18 @@ PRs welcome. The two highest-leverage things you can contribute are:
 
 Code contributions: clone, install with `pip install -e ".[dev]"`, and run `pytest`. Full guide in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## License
+## License & attribution
 
-[Apache 2.0](LICENSE)
+Licensed under the **[Apache License 2.0](LICENSE)** — see the [NOTICE](NOTICE) file
+for attribution requirements when you redistribute.
+
+- **Copyright** © 2025-2026 **ProofAI LLC**
+- **Original author** **Dr. Fouad Bousetouane**
+- **Third-party software** used by this package is listed in
+  [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) with each library's
+  license and project link.
+
+`ProofAgent` and `ProofAgent Harness` are trademarks of ProofAI LLC.
 
 ---
 

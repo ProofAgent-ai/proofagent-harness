@@ -1,6 +1,21 @@
-"""proofagent-harness — open-source test harness for AI agents."""
+"""proofagent-harness — the open-source, domain-aware test harness for AI agents.
+
+Run multi-turn adversarial evaluations with jury-based scoring across
+production-critical metrics (hallucination, policy compliance, drift,
+tool use, manipulation resistance). Bring your own LLM. Bring your own
+traps. Run locally, in CI, or scale through ProofAgent Platform.
+
+Copyright 2025-2026 ProofAI LLC. Licensed under the Apache License, Version 2.0.
+Original author: Dr. Fouad Bousetouane.
+See the LICENSE and NOTICE files in the source distribution for full terms.
+"""
 
 from __future__ import annotations
+
+__author__    = "Dr. Fouad Bousetouane"
+__email__     = "fouad@proofagent.ai"
+__copyright__ = "Copyright 2025-2026 ProofAI LLC"
+__license__   = "Apache-2.0"
 
 from proofagent_harness.harness import Harness
 from proofagent_harness.llm import LLM
@@ -55,5 +70,9 @@ __all__ = [
     "Trap",
     "Turn",
     "TurnSpec",
+    "__author__",
+    "__copyright__",
+    "__email__",
+    "__license__",
     "__version__",
 ]
