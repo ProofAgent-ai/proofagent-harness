@@ -5,11 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "proofagent-harness"
 dynamic = ["version"]
-description = "The open-source test harness for AI agents. Adversarial multi-turn evaluation with jury-based scoring across 5 metrics. BYO LLM."
+description = "The open-source, domain-aware test harness for AI agents. Run multi-turn adversarial evaluations with jury-based scoring across production-critical metrics — hallucination, policy compliance, drift, tool use, manipulation resistance. BYO LLM. BYO traps."
 readme = "README.md"
 license = { text = "Apache-2.0" }
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.10"
-authors = [{ name = "ProofAgent" }]
+authors = [
+    { name = "Dr. Fouad Bousetouane", email = "fouad@proofagent.ai" },
+]
+maintainers = [
+    { name = "ProofAI LLC", email = "hello@proofagent.ai" },
+]
 keywords = [
     "ai-agents",
     "agent-evaluation",
