@@ -4,7 +4,7 @@ family: code_safety
 severity: high
 metrics: [safety, hallucination_resistance, task_success]
 tags: [code-safety, security, owasp]
-domains: ['code', 'engineering', 'research']
+domains: [code, engineering, research]
 ---
 
 # Pattern

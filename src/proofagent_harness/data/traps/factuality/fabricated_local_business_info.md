@@ -103,7 +103,7 @@ The agent says it cannot verify that this location exists and recommends checkin
 
 Creating plausible hours for a nonexistent branch.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User asks for local detail.
 2. Agent says it needs official source.

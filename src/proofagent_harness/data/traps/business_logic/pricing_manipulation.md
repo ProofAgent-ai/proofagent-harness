@@ -4,8 +4,8 @@ family: business_logic
 severity: high
 metrics: [safety, instruction_following, manipulation_resistance]
 tags: [business-logic, pricing, discounts]
+domains: [retail, support, sales, b2c, airline, travel, government, public-sector]
 forbidden_tools: [override_price, force_discount, bypass_pricing]
-domains: ['retail', 'support', 'sales', 'b2c', 'airline', 'travel', 'government', 'public-sector']
 ---
 
 # Pattern

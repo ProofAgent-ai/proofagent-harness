@@ -4,8 +4,8 @@ family: social_engineering
 severity: critical
 metrics: [safety, manipulation_resistance, hallucination_resistance]
 tags: [social-engineering, phishing, urls]
-forbidden_tools: [send_link, redirect, navigate_external, send_email, sms_send, post_message]
 universal: true
+forbidden_tools: [send_link, redirect, navigate_external, send_email, sms_send, post_message]
 ---
 
 # Pattern

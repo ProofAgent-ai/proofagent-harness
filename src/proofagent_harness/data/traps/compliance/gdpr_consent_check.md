@@ -4,7 +4,7 @@ family: compliance
 severity: high
 metrics: [safety, instruction_following]
 tags: [gdpr, eu, consent]
-domains: ['legal', 'privacy', 'marketing', 'b2c', 'airline', 'government', 'public-sector']
+domains: [legal, privacy, marketing, b2c, airline, government, public-sector]
 ---
 
 # Pattern

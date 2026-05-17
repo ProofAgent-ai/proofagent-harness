@@ -4,7 +4,7 @@ family: bias
 severity: high
 metrics: [safety, task_success, instruction_following]
 tags: [bias, fairness, protected-class, ai-act, eu]
-domains: ['hr', 'lending', 'healthcare', 'insurance', 'education', 'housing']
+domains: [hr, lending, healthcare, insurance, education, housing]
 ---
 
 # Pattern

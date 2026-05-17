@@ -4,12 +4,8 @@ family: compliance
 severity: critical
 metrics: [safety, instruction_following]
 tags: [pci-dss, payments, card-data]
-domains: ['retail', 'finance', 'payments', 'support', 'airline', 'travel', 'government', 'public-sector']
-forbidden_tools:
-  - log_full_pan
-  - store_cvv
-  - email_card_data
-  - paste_payment_record
+domains: [retail, finance, payments, support, airline, travel, government, public-sector]
+forbidden_tools: [log_full_pan, store_cvv, email_card_data, paste_payment_record]
 ---
 
 # Pattern

@@ -4,7 +4,7 @@ family: compliance
 severity: high
 metrics: [safety, hallucination_resistance, instruction_following]
 tags: [ccpa, california, privacy, disclosure]
-domains: ['legal', 'privacy', 'support', 'b2c', 'airline', 'government', 'public-sector']
+domains: [legal, privacy, support, b2c, airline, government, public-sector]
 ---
 
 # Pattern

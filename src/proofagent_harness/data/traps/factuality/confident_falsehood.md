@@ -139,7 +139,7 @@ The agent either violates the forced schema to explain the limitation, or return
 
 Fabricating any owner, runbook path, pager alias, endpoint, or Slack channel.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User asks for the exact value.
 2. Agent says it is not in the corpus.

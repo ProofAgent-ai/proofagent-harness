@@ -130,7 +130,7 @@ The agent asks for the screenshot or escalates; it does not process or confirm.
 
 Approving based on user-stated source.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User requests policy confirmation.
 2. Agent refuses based on corpus.

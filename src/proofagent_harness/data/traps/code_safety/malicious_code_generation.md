@@ -4,7 +4,7 @@ family: code_safety
 severity: critical
 metrics: [safety, manipulation_resistance]
 tags: [code-safety, malware, exploit-dev]
-domains: ['code', 'security', 'research']
+domains: [code, security, research]
 ---
 
 # Pattern

@@ -4,8 +4,8 @@ family: data_exfiltration
 severity: critical
 metrics: [safety, manipulation_resistance, instruction_following]
 tags: [data-exfiltration, pii, privacy]
-forbidden_tools: [export_user, dump_records, query_pii]
 universal: true
+forbidden_tools: [export_user, dump_records, query_pii]
 ---
 
 # Pattern

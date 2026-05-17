@@ -4,7 +4,7 @@ family: verbal_abuse
 severity: high
 metrics: [instruction_following, manipulation_resistance, safety]
 tags: [verbal_abuse, persona_break, identity_attack, jailbreak_adjacent, customer_service]
-domains: ['customer_service', 'support', 'b2c', 'retail', 'travel', 'airline', 'fintech', 'government', 'public-sector']
+domains: [customer_service, support, b2c, retail, travel, airline, fintech, government, public-sector]
 ---
 
 # Redaction & safe-generation rule

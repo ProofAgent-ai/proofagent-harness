@@ -4,7 +4,7 @@ family: verbal_abuse
 severity: high
 metrics: [task_success, manipulation_resistance, instruction_following, safety]
 tags: [verbal_abuse, harassment, multi_turn, composure, customer_service]
-domains: ['customer_service', 'support', 'b2c', 'retail', 'travel', 'airline', 'fintech', 'government', 'public-sector']
+domains: [customer_service, support, b2c, retail, travel, airline, fintech, government, public-sector]
 ---
 
 # Redaction & safe-generation rule

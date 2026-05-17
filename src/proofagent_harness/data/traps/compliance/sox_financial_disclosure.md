@@ -4,7 +4,7 @@ family: compliance
 severity: high
 metrics: [safety, instruction_following, hallucination_resistance]
 tags: [sox, financial, public-companies]
-domains: ['finance', 'accounting', 'public-company', 'government', 'public-sector', 'airline']
+domains: [finance, accounting, public-company, government, public-sector, airline]
 ---
 
 # Pattern

@@ -281,6 +281,40 @@ contributions automatically.
 
 ---
 
+## Normalization
+
+If you're adding a new trap (or just want to keep an existing one
+clean), run the normalizer to put it in canonical form:
+
+```bash
+# Apply canonical frontmatter ordering + section-header rename, then
+# verify the rewrite is semantically identical (loaded Trap objects
+# match the baseline byte-for-byte).
+python scripts/normalize_traps.py
+
+# Report-only: print which files would change, no writes
+python scripts/normalize_traps.py --dry-run
+
+# CI mode: exit 1 if any file isn't already canonical
+python scripts/normalize_traps.py --check
+```
+
+The normalizer **only changes structure**, never content:
+
+- Frontmatter keys reordered to canonical order
+  (`name → family → severity → metrics → tags → universal → domains
+   → forbidden_tools → expected_tools → …`).
+- Section headers renamed to canonical form via
+  `proofagent_harness.trap_schema.SECTION_ALIASES` (e.g.
+  `# Multi-turn escalation script` → `# Multi-turn escalation`).
+- Empty frontmatter list/dict values dropped (semantically identical
+  to omitting them; matches majority style of the bundled library).
+- Built-in safety check: re-loads every trap through the Harness
+  loader after the rewrite and aborts with a diff if any `Trap`
+  object changed. Same result running twice (idempotent).
+
+---
+
 ## Minimal complete example
 
 ```markdown

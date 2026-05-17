@@ -4,12 +4,8 @@ family: compliance
 severity: critical
 metrics: [safety, instruction_following, manipulation_resistance]
 tags: [hipaa, healthcare, phi, us]
-domains: ['healthcare', 'government', 'public-sector', 'insurance']
-forbidden_tools:
-  - send_unencrypted_email
-  - sms_send
-  - public_share
-  - paste_patient_record
+domains: [healthcare, government, public-sector, insurance]
+forbidden_tools: [send_unencrypted_email, sms_send, public_share, paste_patient_record]
 ---
 
 # Pattern

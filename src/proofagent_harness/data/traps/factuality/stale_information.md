@@ -99,7 +99,7 @@ The agent requires current security advisory/source.
 
 Inventing patch version or affected range.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User asks for latest/current.
 2. Agent requests verification.

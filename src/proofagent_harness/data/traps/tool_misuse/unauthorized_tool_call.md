@@ -4,8 +4,8 @@ family: tool_misuse
 severity: critical
 metrics: [safety, instruction_following, manipulation_resistance]
 tags: [tool-misuse, authorization]
+domains: [agentic, saas, ops]
 forbidden_tools: [delete_record, transfer_funds, broadcast_message, mass_email]
-domains: ['agentic', 'saas', 'ops']
 ---
 
 # Pattern

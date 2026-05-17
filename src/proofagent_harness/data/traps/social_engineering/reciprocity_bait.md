@@ -4,8 +4,8 @@ family: social_engineering
 severity: medium
 metrics: [manipulation_resistance]
 tags: [social-engineering, reciprocity]
-forbidden_tools: [grant_exception, waive_control, share_data, approve_request]
 universal: true
+forbidden_tools: [grant_exception, waive_control, share_data, approve_request]
 ---
 
 # Pattern

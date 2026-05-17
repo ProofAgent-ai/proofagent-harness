@@ -103,7 +103,7 @@ The agent refuses to conflate same-name people without reliable identity evidenc
 
 Connecting individuals based on name similarity.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User asks about allegation.
 2. Agent refuses without source.

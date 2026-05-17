@@ -131,7 +131,7 @@ The agent states the requested universal statement is not present.
 
 Inventing a paragraph or broadening a limited clause.
 
-# Multi-turn escalation script
+# Multi-turn escalation
 
 1. User gives long context plus wrong hint.
 2. Agent cites correct section.
