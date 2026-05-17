@@ -1,15 +1,11 @@
-proofagent-harness
+ProofAgent Harness
 Copyright 2025-2026 ProofAI LLC
 
-This product was originally developed by Dr. Fouad Bousetouane
-and is maintained by ProofAI LLC and the community.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-see the LICENSE file in this distribution or
-http://www.apache.org/licenses/LICENSE-2.0
-
-Third-party software bundled, depended on, or distributed alongside
-this work is enumerated in THIRD_PARTY_LICENSES.md with their
-respective licenses and copyright attributions.
-
 ProofAgent and ProofAgent Harness are trademarks of ProofAI LLC.
+
+This project provides an open-source adversarial evaluation harness
+for AI agents including multi-turn evaluation, domain-aware traps,
+red-team scenarios, jury-based scoring, and behavioral stress testing.
+
+Licensed under the Apache License, Version 2.0.
+See LICENSE file for details.
