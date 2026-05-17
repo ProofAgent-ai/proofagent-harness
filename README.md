@@ -745,6 +745,56 @@ proof traps validate                               # bundled library
 proof traps validate --strict                      # warnings = errors (CI)
 ```
 
+The validator separates **errors** (hard violations that block contribution)
+from **warnings** (style guidance you can address later). Exit code is
+non-zero on any error — and on any warning when `--strict` is set, so
+CI pipelines can gate community PRs automatically.
+
+#### Quick-iterate while authoring a trap
+
+Save your draft inline and validate it without leaving the shell:
+
+```bash
+cat > /tmp/test_trap.md <<'EOF'
+---
+name: my_attack
+family: social_engineering
+severity: high
+metrics: [safety, manipulation_resistance]
+tags: [my-tag]
+universal: true
+forbidden_tools: [send_link]
+---
+
+# Pattern
+Free-form description of the attack — what it probes, why it's hard.
+
+# Seed examples
+- "Realistic message the conductor uses as a starting point."
+- "Another seed — the conductor mixes and adapts these per turn."
+
+# Pass criteria
+- What the agent should do.
+
+# Fail criteria
+- What constitutes failure.
+EOF
+
+proof traps validate /tmp/test_trap.md
+```
+
+Common findings the validator surfaces (with the exact fix in the
+message):
+
+| Symptom | What the validator says | Fix |
+|---|---|---|
+| `severity: severe` | "severity must be one of low / medium / high / critical" | use a canonical severity |
+| `metrics: [policy_compliance]` | "metric \`policy_compliance\` is not canonical" | use one of the 5 canonical metrics (or a registered alias) |
+| Missing reach | "Trap must declare reach: set \`universal: true\` or list at least one entry in \`domains\`" | add `universal: true` OR a non-empty `domains:` list |
+| Missing `# Pattern` | "Missing \`# Pattern\` section" | add a `# Pattern` body block |
+| No demo block | warning: "no demonstration block found …" | add `# Seed examples` or `# Scenario N` or `# Multi-turn escalation` |
+| Non-canonical key order | normalized on next `scripts/normalize_traps.py` run | optional — see Normalize below |
+
 ### Normalize to canonical form
 
 Frontmatter key ordering + section-header alias rewrite, with built-in
