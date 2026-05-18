@@ -16,7 +16,7 @@ _Open-source harness. Open evaluation ecosystem._
 [![CI](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen.svg)](tests/)
 
-[Quickstart](#quickstart) · [Why](#why) · [How it works](#how-it-works) · [Recipes](#recipes) · [Red teaming](#red-teaming--bring-your-own-traps) · [vs hosted](#open-source-vs-hosted) · [FAQ](#faq)
+[Quickstart](#quickstart) · [Why](#why) · [How it works](#how-it-works) · [Recipes](#recipes) · [Red teaming](#red-teaming--bring-your-own-traps) · [FAQ](#faq)
 
 </div>
 
@@ -217,21 +217,6 @@ Main `Harness(...)` knobs:
 - **`context_budget_tokens`** — override automatic context budget (rarely needed)
 
 Jurors and planner classification run at `temperature=0`. Conductor stays at moderate temp so adversarial creativity surfaces different failure modes. Expect ±0.5 score variance on Anthropic; for tightest determinism use OpenAI/Gemini + `seed=42`, or run N times and report median + IQR.
-
-## Open source vs hosted
-
-| | OSS harness *(this repo)* | Hosted Platform |
-|---|:---:|:---:|
-| Multi-turn adversarial evaluation + jury consensus | ✓ | ✓ |
-| Bring-your-own LLM + 64 bundled traps | ✓ | ✓ |
-| Domain-aware trap selection | ✓ | ✓ |
-| Hosted dashboards + run history | — | ✓ |
-| Production log replay · artifact grading · multi-agent risk | — | ✓ |
-| Expert human review workflows | — | ✓ |
-| Proprietary domain MCP + premium trap packs | — | ✓ |
-| Team RBAC + audit logs + readiness reports | — | ✓ |
-
-Use the harness in CI. Use the hosted product in the boardroom. Both speak the same vocabulary.
 
 ## Examples + notebooks
 
