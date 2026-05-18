@@ -10,6 +10,8 @@ Bring your own LLM. Bring your own traps. Run locally, in CI, or scale through [
 
 _Open-source harness. Open evaluation ecosystem._
 
+<img src="docs/architecture.png" alt="ProofAgent Harness — end-to-end flow: Setup → Planner → Conductor → 3-Juror panel → Consensus + Delphi re-vote → Scoring Aggregator → Reporter → Outputs" width="900" />
+
 [![PyPI](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
