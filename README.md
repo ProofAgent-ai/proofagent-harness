@@ -16,13 +16,64 @@ _Open-source harness. Open evaluation ecosystem._
 [![CI](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen.svg)](tests/)
 
-[Quickstart](#quickstart) · [Why](#why) · [How it works](#how-it-works) · [Recipes](#recipes) · [Red teaming](#red-teaming--bring-your-own-traps) · [FAQ](#faq)
+[Install](#install) · [Quickstart](#quickstart) · [Why](#why) · [How it works](#how-it-works) · [Recipes](#cli--recipes) · [Red teaming](#red-teaming--bring-your-own-traps) · [FAQ](#faq)
+
+**📖 Full documentation:** **[proofagent.ai/harness/docs](https://www.proofagent.ai/harness/docs)** — every section below has a deep-linked counterpart.
 
 </div>
 
 ---
 
 `proofagent-harness` is `pytest` for AI agents. You wrap your agent in a function, hand it to the harness, and get back a CI-grade evaluation report — domain-aware adversarial scenarios, multi-turn campaigns with callbacks, three independent Harness Jurors scoring across five production-critical metrics. Your code, prompts, and knowledge base never leave your machine.
+
+## Install
+
+Requires **Python 3.10+**. Two ways to install — pick whichever fits your workflow.
+
+**1. From PyPI (recommended)** — the published package, signed sdist + wheel:
+
+```bash
+pip install proofagent-harness                    # latest release
+pip install proofagent-harness==0.3.0             # pinned version
+pip install --upgrade proofagent-harness          # upgrade in place
+```
+
+**2. From GitHub (latest main, a tag, or a feature branch)** — install directly from source, useful for testing pre-release fixes or contributing:
+
+```bash
+# latest main
+pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git
+
+# a specific tag (e.g. v0.3.0)
+pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git@v0.3.0
+
+# a feature branch
+pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git@my-branch
+
+# OR clone + editable install (for active development)
+git clone https://github.com/ProofAgent-ai/proofagent-harness.git
+cd proofagent-harness
+pip install -e ".[dev]"                           # editable + dev deps (pytest, ruff, build, twine)
+pytest                                            # 154 tests should pass
+```
+
+**Verify:**
+
+```bash
+proof version                                     # → proofagent-harness 0.3.0
+proof traps stats                                 # → 64 traps across 11 families
+```
+
+**Configure your model** — the harness uses [LiteLLM](https://github.com/BerriAI/litellm), so any provider (Anthropic / OpenAI / Gemini / Bedrock / Ollama / vLLM / …) works the same way:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...               # or OPENAI_API_KEY, GEMINI_API_KEY, …
+export PROOFAGENT_LLM=claude-sonnet-4-6           # override default (any LiteLLM target)
+```
+
+Recommended defaults: Claude Sonnet 4.6 or GPT-4.1 for production-grade evals; GPT-4.1 / Gemini 1.5 Pro + `seed=42` for deterministic runs (Anthropic doesn't honor `seed` yet); Ollama or vLLM for air-gapped.
+
+_→ Read more: [Install on the docs site](https://www.proofagent.ai/harness/docs#install)_
 
 ## Quickstart
 
@@ -57,6 +108,8 @@ Final score: 8.80 / 10    Certification: SILVER    Tokens: 51,518
 
 Full transcripts, Harness Juror reasoning, and findings are on the returned `report` — call `report.to_json("path.json")` or `report.to_markdown("path.md")`.
 
+_→ Read more: [Quickstart on the docs site](https://www.proofagent.ai/harness/docs#quickstart)_
+
 ## Why
 
 Most AI eval libraries score the **last response** with **one judge** against a **fixed test set**. Production agents fail differently: in the **third turn** under pressure, via **domain-specific** failure modes (HIPAA leaks, PCI handling, SOX bypass), through **callbacks** that weaponize an earlier concession.
@@ -67,15 +120,7 @@ Most AI eval libraries score the **last response** with **one judge** against a 
 - **Bring-your-own LLM** (Anthropic / OpenAI / Gemini / Bedrock / Ollama / vLLM via [LiteLLM](https://github.com/BerriAI/litellm)). Local-first.
 - **pytest integration** with assertion-style thresholds.
 
-## Install
-
-```bash
-pip install proofagent-harness                    # Python 3.10+
-export ANTHROPIC_API_KEY=sk-ant-...               # or OPENAI_API_KEY, GEMINI_API_KEY, …
-export PROOFAGENT_LLM=claude-sonnet-4-6           # override default model (any LiteLLM target)
-```
-
-Recommended defaults: Claude Sonnet 4.6 or GPT-4.1 for production-grade evals; GPT-4.1 / Gemini 1.5 Pro + `seed=42` for deterministic runs (Anthropic doesn't honor `seed` yet); Ollama or vLLM for air-gapped.
+_→ Read more: [Why proofagent-harness on the docs site](https://www.proofagent.ai/harness/docs#why)_
 
 ## How it works
 
@@ -93,6 +138,8 @@ PLANNER  →  CONDUCTOR  →  JURY  →  CONSENSUS  →  REPORTER
 - **CONSENSUS** — median per metric. Delphi re-vote when Harness Jurors disagree by more than 2 points.
 - **REPORTER** — final score → certification (`GOLD` / `SILVER` / `NEEDS_ENHANCEMENT` / `NOT_READY`) + actionable findings.
 
+_→ Read more: [How it works on the docs site](https://www.proofagent.ai/harness/docs#how-it-works)_
+
 ## The 5 metrics
 
 | Metric | Question |
@@ -104,6 +151,8 @@ PLANNER  →  CONDUCTOR  →  JURY  →  CONSENSUS  →  REPORTER
 | **Manipulation Resistance** | Did the agent hold firm under social engineering? |
 
 All 0–10, higher is better. Aliases like `hallucination`, `factuality`, `groundedness` resolve to `hallucination_resistance`.
+
+_→ Read more: [The 5 metrics on the docs site](https://www.proofagent.ai/harness/docs#metrics) — includes certification tiers, critical floors, and structured finding types._
 
 ## Your agent + optional context
 
@@ -128,6 +177,8 @@ Harness().evaluate(
 
 `AgentContext.from_dir("./my_agent/")` auto-discovers `system_prompt.md` / `knowledge/` / `tools.json` / `memory.jsonl`. Without context, generic-scoring caps fire (instruction-following capped at 5/10, hallucination at 8/10) — the harness warns you in the scorecard.
 
+_→ Read more: [Your agent + Context on the docs site](https://www.proofagent.ai/harness/docs#your-agent)_
+
 ## CI integration
 
 ```python
@@ -140,6 +191,8 @@ def test_agent_meets_threshold():
     assert report.final_score >= 8.5
     assert report.per_metric["safety"] >= 9.0
 ```
+
+_→ Read more: [CI integration on the docs site](https://www.proofagent.ai/harness/docs#ci-integration)_
 
 ## CLI + Recipes
 
@@ -161,6 +214,8 @@ proof traps validate            # lint trap manifests
 
 See [`examples/`](examples/) for stability checks, cross-family judging, proxy juror for local LLMs, etc.
 
+_→ Read more: [CLI + Recipes on the docs site](https://www.proofagent.ai/harness/docs#cli)_
+
 ## Traps & skills
 
 **Traps** are the adversarial test patterns thrown at your agent. **Skills** are how the harness's own agents behave (planning / conducting / scoring / reporting / consensus). Both ship as markdown inside the package and can be extended:
@@ -170,6 +225,8 @@ Harness(extra_traps=["./my_traps/"], extra_skills=["./my_skills/"])
 ```
 
 64 bundled traps across 11 families: `bias` · `business_logic` · `code_safety` · `compliance` · `data_exfiltration` · `factuality` · `policy_drift` · `prompt_injection` · `social_engineering` · `tool_misuse` · `verbal_abuse`.
+
+_→ Read more: [Traps & skills on the docs site](https://www.proofagent.ai/harness/docs#traps)_
 
 ## Red Teaming — Bring Your Own Traps
 
@@ -204,6 +261,8 @@ python examples/08_custom_trap.py --trap ./my_traps/ --turns 8
 
 [`examples/08_custom_trap.py`](examples/08_custom_trap.py) ships with a worked example at [`examples/custom_traps/refund_chargeback_threat.md`](examples/custom_traps/refund_chargeback_threat.md) and supports `--list-only` for zero-cost wiring checks. Frontmatter normalization: `python scripts/normalize_traps.py`.
 
+_→ Read more: [Bring your own traps](https://www.proofagent.ai/harness/docs#red-teaming) and the [Trap manifest v1.0 spec](https://www.proofagent.ai/harness/docs#trap-manifest) on the docs site._
+
 ## Configuration
 
 Main `Harness(...)` knobs:
@@ -217,6 +276,8 @@ Main `Harness(...)` knobs:
 - **`context_budget_tokens`** — override automatic context budget (rarely needed)
 
 Jurors and planner classification run at `temperature=0`. Conductor stays at moderate temp so adversarial creativity surfaces different failure modes. Expect ±0.5 score variance on Anthropic; for tightest determinism use OpenAI/Gemini + `seed=42`, or run N times and report median + IQR.
+
+_→ Read more: [Configuration](https://www.proofagent.ai/harness/docs#configuration) and [Reproducibility tips](https://www.proofagent.ai/harness/docs#reproducibility) on the docs site._
 
 ## Examples + notebooks
 
@@ -267,6 +328,8 @@ A typical 8-turn Delphi run makes ~38 LLM calls in ~30s: 2-3 planner, 16 conduct
 
 Yes — tests use a `FakeLLM` fixture (see `tests/conftest.py`). Adopt the same pattern in CI for hermetic dry-runs that exercise the pipeline without spending tokens.
 </details>
+
+_→ Read more: [FAQ on the docs site](https://www.proofagent.ai/harness/docs#faq)_
 
 ## Contributing · License · Trademark
 
