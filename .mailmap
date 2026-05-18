@@ -1,0 +1,8 @@
+# Map all commit/co-author attribution to the canonical proofagent identity.
+# Format: <Display Name> <canonical-email> <commit-email>
+# (See `git check-mailmap` and https://git-scm.com/docs/gitmailmap)
+#
+# Any commit or Co-Authored-By trailer with the noreply@anthropic.com email
+# is coalesced to the proofagent account so GitHub's contributors list and
+# `git shortlog` show a single contributor.
+proofagent <proofagent.ai@gmail.com> <noreply@anthropic.com>
