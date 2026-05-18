@@ -11,10 +11,12 @@ license = { text = "Apache-2.0" }
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.10"
 authors = [
-    { name = "Dr. Fouad Bousetouane", email = "fouad@proofagent.ai" },
+    { name = "Dr. Fouad Bousetouane" },
+    { email = "proofagent.ai@gmail.com" },
 ]
 maintainers = [
-    { name = "ProofAI LLC", email = "hello@proofagent.ai" },
+    { name = "ProofAI LLC" },
+    { email = "proofagent.ai@gmail.com" },
 ]
 keywords = [
     "ai-agents",
