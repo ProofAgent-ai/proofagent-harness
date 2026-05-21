@@ -291,8 +291,156 @@ _→ Read more: [Configuration](https://www.proofagent.ai/harness/docs#configura
 | [`06_weak_agent_baseline.py`](examples/06_weak_agent_baseline.py) | Calibration check — verify the harness discriminates by agent quality |
 | [`07_proxy_llm_agent.py`](examples/07_proxy_llm_agent.py) | Route the Harness Juror to a local mlx / vllm / lm-studio proxy |
 | [`08_custom_trap.py`](examples/08_custom_trap.py) | **Bring-your-own-trap** with full LLM choice + `--trap PATH` |
+| [`09_asymmetric_single_cell.py`](examples/09_asymmetric_single_cell.py) | **Asymmetric evaluation** — small local Harness LLM (Gemma 4B via LM Studio) evaluating a frontier-LLM agent across four bundled production-style domains (customer support, medical triage, code generation, privacy/security). Reproduces the headline cohort cells from the paper. |
 
 End-to-end walkthroughs in [`notebooks/`](notebooks/).
+
+## Multi-domain asymmetric evaluation (Example 09)
+
+[`examples/09_asymmetric_single_cell.py`](examples/09_asymmetric_single_cell.py) runs one full evaluation cell against any of four bundled production-style agents (customer support, medical triage, code generation, privacy/security) under any Harness LLM tier — cheap cloud, frontier cloud, or a local 4B model on LM Studio. The four bundled agent specs live in [`examples/agents/`](examples/agents/) and document the spec schema for authoring your own.
+
+### Step 1 · Install
+
+```bash
+pip install proofagent-harness
+git clone https://github.com/ProofAgent-ai/proofagent-harness
+cd proofagent-harness
+```
+
+### Step 2 · Export the API keys you'll use
+
+You only need the keys for the providers you actually call. Mix and match — the agent under test and the Harness LLM can come from different providers.
+
+```bash
+export OPENAI_API_KEY=sk-...           # gpt-5.5 / gpt-4.1 / gpt-4.1-mini agent or harness
+export ANTHROPIC_API_KEY=sk-ant-...    # claude-opus-4-7 / claude-haiku-4-5 agent or harness
+export GEMINI_API_KEY=...              # gemini/* agent or harness
+```
+
+A local Harness LLM (Step 3 Scenario C below) needs no API key — LM Studio runs token-free on your machine.
+
+### Step 3 · Pick a scenario
+
+#### Scenario A — cheap cloud smoke test (~$0.30, ~3 min)
+
+5-turn sanity check that the pipeline runs end to end. Use this before any longer run.
+
+```bash
+python examples/09_asymmetric_single_cell.py \
+  --agent       medical_triage_assistant \
+  --agent-llm   gpt-4.1-mini \
+  --harness-llm anthropic/claude-haiku-4-5 \
+  --turns       5 \
+  --seed        42 \
+  --consensus   debate
+```
+
+#### Scenario B — frontier reference (large Harness LLM, ~$3-5, ~10 min)
+
+Reproduces a Large Harness cell from the paper: Opus 4.7 evaluating a GPT-5.5 agent.
+
+```bash
+python examples/09_asymmetric_single_cell.py \
+  --agent       customer_support_agent \
+  --agent-llm   gpt-5.5 \
+  --harness-llm anthropic/claude-opus-4-7 \
+  --turns       25 \
+  --seed        42 \
+  --consensus   debate
+```
+
+#### Scenario C — asymmetric local (small local Harness LLM, $0, ~30 min)
+
+The paper's headline asymmetric cell: a 4B local Gemma model (running via LM Studio) evaluating a frontier-class agent.
+
+**3.C.1 — start LM Studio with Gemma loaded.** GUI: load `mlx-community/gemma-4-E4B-it-MLX-8bit`, set Context Length to `8192`, toggle the Developer-tab Server ON (port `1234`). Or CLI:
+
+```bash
+lms get  mlx-community/gemma-4-E4B-it-MLX-8bit
+lms load mlx-community/gemma-4-E4B-it-MLX-8bit --context-length 8192
+```
+
+**3.C.2 — verify the proxy and note the model id.**
+
+```bash
+curl http://localhost:1234/v1/models | python3 -m json.tool
+```
+
+The `id` field is the literal string to pass to `--harness-llm`.
+
+**3.C.3 — run.**
+
+```bash
+python examples/09_asymmetric_single_cell.py \
+  --agent          medical_triage_assistant \
+  --agent-llm      gpt-5.5 \
+  --harness-llm    gemma-4-E4B-it-MLX-8bit \
+  --proxy-url      http://localhost:1234/v1 \
+  --turns          25 \
+  --seed           42 \
+  --consensus      debate \
+  --context-budget 6000 \
+  --sequential
+```
+
+Two flags are mandatory for the local path:
+- `--context-budget 6000` — Gemma's working context is ~8K; the pre-flight check rejects the run without this.
+- `--sequential` — LM Studio serves one request at a time; without this, parallel juror calls queue and time out.
+
+#### Scenario D — sweep all four agents
+
+Same Harness LLM, four agents, four reports. Drop into a shell loop:
+
+```bash
+for AGENT in medical_triage_assistant customer_support_agent \
+             code_generation_agent privacy_security_agent; do
+  python examples/09_asymmetric_single_cell.py \
+    --agent       "$AGENT" \
+    --agent-llm   gpt-5.5 \
+    --harness-llm anthropic/claude-haiku-4-5 \
+    --turns       25 --seed 42 --consensus debate \
+    --output-dir  ./results/sweep_${AGENT}
+done
+```
+
+#### Scenario E — wiring check (no API calls, free)
+
+Verify your config resolves correctly before spending tokens. Drop the `--list-only` flag to actually evaluate.
+
+```bash
+python examples/09_asymmetric_single_cell.py \
+  --agent       customer_support_agent \
+  --agent-llm   gpt-5.5 \
+  --harness-llm anthropic/claude-haiku-4-5 \
+  --turns       25 --seed 42 --consensus debate \
+  --list-only
+```
+
+### Step 4 · Read the report
+
+Every run writes two files under `./results/asymmetric_<timestamp>/`:
+
+- `<agent>_harness-<harness>_agent-<agent>_<turns>turn_seed<N>.json` — full evidence-linked transcript, per-juror scores, consensus log, findings, metadata.
+- `<agent>_harness-<harness>_agent-<agent>_<turns>turn_seed<N>.md` — human-readable scorecard, per-metric breakdown, raised findings with rationale and recommendation.
+
+The terminal also prints the final score, certification band, and per-metric table.
+
+### CLI reference
+
+| Flag | Meaning |
+|---|---|
+| `--agent` | Bundled agent name (`customer_support_agent`, `medical_triage_assistant`, `code_generation_agent`, `privacy_security_agent`) OR a filename / absolute path to your own JSON spec. |
+| `--agent-llm` | Model powering the agent under test. Auto-detects provider: `gpt-*` → OpenAI, `anthropic/claude-*` → Anthropic, `gemini/*` → LiteLLM. |
+| `--harness-llm` | Model powering the Harness pipeline (planner / conductor / juror / reporter). Use a cloud id (`anthropic/claude-opus-4-7`, `anthropic/claude-haiku-4-5`, `gpt-5.5`) or a local proxy model name with `--proxy-url`. |
+| `--proxy-url` | OpenAI-compatible URL for a local Harness proxy (LM Studio, Ollama, vLLM, mlx-lm). Omit for cloud Harness LLMs. |
+| `--turns` | Number of adversarial conductor turns. Default `25` (paper cohort). |
+| `--seed` | Random seed. Default `42`. |
+| `--consensus` | `independent` (cheapest, 1×) · `delphi` (balanced) · `debate` (strictest, paper default). |
+| `--context-budget` | Juror prompt token budget. Required for small-context proxy models (`6000` for 8K-context Gemma 4B). |
+| `--sequential` | Serialize juror LLM calls through a single semaphore. Required for single-threaded local proxies (LM Studio default). No effect on cloud Harness LLMs. |
+| `--output-dir` | Where to write reports. Defaults to `./results/asymmetric_<timestamp>/`. |
+| `--list-only` | Print the resolved config and exit without spending tokens. |
+| `--quiet` | Suppress per-turn progress output. |
 
 ## FAQ
 
