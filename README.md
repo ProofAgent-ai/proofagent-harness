@@ -255,13 +255,33 @@ What the trap probes and why it's hard.
 - …
 ```
 
+**Load custom traps in Python.** Drop your `.md` files in a directory, then pass it as `extra_traps` — the conductor will draw from your traps alongside the 64 bundled ones:
+
+```python
+from proofagent_harness import Harness, load_traps
+
+# (optional) preflight — inspect what loaded before paying for an eval
+traps = load_traps(extra_dirs=["./my_traps/"])
+print(f"{len(traps)} traps in conductor library (bundled + custom)")
+
+# Wire into the eval. Custom traps merge with bundled by name (last wins).
+report = Harness(
+    llm="claude-sonnet-4-6",
+    extra_traps=["./my_traps/"],            # one or more directories
+    # trap_packs=["finance"],               # OR pip-installed packs: proofagent_traps_finance
+).evaluate(my_agent)
+```
+
+**Validate + run from the CLI.**
+
 ```bash
 proof traps validate path/to/your_trap.md           # one file
 proof traps validate --strict                       # warnings = errors (CI)
-python examples/08_custom_trap.py --trap ./my_traps/ --turns 8
+python examples/10_load_custom_traps.py --traps-dir ./my_traps/  # inspect only, no API
+python examples/08_custom_trap.py --trap ./my_traps/ --turns 8   # full eval
 ```
 
-[`examples/08_custom_trap.py`](examples/08_custom_trap.py) ships with a worked example at [`examples/custom_traps/refund_chargeback_threat.md`](examples/custom_traps/refund_chargeback_threat.md) and supports `--list-only` for zero-cost wiring checks. Frontmatter normalization: `python scripts/normalize_traps.py`.
+[`examples/10_load_custom_traps.py`](examples/10_load_custom_traps.py) is the minimal loading-only demo (no LLM calls). [`examples/08_custom_trap.py`](examples/08_custom_trap.py) ships with a worked end-to-end example at [`examples/custom_traps/refund_chargeback_threat.md`](examples/custom_traps/refund_chargeback_threat.md) and supports `--list-only` for zero-cost wiring checks. Frontmatter normalization: `python scripts/normalize_traps.py`.
 
 _→ Read more: [Bring your own traps](https://www.proofagent.ai/harness/docs#red-teaming) and the [Trap manifest v1.0 spec](https://www.proofagent.ai/harness/docs#trap-manifest) on the docs site._
 

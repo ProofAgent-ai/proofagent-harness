@@ -19,6 +19,13 @@ __license__   = "Apache-2.0"
 
 from proofagent_harness.harness import Harness
 from proofagent_harness.llm import LLM
+from proofagent_harness.loaders import (
+    TrapIndex,
+    load_personas,
+    load_skills,
+    load_trap_index,
+    load_traps,
+)
 from proofagent_harness.schemas import (
     CANONICAL_METRICS,
     METRIC_DESCRIPTIONS,
@@ -68,6 +75,7 @@ __all__ = [
     "Severity",
     "Skill",
     "Trap",
+    "TrapIndex",
     "Turn",
     "TurnSpec",
     "__author__",
@@ -75,4 +83,8 @@ __all__ = [
     "__email__",
     "__license__",
     "__version__",
+    "load_personas",
+    "load_skills",
+    "load_trap_index",
+    "load_traps",
 ]
