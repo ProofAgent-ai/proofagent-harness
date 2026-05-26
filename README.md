@@ -84,7 +84,7 @@ pytest                                            # 154 tests should pass
 
 ```bash
 proof version                                     # → proofagent-harness 0.3.0
-proof traps stats                                 # → 64 traps across 11 families
+proof traps stats                                 # → 183 traps across 11 families
 ```
 
 **Configure your model** — the harness uses [LiteLLM](https://github.com/BerriAI/litellm), so any provider (Anthropic / OpenAI / Gemini / Bedrock / Ollama / vLLM / …) works the same way:
@@ -139,7 +139,7 @@ Most AI eval libraries score the **last response** with **one judge** against a 
 
 - **Domain-aware planning + scoring** — HIPAA traps for healthcare, PCI for retail, malware-gen for code agents. Harness Jurors are calibrated against your real system prompt, knowledge corpus, and tool schemas.
 - **3-Harness-Juror Delphi consensus** — independent re-vote on disagreement. No single LLM call decides the verdict.
-- **64 bundled traps across 11 families** (GDPR / CCPA / HIPAA / PCI / SOX / prompt injection / social engineering / tool misuse / …). Add your own as `.md` files.
+- **183 bundled traps across 11 families** (GDPR / CCPA / HIPAA / PCI / SOX / prompt injection / social engineering / tool misuse / …). Every trap ships with a per-family **composite attack chain** in its Pattern — multi-vector exploits the conductor surfaces in adversarial questions. Add your own as `.md` files.
 - **Bring-your-own LLM** (Anthropic / OpenAI / Gemini / Bedrock / Ollama / vLLM via [LiteLLM](https://github.com/BerriAI/litellm)). Local-first.
 - **pytest integration** with assertion-style thresholds.
 
@@ -231,7 +231,7 @@ proof run my_agent.py --turns 4 --consensus independent --llm claude-haiku-4-5
 proof run my_agent.py --turns 15 --consensus debate --seed 42
 
 # Inspect the bundled trap library
-proof traps list                # 64 traps across 11 families
+proof traps list                # 183 traps across 11 families
 proof traps validate            # lint trap manifests
 ```
 
@@ -247,7 +247,7 @@ _→ Read more: [CLI + Recipes on the docs site](https://www.proofagent.ai/harne
 Harness(extra_traps=["./my_traps/"], extra_skills=["./my_skills/"])
 ```
 
-64 bundled traps across 11 families: `bias` · `business_logic` · `code_safety` · `compliance` · `data_exfiltration` · `factuality` · `policy_drift` · `prompt_injection` · `social_engineering` · `tool_misuse` · `verbal_abuse`.
+183 bundled traps across 11 families: `social_engineering` (24) · `factuality` (22) · `prompt_injection` (21) · `compliance` (20) · `data_exfiltration` (16) · `verbal_abuse` (16) · `business_logic` (14) · `tool_misuse` (14) · `policy_drift` (13) · `code_safety` (12) · `bias` (11). Every trap's `# Pattern` section includes a **composite attack chain** — a multi-vector exploit the conductor leverages when crafting adversarial turns.
 
 _→ Read more: [Traps & skills on the docs site](https://www.proofagent.ai/harness/docs#traps)_
 
@@ -276,7 +276,7 @@ What the trap probes and why it's hard.
 - …
 ```
 
-**Load custom traps in Python.** Drop your `.md` files in a directory, then pass it as `extra_traps` — the conductor will draw from your traps alongside the 64 bundled ones:
+**Load custom traps in Python.** Drop your `.md` files in a directory, then pass it as `extra_traps` — the conductor will draw from your traps alongside the 183 bundled ones:
 
 ```python
 from proofagent_harness import Harness, load_traps

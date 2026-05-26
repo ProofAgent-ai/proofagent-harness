@@ -18,6 +18,8 @@ flags that matter.
 | [`07_proxy_llm_agent.py`](07_proxy_llm_agent.py) | Self-hosted agent on a local OpenAI-compatible proxy |
 | [`08_custom_trap.py`](08_custom_trap.py) | Bring-your-own-trap with `--trap PATH` |
 | [`09_asymmetric_single_cell.py`](09_asymmetric_single_cell.py) | Small local Harness LLM vs frontier agent across four bundled domains |
+| [`10_load_custom_traps.py`](10_load_custom_traps.py) | **Trap loader inspection** — minimal demo of `load_traps()` + `TrapIndex` (no LLM calls) |
+| [`11_live_trace_evaluation.py`](11_live_trace_evaluation.py) | **Advanced / observability** — live per-turn trace (trap card + Q + A + cumulative coverage) for debugging *why* an agent failed. Shares `examples/agents/*.json` with `09_*`. |
 | [`agents/`](agents/) | Four production-style domain agent specs + multi-provider factory |
 | [`custom_traps/`](custom_traps/) | Sample trap used by `08_custom_trap.py` |
 
@@ -389,6 +391,118 @@ python examples/09_asymmetric_single_cell.py \
 Drop a `.json` file into [`agents/`](agents/) (or anywhere; the runner
 accepts absolute paths) following the schema documented in
 [`agents/README.md`](agents/README.md). Then pass its name to `--agent`.
+
+---
+
+## `10_load_custom_traps.py` — trap loader inspection (no LLM calls)
+
+**What it shows.** The minimal API for inspecting the trap library: load
+the bundled 183 + your custom directory, build a `TrapIndex`, filter by
+family / metric / domain. Zero LLM calls — useful for CI preflight or
+just confirming a `.md` file parses.
+
+```bash
+# Default — inspect the bundled custom_traps/ demo
+python examples/10_load_custom_traps.py
+
+# Point at your own trap directory or single file
+python examples/10_load_custom_traps.py --traps-dir ./my_traps/
+
+# Filtered inventory
+python examples/10_load_custom_traps.py \
+  --traps-dir ./my_traps/ \
+  --family social_engineering --metric safety
+```
+
+**Key flags.** `--traps-dir / -t` · `--family / -f` · `--metric / -m`.
+
+Imports the new public surface: `from proofagent_harness import Harness,
+TrapIndex, load_traps`. No need to reach into the loaders submodule.
+
+---
+
+## `11_live_trace_evaluation.py` — advanced / observability example
+
+**Position.** This is an **observability / debugging** example. Use it
+when you want to *see* what the conductor is picking and how the agent
+is answering, turn by turn — not when you want a batch eval score. For
+batch eval, use `09_asymmetric_single_cell.py` instead.
+
+**What it shows.** Watch the harness pick traps and probe the agent in
+real time. For each turn prints a rich panel with the selected trap ID,
+parsed fields (family, severity, metrics, forbidden/expected tools, tags,
+pattern excerpt incl. composite attack chain), the conductor's
+adversarial question, the agent's answer, any tool calls, and a
+cumulative coverage line (unique traps used, families covered, severity
+mix, composite chains seen, crashes).
+
+Subscribes to `Harness.evaluate(on_event=...)` — the official streaming
+hook — for trap-selection events, and wraps the agent callable to capture
+each turn's question and answer. The same observability pattern works in
+production for telemetry, SIEM forwarding, dataset collection, or live
+guardrails enforcement.
+
+**Agent specs.** Loaded from `examples/agents/*.json` — the same source
+of truth as `09_asymmetric_single_cell.py`, no duplication. Five
+bundled profiles ship out of the box:
+
+| `--agent` | Role | Tools | Knowledge |
+|---|---|---:|---:|
+| `customer_support_agent` (default) | AcmeAir refund / itinerary agent | 12 | 4.5K chars |
+| `medical_triage_assistant` | MercyHealth telehealth triage assistant | 11 | 5.2K chars |
+| `privacy_security_agent` | GDPR / CCPA privacy operations agent | 12 | 5.7K chars |
+| `code_generation_agent` | Internal engineering code assistant | 12 | 5.6K chars |
+| `financial_advisor_agent` | FINRA-registered investment advisor chat | 10 | 4.7K chars |
+
+Pass `--agent /path/to/your.json` to evaluate a custom spec following
+the schema in [`agents/README.md`](agents/README.md).
+
+```bash
+# List the registry
+python examples/11_live_trace_evaluation.py --list-agents
+
+# Wire check (no API calls) — verify config + loaded agent + trap library
+python examples/11_live_trace_evaluation.py \
+  --agent privacy_security_agent --list-only
+
+# Real run — local Gemma harness LLM + gpt-4.1-mini agent
+python examples/11_live_trace_evaluation.py \
+  --agent          medical_triage_assistant \
+  --agent-model    gpt-4.1-mini \
+  --harness-llm    gemma-4-E4B-it-MLX-8bit \
+  --proxy-url      http://localhost:1234/v1 \
+  --turns          8 \
+  --consensus      delphi \
+  --seed           42 \
+  --context-budget 6000 \
+  --sequential
+
+# Cross-family — Claude Opus agent + cloud Sonnet harness LLM
+python examples/11_live_trace_evaluation.py \
+  --agent privacy_security_agent \
+  --agent-model claude-opus-4-7 \
+  --harness-llm anthropic/claude-sonnet-4-6 \
+  --no-proxy --turns 10 --consensus debate
+
+# Your own agent spec (custom JSON)
+python examples/11_live_trace_evaluation.py \
+  --agent /path/to/your_agent.json --turns 12 --sequential
+
+# Verbose — no truncation of pattern / Q / A in the trace
+python examples/11_live_trace_evaluation.py \
+  --agent privacy_security_agent --verbose --turns 5 --sequential
+```
+
+**Key flags.** `--agent / -a` (bundled name or path to JSON spec) ·
+`--agent-model` · `--harness-llm` · `--proxy-url` · `--no-proxy` ·
+`--turns / -t` · `--consensus / -c` · `--seed / -s` ·
+`--context-budget` · `--sequential` · `--verbose / -v` · `--list-only` ·
+`--list-agents` · `--output-dir`.
+
+**What to look for.** The trace makes it visible per-turn whether the
+composite attack chain is actually surfacing in the conductor's
+questions. Look for the `[composite chain present]` badge on each trap
+card and watch the cumulative line evolve across turns.
 
 ---
 
