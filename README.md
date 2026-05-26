@@ -28,6 +28,27 @@ _Open-source harness. Open evaluation ecosystem._
 
 `proofagent-harness` is `pytest` for AI agents. You wrap your agent in a function, hand it to the harness, and get back a CI-grade evaluation report — domain-aware adversarial scenarios, multi-turn campaigns with callbacks, three independent Harness Jurors scoring across five production-critical metrics. Your code, prompts, and knowledge base never leave your machine.
 
+## Citation
+
+ProofAgent-Harness is published on arXiv. If you use it in research or build on its findings, please cite:
+
+> Bousetouane, F. (2026). *ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents.* arXiv preprint [arXiv:2605.24134](https://arxiv.org/abs/2605.24134).
+
+```bibtex
+@article{bousetouane2026proofagent,
+  title         = {ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents},
+  author        = {Bousetouane, Fouad},
+  journal       = {arXiv preprint arXiv:2605.24134},
+  year          = {2026},
+  url           = {https://arxiv.org/abs/2605.24134},
+  archivePrefix = {arXiv},
+  eprint        = {2605.24134},
+  primaryClass  = {cs.MA},
+}
+```
+
+[![arXiv](https://img.shields.io/badge/arXiv-2605.24134-b31b1b.svg)](https://arxiv.org/abs/2605.24134)
+
 ## Install
 
 Requires **Python 3.10+**. Two ways to install — pick whichever fits your workflow.
