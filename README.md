@@ -111,7 +111,11 @@ from proofagent_harness import Harness
 def my_agent(message: str) -> str:
     return your_llm_call(message)
 
-report = Harness().evaluate(my_agent, role="customer support", goal="handle refunds safely")
+report = Harness(llm="claude-sonnet-4-6").evaluate(
+    my_agent,
+    role="customer support",
+    goal="handle refunds safely",
+)
 print(report)
 ```
 
@@ -130,6 +134,8 @@ Final score: 8.80 / 10    Certification: SILVER    Tokens: 51,518
 ```
 
 Full transcripts, Harness Juror reasoning, and findings are on the returned `report` — call `report.to_json("path.json")` or `report.to_markdown("path.md")`.
+
+> **About `llm=`** — this is the **harness's LLM**, used for the entire end-to-end evaluation pipeline (planner → conductor → 3 jurors → reporter). It is **separate from your agent's LLM**, which lives inside `my_agent` and is whatever model your agent calls internally. **Bring your own** — any [LiteLLM-supported](https://github.com/BerriAI/litellm) model works: Anthropic, OpenAI, Gemini, Bedrock, Ollama, vLLM, lm-studio, …
 
 _→ Read more: [Quickstart on the docs site](https://www.proofagent.ai/harness/docs#quickstart)_
 
@@ -188,7 +194,7 @@ def agent(message: str) -> AgentResponse:
     text, tools, retrievals = run_my_agent(message)
     return AgentResponse(text=text, tools_called=tools, retrievals=retrievals)
 
-Harness().evaluate(
+Harness(llm="claude-sonnet-4-6").evaluate(
     agent, role="customer support", goal="handle refunds safely",
     context=AgentContext(
         system_prompt=open("system.md").read(),
@@ -208,7 +214,7 @@ _→ Read more: [Your agent + Context on the docs site](https://www.proofagent.a
 from proofagent_harness import Harness
 
 def test_agent_meets_threshold():
-    report = Harness(turns=8, consensus="delphi", seed=42).evaluate(
+    report = Harness(llm="claude-sonnet-4-6", turns=8, consensus="delphi", seed=42).evaluate(
         my_agent, role="...", goal="...",
     )
     assert report.final_score >= 8.5
@@ -244,7 +250,7 @@ _→ Read more: [CLI + Recipes on the docs site](https://www.proofagent.ai/harne
 **Traps** are the adversarial test patterns thrown at your agent. **Skills** are how the harness's own agents behave (planning / conducting / scoring / reporting / consensus). Both ship as markdown inside the package and can be extended:
 
 ```python
-Harness(extra_traps=["./my_traps/"], extra_skills=["./my_skills/"])
+Harness(llm="claude-sonnet-4-6", extra_traps=["./my_traps/"], extra_skills=["./my_skills/"])
 ```
 
 183 bundled traps across 11 families: `social_engineering` (24) · `factuality` (22) · `prompt_injection` (21) · `compliance` (20) · `data_exfiltration` (16) · `verbal_abuse` (16) · `business_logic` (14) · `tool_misuse` (14) · `policy_drift` (13) · `code_safety` (12) · `bias` (11). Every trap's `# Pattern` section includes a **composite attack chain** — a multi-vector exploit the conductor leverages when crafting adversarial turns.
@@ -504,7 +510,7 @@ def agent(message: str) -> AgentResponse:
     result = my_existing_agent.invoke({"input": message})
     return AgentResponse(text=result["output"], tools_called=result.get("intermediate_steps", []))
 
-Harness().evaluate(agent, role="...", goal="...")
+Harness(llm="claude-sonnet-4-6").evaluate(agent, role="...", goal="...")
 ```
 </details>
 
