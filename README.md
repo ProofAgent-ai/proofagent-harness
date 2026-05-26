@@ -57,7 +57,7 @@ Requires **Python 3.10+**. Two ways to install — pick whichever fits your work
 
 ```bash
 pip install proofagent-harness                    # latest release
-pip install proofagent-harness==0.3.0             # pinned version
+pip install proofagent-harness==0.4.1             # pinned version
 pip install --upgrade proofagent-harness          # upgrade in place
 ```
 
@@ -67,8 +67,8 @@ pip install --upgrade proofagent-harness          # upgrade in place
 # latest main
 pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git
 
-# a specific tag (e.g. v0.3.0)
-pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git@v0.3.0
+# a specific tag (e.g. v0.4.1)
+pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git@v0.4.1
 
 # a feature branch
 pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git@my-branch
@@ -83,7 +83,7 @@ pytest                                            # 154 tests should pass
 **Verify:**
 
 ```bash
-proof version                                     # → proofagent-harness 0.3.0
+proof version                                     # → proofagent-harness 0.4.1
 proof traps stats                                 # → 183 traps across 11 families
 ```
 
