@@ -368,7 +368,7 @@ A local Harness LLM (Step 3 Scenario C below) needs no API key — LM Studio run
 
 ### Step 3 · Pick a scenario
 
-#### Scenario A — cheap cloud smoke test (~$0.30, ~3 min)
+#### Scenario A — cheap cloud smoke test
 
 5-turn sanity check that the pipeline runs end to end. Use this before any longer run.
 
@@ -382,7 +382,7 @@ python examples/09_asymmetric_single_cell.py \
   --consensus   debate
 ```
 
-#### Scenario B — frontier reference (large Harness LLM, ~$3-5, ~10 min)
+#### Scenario B — frontier reference (large Harness LLM, ~10 min)
 
 Reproduces a Large Harness cell from the paper: Opus 4.7 evaluating a GPT-5.5 agent.
 
@@ -396,7 +396,7 @@ python examples/09_asymmetric_single_cell.py \
   --consensus   debate
 ```
 
-#### Scenario C — asymmetric local (small local Harness LLM, $0, ~30 min)
+#### Scenario C — asymmetric local (small local Harness LLM, ~30 min)
 
 The paper's headline asymmetric cell: a 4B local Gemma model (running via LM Studio) evaluating a frontier-class agent.
 
