@@ -47,6 +47,7 @@ class Harness:
         *,
         llm: str | LLM | None = None,
         fallback_llm: str | LLM | None = None,
+        max_tokens: int | None = None,
         metrics: list[str] | None = None,
         turns: int = 8,
         extra_traps: list[str] | None = None,
@@ -92,17 +93,53 @@ class Harness:
 
                 # Inspect the asymmetric cost split:
                 print(report.token_split)  # {'primary': 0.91, 'fallback': 0.09}
+        max_tokens:
+            **(Optional, v0.4.3)** Max OUTPUT (generation) tokens the
+            Harness LLM is allowed to write per call. This is NOT the
+            context window (input+output budget, much larger — 200K-1M
+            for frontier models). It is purely the cap on the model's
+            REPLY length.
+
+            Default ``None`` = use ``LLM.max_tokens`` default (``8192``).
+            Bump higher (``16384``, ``32768``) for very long evals
+            (turns≥100). Lower for cost-bound smoke tests on cheap models.
+
+            When ``llm=`` is a STRING, this is passed to the LLM Harness
+            constructs. When ``llm=`` is a pre-built ``LLM`` instance, this
+            kwarg is IGNORED — your instance configuration wins.
+
+            Same value also applied to the constructed ``fallback_llm``.
+
+            Why this matters: at ``turns=50`` with debate consensus, each
+            juror call needs to write ~4000 output tokens of audit JSON
+            (50 per-turn entries + reasoning). The pre-v0.4.3 default of
+            ``2048`` truncated these responses mid-string, producing
+            unparseable JSON and (correctly) triggering the fallback —
+            but the fallback also hit the same 2048 cap, so both failed.
+            ``8192`` fits 50-turn audits comfortably.
         """
+        # ── max_tokens (v0.4.3): the max OUTPUT (generation) cap propagated
+        # to any LLM the Harness constructs from a string. Defaults to
+        # LLM's class default (8192). If the user passes a pre-built LLM
+        # instance, we respect their configuration — we never silently
+        # override their max_tokens. The instance form is the escape hatch
+        # for fine-grained per-LLM control.
+        _llm_kwargs: dict[str, Any] = {"seed": seed}
+        if max_tokens is not None:
+            _llm_kwargs["max_tokens"] = max_tokens
+
         if isinstance(llm, LLM):
             self.llm: LLM = llm
             if seed is not None and self.llm.seed is None:
                 self.llm.seed = seed
         elif isinstance(llm, str):
-            self.llm = LLM(model=llm, seed=seed)
+            self.llm = LLM(model=llm, **_llm_kwargs)
         else:
             self.llm = default_llm()
             if seed is not None:
                 self.llm.seed = seed
+            if max_tokens is not None:
+                self.llm.max_tokens = max_tokens
 
         # ── Resolve fallback_llm and attach to primary so EVERY internal
         # call (planner, conductor, juror, consensus, reporter) gets
@@ -115,7 +152,7 @@ class Harness:
             if isinstance(fallback_llm, LLM):
                 self.fallback_llm = fallback_llm
             elif isinstance(fallback_llm, str):
-                self.fallback_llm = LLM(model=fallback_llm, seed=seed)
+                self.fallback_llm = LLM(model=fallback_llm, **_llm_kwargs)
             else:
                 raise TypeError(
                     f"fallback_llm must be a str or LLM instance, got "

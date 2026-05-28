@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] — TBD (under test)
+
+### Changed — `LLM.max_tokens` default 2048 → 8192
+
+The default OUTPUT (generation) cap on the Harness LLM is now `8192` instead
+of `2048`. This matches what's needed for long-context evaluations
+(`turns≥30`), where each juror call writes ~3000-5000 tokens of audit JSON
+(50 per-turn entries + reasoning + score). The pre-v0.4.3 default of 2048
+truncated those replies mid-string, producing unparseable JSON that
+correctly triggered the v0.4.2 fallback — but the fallback ALSO hit the
+same 2048 cap, so both primary AND fallback failed.
+
+**Why this is safe**: providers charge for tokens actually generated, not
+the cap. Raising max_tokens never increases cost — it only avoids
+truncation. LM Studio (and similar local proxies) cap silently to the
+underlying model's hard limit if 8192 exceeds it.
+
+**This is OUTPUT only — not the context window.** Context window is the
+input + output budget (200K-1M for frontier models). max_tokens is just
+the reply length cap.
+
+### Added — Tiered fallback (compact prompt + reduced max_tokens)
+
+The fallback path now uses a **stricter system prompt** and a **reduced
+max_tokens cap** instead of a verbatim retry. Rationale: if the primary
+failed because it couldn't fit a complete JSON in the original budget,
+asking the fallback for a **shorter** reply usually beats asking for the
+same reply again.
+
+Concretely, on every fallback fire:
+
+- `max_tokens` for the fallback call = `min(primary_max_tokens, 4096)`.
+  If the user set `max_tokens=2048` for a cost-bound smoke test, the
+  fallback uses 2048 too — never exceeds the user's setting.
+- The system prompt is amended with:
+  ```
+  BE EXTREMELY CONCISE. Use the shortest possible reasoning.
+  Drop verbose explanations.
+  Hard limit: keep your ENTIRE reply under N characters.
+  If the natural reply would exceed this, SUMMARIZE AGGRESSIVELY
+  rather than truncate mid-sentence.
+  ```
+- The **user's original messages are preserved verbatim** — never the
+  primary's failed reply, never an error message. The v0.4.2 fix stays
+  intact.
+
+The primary path also now includes a (softer) character-budget hint
+in its system prompt: `"Aim to keep your reply under N characters. If
+you cannot fit naturally, prefer to summarize rather than truncate
+mid-string."` — belt + braces alongside the silent `max_tokens` cap.
+
+### Added — `max_tokens` parameter on `Harness(...)`
+
+```python
+from proofagent_harness import Harness
+
+# Tight cap for short evals (saves no money but bounds runaway generations):
+Harness(llm="claude-sonnet-4-6", max_tokens=4096)
+
+# Generous cap for very long evals (turns≥100):
+Harness(llm="claude-sonnet-4-6", max_tokens=16384)
+
+# Default — uses LLM.max_tokens (8192 in v0.4.3, was 2048 in v0.4.2):
+Harness(llm="claude-sonnet-4-6")
+```
+
+The same value is applied to the `fallback_llm` when both are constructed
+from strings. If you pass a pre-built `LLM` instance for either, the
+instance's own `max_tokens` is respected — the `max_tokens=` kwarg on
+`Harness` is ignored for instance form.
+
+### Migration notes
+
+- **No breaking changes.** Existing calls work identically; output is just
+  allowed to grow up to 8192 tokens now instead of 2048.
+- Users running short evals (turns≤15) see no change — the audit JSON
+  already fit in 2048.
+- Users running long evals (turns≥30) who hit the v0.4.2
+  `LLMJSONStructureError(both_failed=True)` should see clean runs after
+  upgrading — no script change needed; the new default fixes it.
+
 ## [0.4.2] — 2026-05-28
 
 ### Fixed — **CRITICAL** — `complete_json` retry loop no longer appends errors

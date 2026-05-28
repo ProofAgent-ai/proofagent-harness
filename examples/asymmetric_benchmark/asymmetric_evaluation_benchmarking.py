@@ -78,7 +78,7 @@ USAGE
 REQUIRED ENVIRONMENT
 --------------------
     OPENAI_API_KEY            — for the gpt-4.1 agent (default)
-    ANTHROPIC_API_KEY         — for claude-* agent or --fallback-juror anthropic/*
+    ANTHROPIC_API_KEY         — for claude-* agent or --fallback-llm anthropic/*
     LM Studio                 — running locally with the harness LLM loaded
                                 (or use --no-proxy with a cloud harness LLM
                                  like anthropic/claude-haiku-4-5 for testing)
@@ -663,13 +663,14 @@ def run_single_cell(
     harness_llm_name: str,
     agent_spec_path: Path,
     agent_model: str,
-    fallback_juror: str,
+    fallback_llm: str,
     turns: int,
     consensus: str,
     seed: int,
     context_budget_tokens: int,
     per_call_timeout: int,
     juror_call_timeout: int,
+    max_tokens: int,
     proxy_url: str | None,
     extra_traps: list[str] | None,
     force_fallback: bool,
@@ -710,10 +711,16 @@ def run_single_cell(
     if force_fallback:
         install_force_fallback(primary_model=routed_harness_llm)
 
-    # ── Build the Harness with native fallback_llm support ──
+    # ── Build the Harness with native fallback_llm + max_tokens support ──
+    # max_tokens is the per-call OUTPUT cap (not context window). At turns=50
+    # with debate consensus, each juror call emits ~4000 tokens of audit JSON
+    # (50-entry per_turn_audit array + reasoning). Library default 8192 fits
+    # this comfortably for all common fallback models (Haiku 8K, GPT-4.1-mini
+    # 32K). The benchmark script's --max-tokens flag overrides this default.
     harness = Harness(
         llm=routed_harness_llm,
-        fallback_llm=fallback_juror,
+        fallback_llm=fallback_llm,
+        max_tokens=max_tokens,
         turns=turns,
         consensus=consensus,
         seed=seed,
@@ -752,7 +759,7 @@ def run_single_cell(
     elapsed = time.time() - t0
 
     # ── Snapshot per-source LLM stats (replaces the old fallback_tracker) ──
-    fallback_tracker = LiveLLMStats.from_llm(harness.llm, fallback_model=fallback_juror)
+    fallback_tracker = LiveLLMStats.from_llm(harness.llm, fallback_model=fallback_llm)
 
     # ── Build the CellResult ──
     fs = getattr(report, "final_score", None) if report else None
@@ -998,7 +1005,7 @@ def write_overview_md(out_dir: Path, cells: list[CellResult], cfg: dict[str, Any
     lines.append(f"_Started:_ `{cfg.get('started_at')}`")
     lines.append(f"_Total cells:_ **{len(cells)}**  ({cfg.get('n_harness_llms')} Harness LLMs × {cfg.get('n_agents')} agents)")
     lines.append(f"_Sequential:_ yes · _Consensus:_ {cfg.get('consensus')} · _Turns/cell:_ {cfg.get('turns')} · _Seed:_ {cfg.get('seed')}")
-    lines.append(f"_Fallback juror:_ `{cfg.get('fallback_juror')}` · _Force-fallback mode:_ {'yes' if cfg.get('force_fallback') else 'no'}")
+    lines.append(f"_Fallback LLM:  _ `{cfg.get('fallback_llm')}` · _Force-fallback mode:_ {'yes' if cfg.get('force_fallback') else 'no'}")
     lines.append("")
     lines.append("## Per-cell summary")
     lines.append("")
@@ -1035,7 +1042,7 @@ def write_overview_md(out_dir: Path, cells: list[CellResult], cfg: dict[str, Any
         f"Across this sweep, **{sweep_local_pct:.1f}%** of juror tokens "
         f"({sum_local_tok / 1000:.1f}k) were served by the local Harness LLMs "
         f"and **{sweep_fb_pct:.1f}%** ({sum_fb_tok / 1000:.1f}k) by the "
-        f"cross-family fallback `{cfg.get('fallback_juror')}`."
+        f"cross-family fallback `{cfg.get('fallback_llm')}`."
     )
     lines.append("")
     lines.append(
@@ -1132,10 +1139,21 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL,
                    help=f"Frontier agent LLM under test. Default: {DEFAULT_AGENT_MODEL}.")
-    p.add_argument("--fallback-juror", default=DEFAULT_FALLBACK_JUROR,
-                   help=f"Cross-family fallback model. Default: {DEFAULT_FALLBACK_JUROR}. "
-                        f"Use 'claude-haiku-4-5-20251001' (or any anthropic/* model) for "
-                        f"Anthropic fallback.")
+    # --fallback-llm (v0.4.2 official name) replaces --fallback-juror (v0.4.1
+    # legacy name). The fallback wraps the ENTIRE Harness pipeline (planner,
+    # conductor, juror, consensus, reporter), NOT just the juror stage — the
+    # old "juror" suffix was misleading. Both flag names are accepted for
+    # backwards compatibility; they store into the same `fallback_llm`
+    # destination on the args namespace.
+    p.add_argument("--fallback-llm", "--fallback-juror",
+                   dest="fallback_llm",
+                   default=DEFAULT_FALLBACK_JUROR,
+                   help=f"Cross-family fallback model that handles failed primary "
+                        f"calls anywhere in the pipeline (planner / conductor / "
+                        f"juror / consensus / reporter). Default: "
+                        f"{DEFAULT_FALLBACK_JUROR}. Use 'anthropic/claude-haiku-"
+                        f"4-5-20251001' for Anthropic fallback. "
+                        f"(--fallback-juror is the deprecated v0.4.1 alias.)")
     p.add_argument("--proxy-url", default="http://localhost:1234/v1",
                    help="LM Studio proxy URL. Default: LM Studio at :1234.")
     p.add_argument("--no-proxy", action="store_true",
@@ -1146,8 +1164,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--consensus", "-c", choices=["independent", "delphi", "debate"], default="delphi")
     p.add_argument("--seed", "-s", type=int, default=42)
     p.add_argument("--context-budget", "--ctx", type=int, default=6000,
-                   help="Token budget passed to Harness. 6000 fits small local models well; "
-                        "raise to 32000+ for long-context juror models.")
+                   help="INPUT token budget for prompts the Harness builds. "
+                        "6000 fits small local models well; raise to 32000+ "
+                        "for long-context Harness LLMs. NOT the same as "
+                        "--max-tokens (which caps OUTPUT generation).")
+    p.add_argument("--max-tokens", type=int, default=8192,
+                   help="Max OUTPUT (generation) tokens the Harness LLM is "
+                        "allowed to write per call. Applied to BOTH the "
+                        "primary AND the fallback LLM. Default 8192 fits the "
+                        "~4000-token audit JSON of 50-turn debate-consensus "
+                        "jurying with margin. Bump to 16384+ for turns>=100. "
+                        "Lower to 2048-4096 for cost-bound smoke tests on "
+                        "short evals. NOT the context window (input + output "
+                        "combined — that's --context-budget).")
     p.add_argument("--per-call-timeout", type=int, default=3600,
                    help="Per-call litellm `timeout=` kwarg (seconds). Enforced "
                         "by httpx at the HTTP level. Default 3600s.")
@@ -1157,7 +1186,7 @@ def parse_args() -> argparse.Namespace:
                         "AND smaller than --per-call-timeout, overrides it. "
                         "When the primary times out, litellm raises an httpx "
                         "exception that our fallback wrapper catches and "
-                        "routes to --fallback-juror cleanly. Recommended: 180 "
+                        "routes to --fallback-llm cleanly. Recommended: 180 "
                         "(3 min) for small local models on long-context prompts "
                         "— bounds the 30-60min runaway tail latency that "
                         "overloaded 8K-context models can produce on 50-turn "
@@ -1212,12 +1241,17 @@ def main() -> int:
     print(f"  Agents ({len(agent_paths)}):    {', '.join(p.stem for p in agent_paths)}", flush=True)
     print(f"  Harness LLMs ({len(args.harness_llms)}): {', '.join(_short_model_name(h) for h in args.harness_llms)}", flush=True)
     print(f"  Agent model:    {args.agent_model}", flush=True)
-    print(f"  Fallback juror: {args.fallback_juror}  (cross-family)", flush=True)
+    print(f"  Fallback LLM:   {args.fallback_llm}  (cross-family)", flush=True)
     timeout_tag = (
         f" · juror_timeout={args.juror_call_timeout}s"
         if args.juror_call_timeout else " · juror_timeout=off"
     )
-    print(f"  Consensus:      {args.consensus} · turns={args.turns} · seed={args.seed} · ctx={args.context_budget}{timeout_tag}", flush=True)
+    print(
+        f"  Consensus:      {args.consensus} · turns={args.turns} · seed={args.seed} "
+        f"· ctx={args.context_budget} (input) · max_tokens={args.max_tokens} (output)"
+        f"{timeout_tag}",
+        flush=True,
+    )
     print(f"  Force-fallback: {'YES (validation mode)' if args.force_fallback else 'no'}", flush=True)
     print(f"  Output:         {out_dir}", flush=True)
     print(f"  Total cells:    {len(matrix)}", flush=True)
@@ -1245,7 +1279,7 @@ def main() -> int:
         "agents": [p.stem for p in agent_paths],
         "harness_llms": list(args.harness_llms),
         "agent_model": args.agent_model,
-        "fallback_juror": args.fallback_juror,
+        "fallback_llm": args.fallback_llm,
         "proxy_url": None if args.no_proxy else args.proxy_url,
         "consensus": args.consensus,
         "turns": args.turns,
@@ -1253,6 +1287,7 @@ def main() -> int:
         "context_budget_tokens": args.context_budget,
         "per_call_timeout": args.per_call_timeout,
         "juror_call_timeout": args.juror_call_timeout,
+        "max_tokens": args.max_tokens,
         "force_fallback": bool(args.force_fallback),
         "no_swap": bool(args.no_swap),
         "n_harness_llms": len(args.harness_llms),
@@ -1278,13 +1313,14 @@ def main() -> int:
             harness_llm_name=h,
             agent_spec_path=p,
             agent_model=args.agent_model,
-            fallback_juror=args.fallback_juror,
+            fallback_llm=args.fallback_llm,
             turns=args.turns,
             consensus=args.consensus,
             seed=args.seed,
             context_budget_tokens=args.context_budget,
             per_call_timeout=args.per_call_timeout,
             juror_call_timeout=args.juror_call_timeout,
+            max_tokens=args.max_tokens,
             proxy_url=None if args.no_proxy else args.proxy_url,
             extra_traps=args.extra_traps,
             force_fallback=bool(args.force_fallback),

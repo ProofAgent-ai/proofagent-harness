@@ -86,7 +86,27 @@ class LLM:
 
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.2
-    max_tokens: int = 2048
+    # ── max_tokens: the MAX OUTPUT (generation) tokens the Harness LLM is
+    # allowed to write per call. NOT the context window (input + output
+    # combined — that's much larger, 200K-1M for frontier models).
+    #
+    # Bumped from 2048 → 8192 in v0.4.3 to fit long-context audit JSON.
+    # At turns=50 with debate consensus, each juror call produces ~4000
+    # tokens of output (50-entry per_turn_audit array + reasoning + score).
+    # The pre-v0.4.3 default of 2048 truncated those responses mid-string,
+    # which the JSON parser correctly rejected and which the new fallback
+    # logic correctly classified as both-failed (since both primary AND
+    # fallback hit the same 2048 cap).
+    #
+    # 8192 fits all common fallback models (Anthropic Haiku 8K, GPT-4.1-mini
+    # 32K, Gemini 64K) and most quantized local models (LM Studio caps
+    # silently to the underlying model's max if 8192 exceeds it). Setting
+    # this higher than the model can actually generate is safe — providers
+    # just cap to the hard limit.
+    #
+    # You only PAY for tokens actually generated, not the cap. So raising
+    # max_tokens never increases cost — it only avoids truncation.
+    max_tokens: int = 8192
     seed: int | None = None
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
     # ── v0.4.2: native cross-family fallback ──
@@ -287,19 +307,42 @@ class LLM:
              message recommending: (a) a stronger model, (b) configure
              ``fallback_llm=``, or (c) lower turns / context-budget.
 
+        v0.4.3 ADAPTIVE FALLBACK
+        ─────────────────────────
+        The fallback now uses a TIGHTER budget than the primary:
+
+          - Reduced max_tokens (capped at ``min(primary_max_tokens, 4096)``)
+          - Stricter system prompt ("BE EXTREMELY CONCISE, limit response
+            to N chars MAXIMUM")
+
+        Rationale: if the primary failed because it couldn't fit a complete
+        JSON within its max_tokens budget (the v0.4.3 default of 8192 vs
+        the bug-fix v0.4.2 default of 2048), asking the fallback for SHORTER
+        output is the right move. The fallback still gets the ORIGINAL user
+        messages (the v0.4.2 fix — no error-append) — only the SYSTEM
+        instruction changes to push the model toward a more compact reply.
+
         The ``retries`` parameter is preserved for backwards compatibility
         but is now IGNORED (retrying with the same prompt is wasted spend,
         and retrying with an appended error was the bug).
         """
-        instructions = "Respond ONLY with valid JSON. No prose, no markdown fences."
-        if schema:
-            instructions += f"\n\nJSON Schema:\n{json.dumps(schema, indent=2)}"
-        sys_prompt = (system + "\n\n" + instructions) if system else instructions
+        effective_max_tokens = max_tokens or self.max_tokens
+        # Primary char budget = roughly 3.5 chars/token * max_tokens. The
+        # 3.5 (vs the more common 4) leaves slack for JSON syntax overhead
+        # (brackets, quotes, commas) and tokens that are <4 chars (numbers,
+        # short field names). It's a HINT to the model — not a hard cap —
+        # but small local models often respect it better than they respect
+        # the silent max_tokens cap.
+        primary_char_budget = int(effective_max_tokens * 3.5)
+        primary_sys = self._build_json_system_prompt(
+            system, schema, char_budget=primary_char_budget, compact=False,
+        )
 
-        # ── Attempt 1: PRIMARY ──────────────────────────────────────────
+        # ── Attempt 1: PRIMARY (full budget, normal "be valid JSON" prompt) ─
         try:
             r = await self._raw_complete(
-                messages, system=sys_prompt, temperature=temperature, max_tokens=max_tokens
+                messages, system=primary_sys, temperature=temperature,
+                max_tokens=effective_max_tokens,
             )
             try:
                 data = _parse_json_loose(r.text)
@@ -331,13 +374,29 @@ class LLM:
                 detail=str(transport_exc)[:200],
             )
 
-        # ── Attempt 2: FALLBACK (only reachable if fallback_llm is set) ──
-        # The fallback gets the SAME ORIGINAL messages. Critically, we do
-        # NOT append the primary's failed reply or an error message — that
-        # was the v0.4.1 bug. The fallback sees the prompt as if for the
-        # first time.
+        # ── Attempt 2: FALLBACK (compact mode — only reachable if
+        # fallback_llm is set) ──────────────────────────────────────────────
+        # Fallback gets:
+        #   1. SMALLER max_tokens: min(primary_max_tokens, 4096). If primary
+        #      failed because it couldn't fit its output in the budget,
+        #      asking for HALF that budget forces the model to be terse.
+        #      For users who explicitly set max_tokens=2048 (cost-bound
+        #      smoke tests), we never EXCEED their setting — only shrink.
+        #   2. STRICTER system prompt: "BE EXTREMELY CONCISE, max N chars".
+        #      Small models often respect the prompt hint better than the
+        #      silent max_tokens cap.
+        #   3. ORIGINAL messages: never the primary's failed reply, never
+        #      an error message (the v0.4.2 bug fix stays intact).
+        fallback_max_tokens = min(effective_max_tokens, 4096)
+        fallback_char_budget = int(fallback_max_tokens * 3.5)
+        fallback_sys = self._build_json_system_prompt(
+            system, schema, char_budget=fallback_char_budget, compact=True,
+        )
         fb_r = await self.fallback_llm._raw_complete(
-            messages, system=sys_prompt, temperature=temperature, max_tokens=max_tokens
+            messages,  # ORIGINAL — no error append, no failed-reply leak
+            system=fallback_sys,
+            temperature=temperature,
+            max_tokens=fallback_max_tokens,
         )
         try:
             data = _parse_json_loose(fb_r.text)
@@ -356,6 +415,51 @@ class LLM:
                 parse_error=str(fb_parse_exc),
                 both_failed=True,
             ) from fb_parse_exc
+
+    @staticmethod
+    def _build_json_system_prompt(
+        user_system: str | None,
+        schema: dict[str, Any] | None,
+        *,
+        char_budget: int,
+        compact: bool,
+    ) -> str:
+        """Compose the system prompt for a complete_json call.
+
+        ``compact=False`` (primary path): standard JSON-mode instruction +
+        explicit character budget hint.
+
+        ``compact=True`` (fallback path): same JSON-mode instruction PLUS a
+        firm "BE EXTREMELY CONCISE" directive + a tighter character budget.
+        Used when the primary already failed to produce valid JSON within
+        the original budget — asking the fallback for a SHORTER reply
+        usually beats asking for the same reply again.
+
+        The user's original ``system`` (if any) is preserved verbatim and
+        prepended — we only ADD instructions, never override the caller's
+        framing.
+        """
+        if compact:
+            base = (
+                "Respond ONLY with valid JSON. No prose, no markdown fences.\n"
+                "Your entire reply MUST be a complete, parseable JSON value.\n"
+                "BE EXTREMELY CONCISE. Use the shortest possible reasoning. "
+                "Drop verbose explanations.\n"
+                f"Hard limit: keep your ENTIRE reply under {char_budget:,} "
+                "characters. If the natural reply would exceed this, "
+                "SUMMARIZE AGGRESSIVELY rather than truncate mid-sentence."
+            )
+        else:
+            base = (
+                "Respond ONLY with valid JSON. No prose, no markdown fences.\n"
+                "Your entire reply MUST be a complete, parseable JSON value.\n"
+                f"Aim to keep your reply under {char_budget:,} characters. "
+                "If you cannot fit naturally, prefer to summarize rather "
+                "than truncate mid-string."
+            )
+        if schema:
+            base += f"\n\nJSON Schema:\n{json.dumps(schema, indent=2)}"
+        return (user_system + "\n\n" + base) if user_system else base
 
 class LLMError(RuntimeError):
     """Surface LLM problems with a tidy error type."""

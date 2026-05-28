@@ -214,6 +214,80 @@ async def test_no_fallback_preserves_v041_behavior(
 
 
 @pytest.mark.asyncio
+async def test_fallback_uses_compact_prompt_and_reduced_max_tokens(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """v0.4.3 tiered degradation: when fallback fires, it should receive
+
+      (a) the ORIGINAL user messages (the v0.4.2 fix — no error-append)
+      (b) a STRICTER system prompt asking for a concise reply
+      (c) a SMALLER max_tokens cap (min(primary, 4096))
+
+    This handles the failure mode where primary couldn't fit a complete
+    JSON in the original budget — asking the fallback for shorter output
+    beats asking for the same output again.
+    """
+    _patch_litellm["responses"] = [
+        '{"score": broken json',                 # primary fails parse
+        '{"score": 7, "reasoning": "ok"}',       # fallback succeeds
+    ]
+    primary = LLM(model="test-primary", max_tokens=8192)
+    fallback = LLM(model="test-fallback", max_tokens=8192)
+    primary.fallback_llm = fallback
+
+    await primary.complete_json([{"role": "user", "content": "score this"}])
+
+    assert len(_patch_litellm["call_log"]) == 2
+    primary_call = _patch_litellm["call_log"][0]
+    fallback_call = _patch_litellm["call_log"][1]
+
+    # (a) Original user message preserved on fallback.
+    fb_user_msg = fallback_call["messages"][-1]["content"]
+    assert "score this" in fb_user_msg
+    assert "previous reply" not in fb_user_msg
+    assert "broken" not in fb_user_msg
+
+    # (b) System prompt on fallback is STRICTER than primary.
+    primary_sys = primary_call["messages"][0]["content"]
+    fallback_sys = fallback_call["messages"][0]["content"]
+    assert "Respond ONLY with valid JSON" in primary_sys
+    assert "Respond ONLY with valid JSON" in fallback_sys
+    # Compact-only directive should appear ONLY on fallback.
+    assert "BE EXTREMELY CONCISE" in fallback_sys
+    assert "BE EXTREMELY CONCISE" not in primary_sys
+    # Both prompts include a character budget hint; fallback's must be
+    # SMALLER than primary's (proportional to the reduced max_tokens).
+    assert "characters" in primary_sys
+    assert "characters" in fallback_sys
+
+    # (c) max_tokens on fallback call ≤ 4096 (even though primary was 8192).
+    assert primary_call["kwargs"].get("max_tokens") == 8192
+    assert fallback_call["kwargs"].get("max_tokens") == 4096
+
+
+@pytest.mark.asyncio
+async def test_fallback_max_tokens_respects_user_lower_setting(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """If the user explicitly configured a small max_tokens (e.g. 2048 for
+    a cost-bound smoke test), the fallback must NEVER exceed it — only
+    shrink. The 4096 cap is a CEILING, not a target."""
+    _patch_litellm["responses"] = [
+        '{"score": broken json',
+        '{"x": 1}',
+    ]
+    primary = LLM(model="test-primary", max_tokens=2048)  # user set tight cap
+    fallback = LLM(model="test-fallback", max_tokens=2048)
+    primary.fallback_llm = fallback
+
+    await primary.complete_json([{"role": "user", "content": "x"}])
+
+    fallback_call = _patch_litellm["call_log"][1]
+    # Fallback uses min(2048, 4096) = 2048 — never exceeds user's setting.
+    assert fallback_call["kwargs"].get("max_tokens") == 2048
+
+
+@pytest.mark.asyncio
 async def test_complete_json_both_failed_says_prompt_is_broken(
     _patch_litellm: dict[str, Any],
 ) -> None:

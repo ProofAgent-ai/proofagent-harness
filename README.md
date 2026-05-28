@@ -317,12 +317,13 @@ Main `Harness(...)` knobs:
 
 - **`llm`** — primary Harness LLM, any LiteLLM target (default `claude-sonnet-4-6`)
 - **`fallback_llm`** — *(v0.4.2, optional)* cross-family rescue LLM that handles failed primary calls (JSON malformed, empty, exception). See [Small local LLM + cross-family fallback](#small-local-llm--cross-family-fallback) below
+- **`max_tokens`** — *(v0.4.3, optional)* max **OUTPUT** (generation) tokens the Harness LLM is allowed to write per call. Default `8192` fits 50-turn debate-consensus audit JSON; bump to `16384+` for `turns ≥ 100`, lower to `2048-4096` for cost-bound smoke tests. **Not** the context window (input + output budget — that's `context_budget_tokens`). See [Max output tokens — when to bump it](#max-output-tokens--when-to-bump-it) below
 - **`turns`** — conductor turn count (default `8` · `4` for smoke · `15+` for high-stakes)
 - **`consensus`** — `independent` (1×) · `delphi` (default, ~1.5×) · `debate` (strictest, 3-5×)
 - **`seed`** — OpenAI / Gemini honor it; Anthropic doesn't yet
 - **`metrics`** — restrict scoring to a subset of the 5 canonical
 - **`extra_traps`** / **`extra_skills`** — merge in your own
-- **`context_budget_tokens`** — override automatic context budget (rarely needed)
+- **`context_budget_tokens`** — override automatic **INPUT** context budget (the budget for the prompt — rarely needed; not the same as `max_tokens`)
 
 ### Small local LLM + cross-family fallback
 
@@ -351,6 +352,36 @@ A **high primary share (>85%)** means the asymmetric design is working — the c
 Without `fallback_llm`, failed JSON calls raise the new `LLMJSONStructureError` with three concrete recommendations (use a stronger model, configure a fallback, or shrink the prompt). No more cryptic `Could not get valid JSON after 3 attempts: Unterminated string` errors.
 
 See the standalone benchmark in [`examples/asymmetric_benchmark/`](examples/asymmetric_benchmark/) for a full sweep across multiple local Harness LLMs × multiple frontier agents.
+
+### Max output tokens — when to bump it
+
+`max_tokens` is the **OUTPUT cap** — how many tokens the Harness LLM is allowed to **write** in a single reply. This is **separate** from the context window (input + output combined, 200K-1M for frontier models). At long turn counts the juror's audit JSON gets bigger:
+
+| Setting | Per-juror output need | Recommended `max_tokens` |
+|---|---|---|
+| `turns=8` (default) | ~1300 tokens | `2048-4096` (cost-bound) or `8192` (default) |
+| `turns=20` | ~2000 tokens | `4096` minimum, `8192` recommended |
+| **`turns=50`** (paper grade) | **~4000 tokens** | **`8192` (the v0.4.3 default)** |
+| `turns=100` | ~7500 tokens | `16384` |
+
+```python
+from proofagent_harness import Harness
+
+# Default — fits almost everything (turns ≤ 50)
+Harness(llm="claude-sonnet-4-6")
+
+# Long evals (turns ≥ 100): bump the cap
+Harness(llm="claude-sonnet-4-6", max_tokens=16384)
+
+# Cost-bound smoke tests on short evals
+Harness(llm="claude-haiku-4-5-20251001", max_tokens=2048)
+```
+
+**The same value is applied to the `fallback_llm` when both are constructed from strings.** Passing a pre-built `LLM` instance lets you set per-LLM `max_tokens` independently.
+
+**Setting `max_tokens` higher never costs more.** Providers charge for tokens *generated*, not the cap. The cap just prevents truncation if the natural reply is long. LM Studio (and other local proxies) silently cap to the underlying model's hard limit if your setting exceeds it — safe to set 8192 on a model that only supports 4096.
+
+When `fallback_llm` is configured, the fallback path uses **half the primary's max_tokens (min 4096) + a stricter "be concise" system prompt** as an adaptive degradation strategy — see [the v0.4.3 CHANGELOG](CHANGELOG.md) for the design rationale.
 
 Jurors and planner classification run at `temperature=0`. Conductor stays at moderate temp so adversarial creativity surfaces different failure modes. Expect ±0.5 score variance on Anthropic; for tightest determinism use OpenAI/Gemini + `seed=42`, or run N times and report median + IQR.
 
