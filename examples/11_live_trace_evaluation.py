@@ -67,6 +67,37 @@ Usage
     python examples/11_live_trace_evaluation.py \\
         --agent privacy_security_agent --verbose --turns 5 --sequential
 
+    # Merge an external trap directory on top of the bundled 183-trap library.
+    # Useful when you keep an experimental / private trap pack outside the
+    # main harness repo. Custom traps override bundled traps with the same name
+    # ("last wins").
+    python examples/11_live_trace_evaluation.py \\
+        --agent privacy_security_agent \\
+        --extra-traps ~/projects/my-benchmark/hacker_traps/ \\
+        --turns 8
+
+    # Multiple external dirs + a pip-installed trap pack at the same time.
+    python examples/11_live_trace_evaluation.py \\
+        --agent customer_support_agent \\
+        --extra-traps ./internal_traps/ ./pilot_traps/ \\
+        --trap-packs finance healthcare \\
+        --turns 8
+
+    # Juror fallback — recommended whenever the primary is a small local model.
+    # If Gemma returns empty/garbled juror output, retry with gpt-4.1-mini
+    # (forced through api.openai.com). Without this, silent juror failures
+    # collapse the final score to 0/10 with no findings. The fallback only
+    # fires on actual failures, so cost is bounded by your primary's failure rate.
+    python examples/11_live_trace_evaluation.py \\
+        --agent           customer_support_agent \\
+        --extra-traps     /path/to/hacker_traps/ \\
+        --agent-model     gpt-4.1 \\
+        --harness-llm     gemma-4-E4B-it-MLX-8bit \\
+        --proxy-url       http://localhost:1234/v1 \\
+        --fallback-juror  gpt-4.1-mini \\
+        --consensus       debate --turns 100 --seed 42 --sequential \\
+        --context-budget  100000 --per-call-timeout 7200
+
 Required env
 ------------
     OPENAI_API_KEY     (gpt-* agent models)
@@ -198,6 +229,128 @@ def install_sequential_jury(per_call_timeout: int, verbose: bool) -> None:
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_TRAIL = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
 _REASONING_HINTS = ("gemma", "deepseek-r1", "deepseek_r1", "qwq", "openai/o1", "openai/o3", "o1-", "o3-")
+
+
+def install_fallback_juror(fallback_model: str, verbose: bool) -> dict:
+    """If a juror call to the primary harness LLM returns empty/garbled content
+    or raises an exception, automatically retry the same prompt with
+    `fallback_model` (forced through api.openai.com, bypassing --proxy-url).
+
+    Critical when running a small local harness LLM (e.g. Gemma 4B) at long
+    context windows — Gemma occasionally returns empty content or content
+    consisting only of `<think>` blocks the parser cannot use as a juror score.
+    Without a fallback, those turns get silently skipped, and a run with many
+    failures finishes with final_score=0/10 and no findings.
+
+    The fallback costs only what's needed (e.g. gpt-4.1-mini at ~$0.05-0.20
+    per failed turn) but rescues the run from a silent failure. Requires
+    `OPENAI_API_KEY` to be set with a real OpenAI key.
+
+    Returns a tracker dict updated in-place as calls happen; pass it to
+    `print_fallback_report()` at end of run for the usage breakdown.
+    """
+    import litellm
+    _orig = litellm.acompletion
+
+    tracker: dict = {
+        "fallback_model": fallback_model,
+        "primary_calls": 0,
+        "primary_empty": 0,
+        "primary_errors": 0,
+        "fallback_calls": 0,
+        "fallback_errors": 0,
+    }
+
+    # Normalize: if user passed bare "gpt-4.1-mini", prefix to "openai/gpt-4.1-mini"
+    # so LiteLLM routes it via the OpenAI provider.
+    fb_model = fallback_model if "/" in fallback_model else f"openai/{fallback_model}"
+
+    def _is_useful(response) -> bool:
+        try:
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                return False
+            msg = getattr(choices[0], "message", None)
+            content = getattr(msg, "content", "") if msg else ""
+            if not isinstance(content, str):
+                return False
+            # Re-strip any leftover think tags the upstream wrapper missed.
+            cleaned = _THINK_RE.sub("", content)
+            cleaned = _THINK_TRAIL.sub("", cleaned).strip()
+            return len(cleaned) >= 30
+        except Exception:
+            return False
+
+    async def _with_fallback(*args, **kwargs):
+        tracker["primary_calls"] += 1
+        # ── Primary attempt ──────────────────────────────────────────
+        try:
+            r = await _orig(*args, **kwargs)
+            if _is_useful(r):
+                return r
+            tracker["primary_empty"] += 1
+            if verbose:
+                console.print(
+                    f"  [yellow][fallback][/yellow] primary returned empty/garbled "
+                    f"(call #{tracker['primary_calls']}); retrying with {fallback_model}"
+                )
+        except Exception as exc:
+            tracker["primary_errors"] += 1
+            if verbose:
+                console.print(
+                    f"  [yellow][fallback][/yellow] primary raised "
+                    f"{type(exc).__name__} (call #{tracker['primary_calls']}); "
+                    f"retrying with {fallback_model}"
+                )
+        # ── Fallback attempt ─────────────────────────────────────────
+        # Same args, different model + force api.openai.com (bypass --proxy-url
+        # which is set via OPENAI_BASE_URL). Per-call api_base overrides env.
+        fb_kwargs = {**kwargs, "model": fb_model, "api_base": "https://api.openai.com/v1"}
+        try:
+            r = await _orig(*args, **fb_kwargs)
+            tracker["fallback_calls"] += 1
+            return r
+        except Exception as exc:
+            tracker["fallback_errors"] += 1
+            console.print(
+                f"  [red][fallback][/red] fallback {fallback_model} ALSO failed: "
+                f"{type(exc).__name__}: {str(exc)[:120]}"
+            )
+            raise
+
+    litellm.acompletion = _with_fallback
+    if verbose:
+        console.print(
+            f"  [yellow][config][/yellow] juror fallback ON "
+            f"(primary fail → retry with {fallback_model} via api.openai.com)"
+        )
+    return tracker
+
+
+def print_fallback_report(tracker: dict | None) -> None:
+    """Print the juror-fallback usage breakdown at end of run."""
+    if not tracker or tracker.get("primary_calls", 0) == 0:
+        return
+    pc = tracker["primary_calls"]
+    pe = tracker["primary_empty"]
+    perr = tracker["primary_errors"]
+    fc = tracker["fallback_calls"]
+    ferr = tracker["fallback_errors"]
+    ok_pct = ((pc - pe - perr) / pc) * 100 if pc else 0.0
+    fb_pct = (fc / pc) * 100 if pc else 0.0
+    body = (
+        f"[bold]Primary juror calls:[/bold]   {pc}\n"
+        f"[bold]   returned OK:[/bold]        {pc - pe - perr}  ({ok_pct:.1f}%)\n"
+        f"[bold]   empty / garbled:[/bold]    {pe}\n"
+        f"[bold]   raised exception:[/bold]   {perr}\n"
+        f"[bold]Fallback used:[/bold]         {fc}  ({fb_pct:.1f}% of all calls)\n"
+        f"[bold]   fallback errors:[/bold]    {ferr}"
+    )
+    border = "green" if fc == 0 else ("yellow" if ferr == 0 else "red")
+    console.print(
+        Panel(body, title=f"Juror fallback report ({tracker['fallback_model']})",
+              border_style=border)
+    )
 
 
 def install_think_stripper(harness_llm: str, verbose: bool) -> bool:
@@ -408,6 +561,42 @@ def parse_args() -> argparse.Namespace:
                    help="Serialize juror calls — REQUIRED for single-threaded local proxies.")
     p.add_argument("--per-call-timeout", type=int, default=3600)
 
+    # ── Juror fallback (rescue from silent juror failures) ───────────
+    p.add_argument(
+        "--fallback-juror", default=None, metavar="MODEL",
+        help=(
+            "When the primary --harness-llm returns empty/garbled content or "
+            "raises an exception on a juror call, automatically retry the same "
+            "prompt with MODEL (forced through api.openai.com, bypassing "
+            "--proxy-url). Critical when the primary is a small local model "
+            "(e.g. Gemma 4B) that occasionally fails JSON-formatted juror "
+            "scoring — without this, failed turns are silently dropped and "
+            "the final score collapses to 0. Recommended: 'gpt-4.1-mini' "
+            "(~$0.05-0.20 per fallback). Requires OPENAI_API_KEY set with a "
+            "real OpenAI key."
+        ),
+    )
+
+    # ── External trap sources (merge on top of bundled library) ──────
+    p.add_argument(
+        "--extra-traps", nargs="+", default=None, metavar="PATH",
+        help=(
+            "One or more directories of custom .md trap files to merge on top "
+            "of the bundled library. Useful for experimental / private trap "
+            "packs you don't want to ship in the main repo. Custom traps "
+            "override bundled traps with the same name (last wins). Each path "
+            "is recursed; both flat and family-subdir layouts are accepted."
+        ),
+    )
+    p.add_argument(
+        "--trap-packs", nargs="+", default=None, metavar="PACK",
+        help=(
+            "One or more pip-installed trap packs to load (e.g. 'finance' "
+            "loads the proofagent_traps_finance package via importlib resources). "
+            "Combines additively with --extra-traps and the bundled library."
+        ),
+    )
+
     # ── Verbosity / output ───────────────────────────────────────────
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--list-only", action="store_true",
@@ -489,12 +678,37 @@ def main() -> int:
     print_selected_spec(spec)
     console.print()
 
-    traps = load_traps()
+    # Validate external trap paths up-front (fail fast with a clear message
+    # instead of a downstream FileNotFoundError after the harness has booted).
+    extra_traps = args.extra_traps or []
+    trap_packs = args.trap_packs or []
+    for raw in extra_traps:
+        if not Path(raw).expanduser().exists():
+            raise SystemExit(f"--extra-traps path does not exist: {raw}")
+    extra_traps_resolved = [str(Path(p).expanduser().resolve()) for p in extra_traps]
+
+    bundled_only = load_traps()
+    traps = load_traps(extra_dirs=extra_traps_resolved, trap_packs=trap_packs)
     idx = TrapIndex(traps)
     composite_n = sum(1 for t in traps if "Composite attack chain" in (t.pattern or ""))
+
+    extra_added = len(traps) - len(bundled_only)
+    extras_line = ""
+    if extra_traps_resolved or trap_packs:
+        srcs = []
+        if extra_traps_resolved:
+            srcs.append(f"{len(extra_traps_resolved)} dir(s): " + ", ".join(extra_traps_resolved))
+        if trap_packs:
+            srcs.append(f"{len(trap_packs)} pack(s): " + ", ".join(trap_packs))
+        extras_line = (
+            f"\n[dim]External traps merged: +{extra_added} net (bundled={len(bundled_only)}, "
+            f"merged={len(traps)}) · sources: {' · '.join(srcs)}[/dim]"
+        )
+
     console.print(
         f"[dim]Trap library: {len(traps)} traps · {len(idx.by_family)} families · "
-        f"{composite_n} with composite attack chain in Pattern[/dim]\n"
+        f"{composite_n} with composite attack chain in Pattern[/dim]"
+        f"{extras_line}\n"
     )
 
     if args.list_only:
@@ -509,6 +723,13 @@ def main() -> int:
         install_sequential_jury(args.per_call_timeout, verbose=True)
     install_think_stripper(harness_llm_name, verbose=True)
 
+    # Install fallback LAST so it wraps everything (sequential semaphore +
+    # think-stripper both run inside the fallback's _orig call). When the
+    # stripped primary response is empty/garbled, fallback kicks in.
+    fallback_tracker: dict | None = None
+    if args.fallback_juror:
+        fallback_tracker = install_fallback_juror(args.fallback_juror, verbose=True)
+
     # ── Build agent + trace collector ─────────────────────────────────
     raw_agent = make_agent_from_spec(spec, model=args.agent_model)
     context = make_context_from_spec(spec)
@@ -516,12 +737,16 @@ def main() -> int:
     wrapped_agent = collector.wrap_agent(raw_agent)
 
     # ── Build Harness ─────────────────────────────────────────────────
+    # Same extra_traps + trap_packs as the TrapIndex above, so what the
+    # collector visualizes is exactly what the planner/conductor can pick.
     harness = Harness(
         llm=harness_llm_name,
         turns=args.turns,
         consensus=args.consensus,
         seed=args.seed,
         context_budget_tokens=args.context_budget,
+        extra_traps=extra_traps_resolved or None,
+        trap_packs=trap_packs or None,
     )
 
     # ── Run ───────────────────────────────────────────────────────────
@@ -569,13 +794,54 @@ def main() -> int:
     console.print(f"Composite chains used:     {len(collector.composite_traps)} unique traps")
     console.print(f"Agent crashes:             {collector.crashes}")
 
+    # Fallback usage breakdown (only if --fallback-juror was set)
+    print_fallback_report(fallback_tracker)
+
     # ── Save report ───────────────────────────────────────────────────
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(args.output_dir) if args.output_dir else (DEFAULT_RESULTS_DIR / f"live_{ts}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # BOTH the folder AND the files are self-describing. Example layout:
+    #   results/
+    #     live_customer_support_agent_AGENT-gpt-4.1_HARNESS-gemma-4-E4B-it-MLX-8bit_100turn_seed42_score7.8_20260526_201422/
+    #         live_customer_support_agent_AGENT-gpt-4.1_HARNESS-gemma-4-E4B-it-MLX-8bit_100turn_seed42_score7.8.json
+    #         live_customer_support_agent_AGENT-gpt-4.1_HARNESS-gemma-4-E4B-it-MLX-8bit_100turn_seed42_score7.8.md
+    #
+    # Folder = stem + timestamp suffix. Timestamp prevents collisions when
+    # the same exact config (agent + harness + turns + seed + score) is run
+    # twice. Files inside keep the descriptive stem so they remain
+    # self-describing if anyone copies them out of the folder.
+    #
+    # Score tag is smart about silent juror failures: if per_metric has data,
+    # we use the real score (e.g. `score7.8`). If per_metric is empty (juror
+    # silently failed and the harness defaulted to 0.0/NOT_READY), we tag it
+    # `scoreFAILED` so the bad run is unmistakable in any directory listing —
+    # no more silently citing a 0.0 that wasn't a real evaluation.
     safe_agent_llm = args.agent_model.replace("/", "_").replace("@", "_")
-    safe_harness = args.harness_llm.replace("/", "_").replace("@", "_")
-    stem = f"live_{spec.name}_{safe_agent_llm}_via_{safe_harness}_{args.turns}turn_seed{args.seed}"
+    safe_harness   = args.harness_llm.replace("/", "_").replace("@", "_")
+
+    fs = getattr(report, "final_score", None)
+    pm = getattr(report, "per_metric", {}) or {}
+    if not pm:
+        # Silent juror failure — the 0.0 is a default, not a real score.
+        score_tag = "scoreFAILED"
+    elif isinstance(fs, (int, float)):
+        score_tag = f"score{fs:.1f}"
+    else:
+        score_tag = "scoreNA"
+
+    stem = (
+        f"live_{spec.name}"
+        f"_AGENT-{safe_agent_llm}"
+        f"_HARNESS-{safe_harness}"
+        f"_{args.turns}turn_seed{args.seed}"
+        f"_{score_tag}"
+    )
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = (
+        Path(args.output_dir)
+        if args.output_dir
+        else (DEFAULT_RESULTS_DIR / f"{stem}_{ts}")
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
     report.to_json(str(out_dir / f"{stem}.json"))
     report.to_markdown(str(out_dir / f"{stem}.md"))
     console.print(f"\n[bold]Report saved:[/bold]")

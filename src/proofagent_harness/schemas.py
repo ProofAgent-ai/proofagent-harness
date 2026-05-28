@@ -297,6 +297,30 @@ class Report(BaseModel):
     duration_seconds: float = 0.0
     tokens_used: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # ── v0.4.2: per-source Harness LLM accounting ──
+    # When `Harness(llm=..., fallback_llm=...)` is configured, these break
+    # down the `tokens_used` total by which model carried the load.
+    # `token_split` is a convenience ratio in [0, 1] that surfaces the
+    # asymmetric-cost story (high primary share = cheap local model did
+    # most of the work; high fallback share = the fallback rescued most
+    # calls and you should consider a stronger primary).
+    primary_llm_model: str = ""
+    primary_call_count: int = 0
+    primary_prompt_tokens: int = 0
+    primary_completion_tokens: int = 0
+    primary_cost_usd: float = 0.0
+    fallback_llm_model: str = ""
+    fallback_call_count: int = 0
+    fallback_prompt_tokens: int = 0
+    fallback_completion_tokens: int = 0
+    fallback_cost_usd: float = 0.0
+    fallback_rate: float = 0.0
+    """fallback_call_count / (primary_call_count + fallback_call_count),
+    or 0.0 if no fallback was configured. A value above ~0.3 suggests the
+    primary Harness LLM is being overwhelmed."""
+    token_split: dict[str, float] = Field(default_factory=dict)
+    """Token-share by source: {'primary': 0.91, 'fallback': 0.09}. Empty
+    dict if no fallback was configured."""
 
     def to_json(self, path: str | None = None, *, indent: int = 2) -> str:
         """Serialize to JSON (and optionally write to disk)."""
@@ -366,6 +390,10 @@ class Event(BaseModel):
         "consensus_check",
         "report_start", "report_end",
         "context_truncated",
+        # v0.4.2: emitted when Harness LLM's fallback_llm rescues a failed
+        # primary call (empty content, JSON parse error, or exception).
+        # Payload: {primary_model, fallback_model, stage, reason, detail}
+        "fallback_triggered",
         "done", "error",
     ]
     turn: int | None = None

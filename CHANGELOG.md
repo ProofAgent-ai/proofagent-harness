@@ -4,6 +4,99 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — 2026-05-28
+
+### Fixed — **CRITICAL** — `complete_json` retry loop no longer appends errors
+
+Removed the compounding-prompt feedback loop in
+`LLM.complete_json`. The pre-v0.4.2 implementation retried up to 3 times
+on JSON parse failure and APPENDED the failed reply + an error message to
+the conversation between retries. For long-context evals (50-turn debate
+transcripts), each retry compounded the prompt by ~30K tokens until even
+200K-context fallbacks overflowed and produced garbage — burning hundreds
+of dollars of API spend per cell on data that came back N/A.
+
+**v0.4.2 behavior**: single attempt. If the primary fails:
+
+1. If `fallback_llm` is configured → route the ORIGINAL messages to the
+   fallback (no error append, no broken reply leak).
+2. Otherwise → raise `LLMJSONStructureError` with an actionable message
+   recommending: a stronger model, configuring `fallback_llm`, or lowering
+   `turns` / `context-budget`.
+
+The `retries` parameter on `complete_json` is preserved for backwards
+compatibility but is now ignored.
+
+**Why this was a bug**: helpful for a smart LLM, catastrophic for small
+local models that produce malformed JSON regularly. The "you said: <broken>
+please fix" framing inflated prompts without fixing the output.
+
+### Added — optional `fallback_llm` on `Harness(...)`
+
+```python
+from proofagent_harness import Harness
+
+# Asymmetric eval: cheap local primary + cross-family rescue
+harness = Harness(
+    llm="openai/gemma-4-E4B-it-MLX-8bit",
+    fallback_llm="anthropic/claude-haiku-4-5-20251001",
+    turns=50, consensus="debate",
+)
+report = harness.evaluate(agent, ...)
+
+print(report.token_split)      # {'primary': 0.91, 'fallback': 0.09}
+print(report.fallback_rate)    # 0.07 — fraction of calls rescued
+```
+
+The fallback wraps the **entire pipeline** (planner, conductor, juror,
+consensus, reporter). The fallback receives the ORIGINAL prompt — never
+the primary's broken reply or an error message. Per-source token counters
+appear on the `Report`:
+
+```
+Report.primary_call_count          int
+Report.primary_prompt_tokens       int
+Report.primary_completion_tokens   int
+Report.primary_cost_usd            float
+Report.fallback_call_count         int
+Report.fallback_prompt_tokens      int
+Report.fallback_completion_tokens  int
+Report.fallback_cost_usd           float
+Report.fallback_rate               float [0..1]
+Report.token_split                 dict {'primary': X, 'fallback': Y}
+```
+
+`Report.token_split` is empty `{}` when no fallback was configured —
+backwards compatible with v0.4.1 reports.
+
+### Added — `LLMJSONStructureError` exception
+
+New subclass of `LLMError` raised when the LLM can't produce parseable
+JSON. Message names the model, the parse error, and three concrete fixes.
+Replaces the cryptic `Could not get valid JSON after 3 attempts:
+Unterminated string starting at: line 141 column 19` error.
+
+Exported from the top-level package: `from proofagent_harness import
+LLMJSONStructureError`.
+
+### Added — `fallback_triggered` `Event` type
+
+Emitted whenever the fallback fires. Payload includes
+`primary_model`, `fallback_model`, `stage`, `reason`, `detail`. Subscribe
+via `on_event=...` in `Harness.evaluate(...)` for custom progress UI. The
+LLM also prints a one-line `[fallback]` notice to stdout regardless of
+subscribers.
+
+### Migration notes
+
+- **No breaking changes.** Existing `Harness(llm="...")` calls work exactly
+  as before. `fallback_llm` is optional, defaults to `None`.
+- The previously-private `complete_json(retries=2)` parameter is preserved
+  but ignored. Users who were tuning it should remove the kwarg for clarity.
+- If you previously caught `LLMError` and tried to parse the message to
+  detect JSON failures, switch to catching `LLMJSONStructureError` for a
+  cleaner contract.
+
 ## [Unreleased]
 
 ### Added — anchoring discipline (`PASS_UNANCHORED` + anchor-poking conductor)

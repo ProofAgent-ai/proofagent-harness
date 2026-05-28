@@ -46,6 +46,7 @@ class Harness:
         self,
         *,
         llm: str | LLM | None = None,
+        fallback_llm: str | LLM | None = None,
         metrics: list[str] | None = None,
         turns: int = 8,
         extra_traps: list[str] | None = None,
@@ -60,6 +61,38 @@ class Harness:
         seed: int | None = None,
         context_budget_tokens: int | None = None,
     ) -> None:
+        """Configure a Harness.
+
+        Parameters
+        ----------
+        llm:
+            Primary Harness LLM used for ALL internal scoring (planner,
+            conductor, juror, consensus, reporter). String like
+            ``"claude-sonnet-4-6"`` is auto-wrapped as ``LLM(model=...)``.
+            Pass an ``LLM`` instance directly for advanced configuration.
+        fallback_llm:
+            **(Optional, v0.4.2)** A secondary LLM that automatically
+            handles primary failures. Most useful when ``llm=`` is a small
+            local model (Gemma 4B, Llama-3.2-3B, etc.) that may produce
+            malformed JSON or time out on long-context juror prompts.
+            When configured, failed primary calls route to the fallback
+            with the **original prompt** (no error-message append) — see
+            :class:`LLM` docstring for the asymmetric-cost design rationale.
+            Default ``None`` = no fallback; failures surface as actionable
+            :class:`LLMJSONStructureError` exceptions instead.
+
+            Example::
+
+                from proofagent_harness import Harness
+                report = Harness(
+                    llm="openai/gemma-4-E4B-it-MLX-8bit",
+                    fallback_llm="anthropic/claude-haiku-4-5-20251001",
+                    turns=50, consensus="debate",
+                ).evaluate(agent, ...)
+
+                # Inspect the asymmetric cost split:
+                print(report.token_split)  # {'primary': 0.91, 'fallback': 0.09}
+        """
         if isinstance(llm, LLM):
             self.llm: LLM = llm
             if seed is not None and self.llm.seed is None:
@@ -70,6 +103,25 @@ class Harness:
             self.llm = default_llm()
             if seed is not None:
                 self.llm.seed = seed
+
+        # ── Resolve fallback_llm and attach to primary so EVERY internal
+        # call (planner, conductor, juror, consensus, reporter) gets
+        # transparent rescue. The primary handles the bulk of the work;
+        # the fallback only fires on JSON failure, empty content, or
+        # exception. The fallback gets the ORIGINAL prompt (the v0.4.2
+        # bug fix — see LLM.complete_json docstring).
+        self.fallback_llm: LLM | None = None
+        if fallback_llm is not None:
+            if isinstance(fallback_llm, LLM):
+                self.fallback_llm = fallback_llm
+            elif isinstance(fallback_llm, str):
+                self.fallback_llm = LLM(model=fallback_llm, seed=seed)
+            else:
+                raise TypeError(
+                    f"fallback_llm must be a str or LLM instance, got "
+                    f"{type(fallback_llm).__name__!s}"
+                )
+            self.llm.fallback_llm = self.fallback_llm
 
         raw_metrics = metrics or list(CANONICAL_METRICS)
         self.metrics = [canonicalize_metric(m) for m in raw_metrics]
@@ -180,6 +232,24 @@ class Harness:
         progress = ProgressReporter(enabled=self.verbose)
         composed_callback = _compose_callbacks(progress.on_event, on_event)
 
+        # Wire LLM.on_fallback → harness Event stream. Subscribers to
+        # `on_event` will receive a `fallback_triggered` Event each time
+        # the fallback LLM is invoked (with payload: primary_model,
+        # fallback_model, stage, reason). The LLM also prints a short
+        # progress line to stdout regardless of subscribers.
+        if self.fallback_llm is not None:
+            def _on_fallback(payload: dict[str, Any]) -> None:
+                composed_callback(Event(
+                    type="fallback_triggered",
+                    detail=(
+                        f"{payload.get('primary_model', '?')} → "
+                        f"{payload.get('fallback_model', '?')} "
+                        f"({payload.get('stage', '?')}: {payload.get('reason', '?')})"
+                    ),
+                    payload=payload,
+                ))
+            self.llm.on_fallback = _on_fallback
+
         if self.verbose:
             progress.start(turn_count=self.turns)
 
@@ -272,6 +342,23 @@ class Harness:
         except ValueError:
             cert = Certification.NOT_READY
 
+        # v0.4.2: per-source accounting for the asymmetric-cost story.
+        primary_tot = self.llm.primary_prompt_tokens + self.llm.primary_completion_tokens
+        fb_tot = self.llm.fallback_prompt_tokens + self.llm.fallback_completion_tokens
+        grand_tot = primary_tot + fb_tot
+        fb_rate = (
+            self.llm.fallback_call_count
+            / (self.llm.primary_call_count + self.llm.fallback_call_count)
+            if (self.llm.primary_call_count + self.llm.fallback_call_count) > 0
+            else 0.0
+        )
+        token_split: dict[str, float] = {}
+        if self.fallback_llm is not None and grand_tot > 0:
+            token_split = {
+                "primary": round(primary_tot / grand_tot, 4),
+                "fallback": round(fb_tot / grand_tot, 4),
+            }
+
         return Report(
             final_score=float(state.get("final_score") or 0.0),
             certification=cert,
@@ -285,8 +372,22 @@ class Harness:
             summary=str(state.get("summary") or ""),
             duration_seconds=round(duration, 2),
             tokens_used=int(self.llm.total_tokens),
+            # ── v0.4.2 per-source LLM accounting ──
+            primary_llm_model=self.llm.model,
+            primary_call_count=int(self.llm.primary_call_count),
+            primary_prompt_tokens=int(self.llm.primary_prompt_tokens),
+            primary_completion_tokens=int(self.llm.primary_completion_tokens),
+            primary_cost_usd=float(self.llm.primary_cost_usd),
+            fallback_llm_model=(self.fallback_llm.model if self.fallback_llm else ""),
+            fallback_call_count=int(self.llm.fallback_call_count),
+            fallback_prompt_tokens=int(self.llm.fallback_prompt_tokens),
+            fallback_completion_tokens=int(self.llm.fallback_completion_tokens),
+            fallback_cost_usd=float(self.llm.fallback_cost_usd),
+            fallback_rate=round(fb_rate, 4),
+            token_split=token_split,
             metadata={
                 "model": self.llm.model,
+                "fallback_model": self.fallback_llm.model if self.fallback_llm else None,
                 "consensus_strategy": self.consensus,
                 "personas": self.personas,
                 "metrics": self.metrics,

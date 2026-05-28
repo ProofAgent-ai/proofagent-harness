@@ -1,0 +1,255 @@
+"""Regression tests for the v0.4.2 LLM fixes.
+
+Covers:
+
+  1. The core bug fix: `complete_json` no longer appends the failed reply +
+     error message to the conversation on retry. Each call sends exactly the
+     ORIGINAL prompt. This prevents the compounding-prompt feedback loop
+     that overflowed model context windows on long-context evals.
+
+  2. The optional `fallback_llm`: when configured, failed primary calls
+     (JSON parse failure OR transport exception) automatically route to the
+     fallback with the SAME original prompt. The fallback never sees the
+     primary's failed reply or any error message.
+
+  3. The new `LLMJSONStructureError`: actionable error raised when no
+     fallback is configured and the primary can't produce JSON. Message
+     names the model, the parse error, and three concrete recommended fixes.
+
+  4. Per-source token accounting: `primary_*` and `fallback_*` counters on
+     the `LLM` instance update independently. Surfaced in the Report as
+     `token_split` so the asymmetric-cost story is visible to users.
+
+  5. Backwards compat: an `LLM` constructed with no `fallback_llm` behaves
+     identically to v0.4.1 — same counters, same exceptions.
+
+The tests stub `litellm.acompletion` so they run offline in <1 second.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+import types
+from typing import Any
+
+import pytest
+
+
+# ── Shared fixtures ────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _patch_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace litellm.acompletion with a queue-driven stub. Returns the
+    state dict so tests can push responses + read the call log."""
+    state: dict[str, Any] = {"call_log": [], "responses": []}
+
+    async def _fake_acompletion(*, model: str, messages: list, **kwargs: Any) -> dict[str, Any]:
+        state["call_log"].append({
+            "model": model,
+            "messages": list(messages),
+            "kwargs": dict(kwargs),
+        })
+        if not state["responses"]:
+            raise RuntimeError("test queue empty: push a response before calling")
+        item = state["responses"].pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return {
+            "choices": [{"message": {"content": item}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            "model": model,
+        }
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", _fake_acompletion)
+    return state
+
+
+# ── Imports under test (placed AFTER the fixture monkeypatches litellm) ────
+
+
+def _llm_classes() -> tuple[type, type, type]:
+    from proofagent_harness.llm import LLM, LLMError, LLMJSONStructureError
+
+    return LLM, LLMError, LLMJSONStructureError
+
+
+# ── Test 1: no error-append (the core v0.4.1 bug fix) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_complete_json_no_fallback_raises_actionable_error(_patch_litellm: dict[str, Any]) -> None:
+    """When primary returns broken JSON and no fallback is configured,
+    raise LLMJSONStructureError. SINGLE attempt. No retry. No error append."""
+    LLM, _LLMError, LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = ['{"score": broken json oops']
+    llm = LLM(model="test-primary")
+
+    with pytest.raises(LLMJSONStructureError) as exc:
+        await llm.complete_json([{"role": "user", "content": "score this"}])
+
+    # Exactly ONE litellm call. No retry. Prompt size constant.
+    assert len(_patch_litellm["call_log"]) == 1
+    sent_message = _patch_litellm["call_log"][0]["messages"][-1]["content"]
+    assert "score this" in sent_message
+    assert "previous reply" not in sent_message, (
+        "BUG: error message was appended to the conversation. "
+        "The v0.4.2 fix requires single-attempt-no-append."
+    )
+
+    # Actionable error: names the model, recommends fallback_llm.
+    msg = str(exc.value)
+    assert "test-primary" in msg
+    assert "fallback_llm" in msg
+    assert "Anthropic" in msg or "stronger" in msg.lower()
+
+
+# ── Test 2: fallback rescues with original prompt ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_complete_json_fallback_rescues_with_original_prompt(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """When primary returns broken JSON and fallback IS configured:
+    fallback receives the ORIGINAL messages (no error append, no broken reply)."""
+    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = [
+        '{"score": broken json',  # primary fails parse
+        '{"score": 8, "reasoning": "good"}',  # fallback succeeds
+    ]
+    primary = LLM(model="test-primary")
+    fallback = LLM(model="test-fallback")
+    primary.fallback_llm = fallback
+
+    notices: list[dict[str, Any]] = []
+    primary.on_fallback = lambda p: notices.append(p)
+
+    result = await primary.complete_json(
+        [{"role": "user", "content": "score this"}]
+    )
+
+    assert result == {"score": 8, "reasoning": "good"}
+    assert len(_patch_litellm["call_log"]) == 2
+
+    # Critical: fallback got the ORIGINAL prompt.
+    fb_messages = _patch_litellm["call_log"][1]["messages"]
+    fb_last = fb_messages[-1]["content"]
+    assert "score this" in fb_last
+    assert "previous reply" not in fb_last
+    assert "broken" not in fb_last, (
+        "BUG: primary's broken reply leaked into the fallback's prompt."
+    )
+
+    # Per-source token accounting.
+    assert primary.primary_call_count == 1
+    assert primary.fallback_call_count == 1
+    assert primary.primary_prompt_tokens == 100
+    assert primary.fallback_prompt_tokens == 100
+
+    # on_fallback callback fires with structured payload.
+    assert len(notices) == 1
+    assert notices[0]["primary_model"] == "test-primary"
+    assert notices[0]["fallback_model"] == "test-fallback"
+    assert notices[0]["reason"] == "json_parse_error"
+    assert notices[0]["stage"] == "complete_json"
+
+
+# ── Test 3: transport errors also route to fallback ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_complete_json_fallback_rescues_transport_errors(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """When the primary's underlying litellm call RAISES (network, rate
+    limit, etc.), the fallback should also rescue."""
+    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = [
+        ConnectionError("simulated network failure"),
+        '{"x": 1}',
+    ]
+    primary = LLM(model="test-primary")
+    fallback = LLM(model="test-fallback")
+    primary.fallback_llm = fallback
+
+    result = await primary.complete_json([{"role": "user", "content": "x"}])
+
+    assert result == {"x": 1}
+    assert primary.fallback_call_count == 1
+    # When the primary throws BEFORE producing content, there's nothing to
+    # account for on the primary side.
+    assert primary.primary_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_complete_json_no_fallback_propagates_transport_errors(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """Without a fallback, transport errors bubble up unchanged (NOT as
+    LLMJSONStructureError — that's for JSON-specific failures)."""
+    LLM, LLMError, LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = [ConnectionError("simulated network failure")]
+    llm = LLM(model="test-primary")
+
+    with pytest.raises(LLMError) as exc:
+        await llm.complete_json([{"role": "user", "content": "x"}])
+
+    # Should be the base LLMError, not the JSON subclass.
+    assert not isinstance(exc.value, LLMJSONStructureError)
+    assert "test-primary" in str(exc.value)
+
+
+# ── Test 4: backwards compat ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_preserves_v041_behavior(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """An LLM with no fallback_llm behaves identically to v0.4.1 on a
+    successful call — same total_tokens, same call_count, same return type."""
+    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = ['{"x": 1}']
+    llm = LLM(model="test-only")
+
+    r = await llm.complete([{"role": "user", "content": "hi"}])
+
+    assert r.text == '{"x": 1}'
+    assert llm.primary_call_count == 1
+    assert llm.fallback_call_count == 0
+    assert llm.total_tokens == 150
+    assert llm.total_cost_usd >= 0.0
+
+
+# ── Test 5: both-failed error has different message ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_complete_json_both_failed_says_prompt_is_broken(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """When BOTH primary AND fallback can't produce valid JSON, the error
+    should point the user at the PROMPT (not the model) as the likely cause."""
+    LLM, _LLMError, LLMJSONStructureError = _llm_classes()
+
+    _patch_litellm["responses"] = ['{"a": broken', '{"b": also broken']
+    primary = LLM(model="test-primary")
+    fallback = LLM(model="test-fallback")
+    primary.fallback_llm = fallback
+
+    with pytest.raises(LLMJSONStructureError) as exc:
+        await primary.complete_json([{"role": "user", "content": "x"}])
+
+    msg = str(exc.value)
+    assert "Both" in msg or "both" in msg
+    assert "PROMPT" in msg or "prompt" in msg
+    assert "Lower --turns" in msg or "Lower --context-budget" in msg

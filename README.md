@@ -35,15 +35,14 @@ ProofAgent-Harness is published on arXiv. If you use it in research or build on 
 > Bousetouane, F. (2026). *ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents.* arXiv preprint [arXiv:2605.24134](https://arxiv.org/abs/2605.24134).
 
 ```bibtex
-@article{bousetouane2026proofagent,
-  title         = {ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents},
-  author        = {Bousetouane, Fouad},
-  journal       = {arXiv preprint arXiv:2605.24134},
-  year          = {2026},
-  url           = {https://arxiv.org/abs/2605.24134},
-  archivePrefix = {arXiv},
-  eprint        = {2605.24134},
-  primaryClass  = {cs.MA},
+@misc{bousetouane2026proofagentharnessopeninfrastructure,
+      title={ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents},
+      author={Fouad Bousetouane},
+      year={2026},
+      eprint={2605.24134},
+      archivePrefix={arXiv},
+      primaryClass={cs.MA},
+      url={https://arxiv.org/abs/2605.24134},
 }
 ```
 
@@ -316,13 +315,42 @@ _→ Read more: [Bring your own traps](https://www.proofagent.ai/harness/docs#re
 
 Main `Harness(...)` knobs:
 
-- **`llm`** — any LiteLLM target (default `claude-sonnet-4-6`)
+- **`llm`** — primary Harness LLM, any LiteLLM target (default `claude-sonnet-4-6`)
+- **`fallback_llm`** — *(v0.4.2, optional)* cross-family rescue LLM that handles failed primary calls (JSON malformed, empty, exception). See [Small local LLM + cross-family fallback](#small-local-llm--cross-family-fallback) below
 - **`turns`** — conductor turn count (default `8` · `4` for smoke · `15+` for high-stakes)
 - **`consensus`** — `independent` (1×) · `delphi` (default, ~1.5×) · `debate` (strictest, 3-5×)
 - **`seed`** — OpenAI / Gemini honor it; Anthropic doesn't yet
 - **`metrics`** — restrict scoring to a subset of the 5 canonical
 - **`extra_traps`** / **`extra_skills`** — merge in your own
 - **`context_budget_tokens`** — override automatic context budget (rarely needed)
+
+### Small local LLM + cross-family fallback
+
+Running with a small local Harness LLM (Gemma 4B, Llama-3.2-3B, Qwen 3B, Phi-3.5) under long-turn evaluation? Use the `fallback_llm` parameter so any juror call the small model can't handle (malformed JSON, timeout, exception) automatically routes to a stronger cross-family model. The fallback receives the **original prompt** — never the primary's broken reply or an error message (the v0.4.2 bug fix).
+
+```python
+from proofagent_harness import Harness
+
+# Cheap local primary + cross-family rescue
+report = Harness(
+    llm="openai/gemma-4-E4B-it-MLX-8bit",                  # local via LM Studio
+    fallback_llm="anthropic/claude-haiku-4-5-20251001",    # cross-family rescue
+    turns=50,
+    consensus="debate",
+).evaluate(agent, ...)
+
+# Inspect the asymmetric-cost split:
+print(report.fallback_rate)           # 0.07 — only 7% of calls needed rescue
+print(report.token_split)             # {'primary': 0.91, 'fallback': 0.09}
+print(report.primary_call_count)      # 28
+print(report.fallback_call_count)     # 2
+```
+
+A **high primary share (>85%)** means the asymmetric design is working — the cheap local model carries the bulk of the eval, fallback API spend is bounded by the failure rate. A **low primary share (<60%)** means the local model is overwhelmed; consider lowering `turns`, lowering `context_budget_tokens`, or using a stronger primary.
+
+Without `fallback_llm`, failed JSON calls raise the new `LLMJSONStructureError` with three concrete recommendations (use a stronger model, configure a fallback, or shrink the prompt). No more cryptic `Could not get valid JSON after 3 attempts: Unterminated string` errors.
+
+See the standalone benchmark in [`examples/asymmetric_benchmark/`](examples/asymmetric_benchmark/) for a full sweep across multiple local Harness LLMs × multiple frontier agents.
 
 Jurors and planner classification run at `temperature=0`. Conductor stays at moderate temp so adversarial creativity surfaces different failure modes. Expect ±0.5 score variance on Anthropic; for tightest determinism use OpenAI/Gemini + `seed=42`, or run N times and report median + IQR.
 

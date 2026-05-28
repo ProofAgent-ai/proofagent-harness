@@ -18,7 +18,7 @@ __copyright__ = "Copyright 2025-2026 ProofAI LLC"
 __license__   = "Apache-2.0"
 
 from proofagent_harness.harness import Harness
-from proofagent_harness.llm import LLM
+from proofagent_harness.llm import LLM, LLMError, LLMJSONStructureError
 from proofagent_harness.loaders import (
     TrapIndex,
     load_personas,
@@ -69,6 +69,8 @@ __all__ = [
     "Finding",
     "Harness",
     "JurorScore",
+    "LLMError",
+    "LLMJSONStructureError",
     "Persona",
     "Report",
     "Scoring",
