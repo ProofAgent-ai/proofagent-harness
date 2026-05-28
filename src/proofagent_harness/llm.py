@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from collections.abc import Callable
@@ -93,13 +94,13 @@ class LLM:
     # secondary LLM, which receives the ORIGINAL messages. Counters track
     # primary vs fallback spend separately so the cost-asymmetry story is
     # visible in the final report.
-    fallback_llm: "LLM | None" = None
+    fallback_llm: LLM | None = None
     # Optional callback invoked when fallback fires. Receives a dict with
     # keys: stage ('complete' | 'complete_json'), primary_model,
     # fallback_model, reason (exception type name + brief msg).
     # The harness wires this to its Event stream so on_event subscribers see
     # 'fallback_triggered' events in the live log.
-    on_fallback: "Callable[[dict[str, Any]], None] | None" = None
+    on_fallback: Callable[[dict[str, Any]], None] | None = None
 
     # Cumulative spend totals — shared across primary AND fallback calls.
     total_cost_usd: float = 0.0
@@ -247,7 +248,8 @@ class LLM:
             flush=True,
         )
         if self.on_fallback is not None:
-            try:
+            # Never crash the call path on a subscriber error.
+            with contextlib.suppress(Exception):
                 self.on_fallback({
                     "stage": stage,
                     "primary_model": primary,
@@ -255,8 +257,6 @@ class LLM:
                     "reason": reason,
                     "detail": detail,
                 })
-            except Exception:  # never crash the call path
-                pass
 
     async def complete_json(
         self,

@@ -2,46 +2,45 @@
 
 Covers:
 
-  1. The core bug fix: `complete_json` no longer appends the failed reply +
+  1. The core bug fix: ``complete_json`` no longer appends the failed reply +
      error message to the conversation on retry. Each call sends exactly the
      ORIGINAL prompt. This prevents the compounding-prompt feedback loop
      that overflowed model context windows on long-context evals.
 
-  2. The optional `fallback_llm`: when configured, failed primary calls
+  2. The optional ``fallback_llm``: when configured, failed primary calls
      (JSON parse failure OR transport exception) automatically route to the
      fallback with the SAME original prompt. The fallback never sees the
      primary's failed reply or any error message.
 
-  3. The new `LLMJSONStructureError`: actionable error raised when no
+  3. The new ``LLMJSONStructureError``: actionable error raised when no
      fallback is configured and the primary can't produce JSON. Message
      names the model, the parse error, and three concrete recommended fixes.
 
-  4. Per-source token accounting: `primary_*` and `fallback_*` counters on
-     the `LLM` instance update independently. Surfaced in the Report as
-     `token_split` so the asymmetric-cost story is visible to users.
+  4. Per-source token accounting: ``primary_*`` and ``fallback_*`` counters
+     on the ``LLM`` instance update independently. Surfaced in the Report as
+     ``token_split`` so the asymmetric-cost story is visible to users.
 
-  5. Backwards compat: an `LLM` constructed with no `fallback_llm` behaves
-     identically to v0.4.1 — same counters, same exceptions.
+  5. Backwards compat: an ``LLM`` constructed with no ``fallback_llm``
+     behaves identically to v0.4.1 — same counters, same exceptions.
 
-The tests stub `litellm.acompletion` so they run offline in <1 second.
+The tests stub ``litellm.acompletion`` so they run offline in <1 second.
 """
 
 from __future__ import annotations
 
-import asyncio
-import sys
-import types
 from typing import Any
 
+import litellm
 import pytest
 
+from proofagent_harness.llm import LLM, LLMError, LLMJSONStructureError
 
-# ── Shared fixtures ────────────────────────────────────────────────────────
+# ── Shared fixture ────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
 def _patch_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Replace litellm.acompletion with a queue-driven stub. Returns the
+    """Replace ``litellm.acompletion`` with a queue-driven stub. Returns the
     state dict so tests can push responses + read the call log."""
     state: dict[str, Any] = {"call_log": [], "responses": []}
 
@@ -62,30 +61,19 @@ def _patch_litellm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             "model": model,
         }
 
-    import litellm
-
     monkeypatch.setattr(litellm, "acompletion", _fake_acompletion)
     return state
-
-
-# ── Imports under test (placed AFTER the fixture monkeypatches litellm) ────
-
-
-def _llm_classes() -> tuple[type, type, type]:
-    from proofagent_harness.llm import LLM, LLMError, LLMJSONStructureError
-
-    return LLM, LLMError, LLMJSONStructureError
 
 
 # ── Test 1: no error-append (the core v0.4.1 bug fix) ─────────────────────
 
 
 @pytest.mark.asyncio
-async def test_complete_json_no_fallback_raises_actionable_error(_patch_litellm: dict[str, Any]) -> None:
+async def test_complete_json_no_fallback_raises_actionable_error(
+    _patch_litellm: dict[str, Any],
+) -> None:
     """When primary returns broken JSON and no fallback is configured,
     raise LLMJSONStructureError. SINGLE attempt. No retry. No error append."""
-    LLM, _LLMError, LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = ['{"score": broken json oops']
     llm = LLM(model="test-primary")
 
@@ -117,11 +105,9 @@ async def test_complete_json_fallback_rescues_with_original_prompt(
 ) -> None:
     """When primary returns broken JSON and fallback IS configured:
     fallback receives the ORIGINAL messages (no error append, no broken reply)."""
-    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = [
-        '{"score": broken json',  # primary fails parse
-        '{"score": 8, "reasoning": "good"}',  # fallback succeeds
+        '{"score": broken json',                # primary fails parse
+        '{"score": 8, "reasoning": "good"}',    # fallback succeeds
     ]
     primary = LLM(model="test-primary")
     fallback = LLM(model="test-fallback")
@@ -169,8 +155,6 @@ async def test_complete_json_fallback_rescues_transport_errors(
 ) -> None:
     """When the primary's underlying litellm call RAISES (network, rate
     limit, etc.), the fallback should also rescue."""
-    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = [
         ConnectionError("simulated network failure"),
         '{"x": 1}',
@@ -194,8 +178,6 @@ async def test_complete_json_no_fallback_propagates_transport_errors(
 ) -> None:
     """Without a fallback, transport errors bubble up unchanged (NOT as
     LLMJSONStructureError — that's for JSON-specific failures)."""
-    LLM, LLMError, LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = [ConnectionError("simulated network failure")]
     llm = LLM(model="test-primary")
 
@@ -216,8 +198,6 @@ async def test_no_fallback_preserves_v041_behavior(
 ) -> None:
     """An LLM with no fallback_llm behaves identically to v0.4.1 on a
     successful call — same total_tokens, same call_count, same return type."""
-    LLM, _LLMError, _LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = ['{"x": 1}']
     llm = LLM(model="test-only")
 
@@ -239,8 +219,6 @@ async def test_complete_json_both_failed_says_prompt_is_broken(
 ) -> None:
     """When BOTH primary AND fallback can't produce valid JSON, the error
     should point the user at the PROMPT (not the model) as the likely cause."""
-    LLM, _LLMError, LLMJSONStructureError = _llm_classes()
-
     _patch_litellm["responses"] = ['{"a": broken', '{"b": also broken']
     primary = LLM(model="test-primary")
     fallback = LLM(model="test-fallback")
