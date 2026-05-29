@@ -4,6 +4,86 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] — TBD (fix release)
+
+### Fixed — OpenAI fallback misrouted when proxy env var is set
+
+When a user wires a local proxy (e.g. LM Studio at
+`http://localhost:1234/v1`) by setting `OPENAI_BASE_URL` so the PRIMARY
+LLM routes through it, the v0.4.3 fallback path would inherit that env
+var for OpenAI-flavored fallback models too. A `fallback_llm="gpt-4.1-mini"`
+call would then hit LM Studio (which doesn't have `gpt-4.1-mini` loaded)
+and fail with:
+
+```
+litellm.BadRequestError: OpenAIException — No models loaded.
+Please load a model in the developer page or use the 'lms load' command.
+```
+
+v0.4.4 fixes this by:
+
+1. **New `LLM.api_base` field** — optional explicit endpoint override
+   passed to `litellm.acompletion` on every call. Pins the endpoint
+   regardless of `OPENAI_BASE_URL` / `OPENAI_API_BASE` env vars.
+
+2. **`Harness.__init__` auto-sets `api_base`** for OpenAI-flavored
+   fallback strings. When `fallback_llm` is a string matching `openai/*`
+   or bare `gpt-*` / `o1-*` / `o3-*` / `o4-*` / `chatgpt-*` /
+   `text-davinci`, the constructed fallback LLM gets
+   `api_base="https://api.openai.com/v1"` so it always reaches the
+   canonical OpenAI endpoint, bypassing any local proxy the primary uses.
+
+3. **Pre-built LLM instances respected unchanged** — if you pass
+   `Harness(fallback_llm=LLM(model="openai/...", api_base="https://my-azure.openai.azure.com/v1"))`,
+   your custom `api_base` wins. The auto-pin only fires when Harness is
+   constructing the LLM from a string AND no api_base was set.
+
+4. **Anthropic / Gemini / Mistral fallback strings untouched** — they
+   route via their provider's native API key (`ANTHROPIC_API_KEY`,
+   `GOOGLE_API_KEY`, etc.) and never collide with `OPENAI_BASE_URL`.
+
+### Added — Defense-in-depth: fallback preflight + model-identity verification
+
+Before the eval starts, the Harness now ALSO:
+
+- **Pings the fallback LLM** with a 5-token "ok" call. If it can't reach
+  the fallback (network, missing API key, wrong endpoint), the run
+  aborts BEFORE burning hours of wall time + API spend on a doomed eval.
+
+- **Verifies the response's `model` field matches the requested fallback**
+  via fuzzy normalization (strips `provider/` prefix and version-date
+  suffixes — so `openai/gpt-4.1-mini` ↔ `gpt-4.1-mini-2025-04-14`
+  matches cleanly, but `openai/gpt-4.1-mini` ↔ `gemma-4-e4b-it-mlx`
+  doesn't). If a proxy / Azure deployment / vLLM silently answered with
+  the WRONG model, the run aborts with a clear error telling you which
+  model actually responded vs which one you asked for.
+
+- **Logs the resolved fallback endpoint** at startup:
+  `Fallback LLM reachable (openai/gpt-4.1-mini) via api_base=https://api.openai.com/v1`.
+  At-a-glance verification that the wiring is correct.
+
+This is belt + braces on top of the `api_base` auto-pin: even if a future
+regression or unusual user config defeats the auto-pin, the preflight
+will catch it before the eval starts.
+
+### Migration notes
+
+No breaking changes. If you have `OPENAI_BASE_URL` set in your shell
+for local development AND use an OpenAI fallback string, you'll just
+silently start getting correct behavior (was: BadRequestError).
+
+If you're already passing a custom OpenAI-compatible endpoint via
+`OPENAI_BASE_URL`, switch to constructing the fallback as an `LLM`
+instance with explicit `api_base=`:
+
+```python
+from proofagent_harness import Harness, LLM
+
+# Azure OpenAI fallback (custom endpoint):
+fb = LLM(model="openai/gpt-4o-mini", api_base="https://my-deployment.openai.azure.com/v1")
+Harness(llm="claude-sonnet-4-6", fallback_llm=fb)
+```
+
 ## [0.4.3] — TBD (under test)
 
 ### Changed — `LLM.max_tokens` default 2048 → 8192

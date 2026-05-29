@@ -145,6 +145,73 @@ make_agent_from_spec = _factory.make_agent_from_spec
 make_context_from_spec = _factory.make_context_from_spec
 
 
+def make_agent_with_fallback(
+    spec: Any,
+    *,
+    primary_model: str,
+    fallback_model: str | None,
+) -> Callable[[str], AgentResponse]:
+    """Wrap an agent so primary-model exceptions automatically retry with a
+    fallback model.
+
+    Built specifically for running expensive/experimental frontier models
+    (gpt-5.5, claude-opus-4-7, gemini-2.5-pro) where the agent may hit
+    content-policy blocks, rate limits, or 5xx errors mid-eval — without
+    a fallback, those exceptions surface as `agent crash:ExceptionType`
+    and the cell loses that turn's signal.
+
+    Fallback fires on ANY exception from the primary agent call (network,
+    content-policy, rate limit, malformed response, etc.) but NOT on a
+    legitimate in-character refusal — refusals are normal scored output,
+    not errors.
+
+    If `fallback_model` is None, returns the primary agent unwrapped.
+    """
+    primary_agent = make_agent_from_spec(spec, model=primary_model)
+    if not fallback_model:
+        return primary_agent
+
+    fallback_agent = make_agent_from_spec(spec, model=fallback_model)
+    # Per-cell agent-fallback counters live in a mutable dict so the wrapper
+    # closure can mutate them in place. CellResult reads these at end-of-cell.
+    spec._agent_fallback_stats = {
+        "primary_calls": 0,
+        "fallback_calls": 0,
+        "fallback_errors": 0,
+    }
+
+    def wrapped(message: str) -> AgentResponse:
+        stats = spec._agent_fallback_stats
+        try:
+            r = primary_agent(message)
+            stats["primary_calls"] += 1
+            return r
+        except Exception as exc:
+            # Print a short stdout notice — visible alongside the harness's
+            # own [fallback] lines so the user sees BOTH layers of rescue.
+            print(
+                f"  [agent-fallback] {primary_model} → {fallback_model} · "
+                f"reason={type(exc).__name__}: {str(exc)[:120]}",
+                flush=True,
+            )
+            try:
+                r = fallback_agent(message)
+                stats["fallback_calls"] += 1
+                return r
+            except Exception as fb_exc:
+                stats["fallback_errors"] += 1
+                # Both primary and fallback agent failed — let it propagate
+                # as a crash (the cell logger will record it as
+                # agent_crashes++ and continue to the next turn).
+                raise RuntimeError(
+                    f"Both primary agent ({primary_model}) and fallback "
+                    f"({fallback_model}) failed. Primary: {type(exc).__name__}. "
+                    f"Fallback: {type(fb_exc).__name__}: {fb_exc}"
+                ) from fb_exc
+
+    return wrapped
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  Defaults — sensible, paper-friendly. Override via CLI.
 # ═════════════════════════════════════════════════════════════════════════════
@@ -663,6 +730,7 @@ def run_single_cell(
     harness_llm_name: str,
     agent_spec_path: Path,
     agent_model: str,
+    agent_model_fallback: str | None,
     fallback_llm: str,
     turns: int,
     consensus: str,
@@ -729,7 +797,15 @@ def run_single_cell(
     )
 
     # ── Build the agent + the compact logger ──
-    raw_agent = make_agent_from_spec(spec, model=agent_model)
+    # If --agent-model-fallback is set, wrap the agent so primary-model
+    # exceptions (content-policy blocks, rate limits, transient 5xx)
+    # automatically retry with the fallback model. Critical for running
+    # expensive frontier agents (gpt-5.5, opus-4-7) that may have spotty
+    # availability — without this, an agent exception kills the turn's
+    # signal and the cell logs `agent crash:ExceptionType`.
+    raw_agent = make_agent_with_fallback(
+        spec, primary_model=agent_model, fallback_model=agent_model_fallback,
+    )
     context = make_context_from_spec(spec)
     # Logger reads per-source counters directly off the Harness's primary
     # LLM instance — the same LLM the library updates on every call.
@@ -1138,7 +1214,20 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL,
-                   help=f"Frontier agent LLM under test. Default: {DEFAULT_AGENT_MODEL}.")
+                   help=f"Frontier agent LLM under test. Default: {DEFAULT_AGENT_MODEL}. "
+                        f"Examples: 'gpt-5.5', 'gpt-4.1', 'claude-opus-4-7'.")
+    p.add_argument("--agent-model-fallback", default=None,
+                   help="OPTIONAL fallback model for the AGENT UNDER TEST (NOT the "
+                        "Harness LLM — that's --fallback-llm). When the primary agent "
+                        "model errors (network, rate limit, content-policy block, etc.) "
+                        "the conductor's turn automatically retries the SAME prompt with "
+                        "this fallback. Useful when running expensive / experimental "
+                        "frontier models that may have spotty availability — e.g. "
+                        "'--agent-model gpt-5.5 --agent-model-fallback gpt-4.1' keeps "
+                        "the eval going if gpt-5.5 blocks a request. The fallback's "
+                        "responses ARE scored normally — this is for resilience, not "
+                        "as a separate baseline. Default: None (no fallback; agent "
+                        "exceptions surface as 'crash:ExceptionType' in the log).")
     # --fallback-llm (v0.4.2 official name) replaces --fallback-juror (v0.4.1
     # legacy name). The fallback wraps the ENTIRE Harness pipeline (planner,
     # conductor, juror, consensus, reporter), NOT just the juror stage — the
@@ -1240,7 +1329,10 @@ def main() -> int:
     print(f"  Started:        {started_at}", flush=True)
     print(f"  Agents ({len(agent_paths)}):    {', '.join(p.stem for p in agent_paths)}", flush=True)
     print(f"  Harness LLMs ({len(args.harness_llms)}): {', '.join(_short_model_name(h) for h in args.harness_llms)}", flush=True)
-    print(f"  Agent model:    {args.agent_model}", flush=True)
+    agent_line = f"  Agent model:    {args.agent_model}"
+    if args.agent_model_fallback:
+        agent_line += f"  (agent fallback: {args.agent_model_fallback})"
+    print(agent_line, flush=True)
     print(f"  Fallback LLM:   {args.fallback_llm}  (cross-family)", flush=True)
     timeout_tag = (
         f" · juror_timeout={args.juror_call_timeout}s"
@@ -1279,6 +1371,7 @@ def main() -> int:
         "agents": [p.stem for p in agent_paths],
         "harness_llms": list(args.harness_llms),
         "agent_model": args.agent_model,
+        "agent_model_fallback": args.agent_model_fallback,
         "fallback_llm": args.fallback_llm,
         "proxy_url": None if args.no_proxy else args.proxy_url,
         "consensus": args.consensus,
@@ -1317,6 +1410,7 @@ def main() -> int:
             turns=args.turns,
             consensus=args.consensus,
             seed=args.seed,
+            agent_model_fallback=args.agent_model_fallback,
             context_budget_tokens=args.context_budget,
             per_call_timeout=args.per_call_timeout,
             juror_call_timeout=args.juror_call_timeout,

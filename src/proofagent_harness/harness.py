@@ -39,6 +39,27 @@ from proofagent_harness.schemas import (
 )
 
 
+def _is_openai_like_model(name: str) -> bool:
+    """Heuristic: does this model string route through the OpenAI API?
+
+    Used to decide whether to pin api_base for the constructed fallback LLM
+    (v0.4.4 fix — see Harness.__init__ docstring). True for explicit
+    'openai/*' prefix AND for bare model names that everyone recognizes as
+    OpenAI products (gpt-*, o1-*, o3-*, o4-*). False for everything else,
+    including Anthropic / Gemini / Mistral / local proxies.
+
+    Conservative on purpose: false positives (treating a non-OpenAI model
+    as OpenAI) would pin api_base wrongly and break the call. Better to
+    miss and let the user pass a pre-built LLM with explicit api_base.
+    """
+    n = name.lower().strip()
+    if n.startswith("openai/"):
+        return True
+    # Bare model names commonly used as OpenAI shortcuts in litellm.
+    bare_prefixes = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-", "text-davinci")
+    return any(n.startswith(p) for p in bare_prefixes)
+
+
 class Harness:
     """The user-facing harness. Configure once, evaluate any number of agents."""
 
@@ -150,9 +171,24 @@ class Harness:
         self.fallback_llm: LLM | None = None
         if fallback_llm is not None:
             if isinstance(fallback_llm, LLM):
+                # User passed a pre-built LLM — respect their configuration
+                # verbatim (api_base, max_tokens, etc.). This is the escape
+                # hatch for custom OpenAI-compatible endpoints (Azure, vLLM).
                 self.fallback_llm = fallback_llm
             elif isinstance(fallback_llm, str):
-                self.fallback_llm = LLM(model=fallback_llm, **_llm_kwargs)
+                # v0.4.4: when the fallback is an OpenAI-flavored string AND
+                # we're constructing the LLM ourselves, pin api_base to the
+                # canonical OpenAI endpoint so the fallback bypasses any
+                # OPENAI_BASE_URL env var the user may have set for the
+                # primary (e.g. proxy_url → LM Studio in the asymmetric
+                # benchmark). Without this, OpenAI fallback calls misroute
+                # to the local proxy and fail with "No models loaded".
+                fb_kwargs = dict(_llm_kwargs)
+                if _is_openai_like_model(fallback_llm):
+                    fb_kwargs.setdefault(
+                        "api_base", "https://api.openai.com/v1"
+                    )
+                self.fallback_llm = LLM(model=fallback_llm, **fb_kwargs)
             else:
                 raise TypeError(
                     f"fallback_llm must be a str or LLM instance, got "
@@ -301,6 +337,27 @@ class Harness:
                     detail=f"Harness LLM reachable ({self.llm.model})",
                 )
             )
+
+            # v0.4.4 defense-in-depth: also preflight the fallback LLM and
+            # verify the responding model identity matches what we asked for.
+            # Catches misrouting where a proxy (LM Studio, Azure custom
+            # endpoint, etc.) silently answered with a different model. If
+            # the fallback can't be reached OR responds from the wrong
+            # model, we abort BEFORE the eval starts — saves hours of wall
+            # time + API spend on a run that would have collapsed mid-cell.
+            if self.fallback_llm is not None:
+                composed_callback(Event(
+                    type="setup_start",
+                    detail=f"verifying fallback LLM ({self.fallback_llm.model})",
+                ))
+                await self._preflight_check_fallback_llm()
+                composed_callback(Event(
+                    type="setup_done",
+                    detail=(
+                        f"Fallback LLM reachable ({self.fallback_llm.model}) "
+                        f"via api_base={self.fallback_llm.api_base or '<provider default>'}"
+                    ),
+                ))
 
             initial_state = self._build_initial_state(
                 agent=agent,
@@ -537,8 +594,125 @@ class Harness:
                 "Aborting before evaluation starts. No real tokens spent."
             ) from exc
 
+    async def _preflight_check_fallback_llm(self) -> None:
+        """v0.4.4: confirm the fallback LLM is reachable AND that the
+        responding model identity matches what we asked for.
+
+        Catches two classes of misrouting that v0.4.1-4.3 hit at runtime:
+
+          1. Network unreachable / wrong API key → fail-fast with a clear
+             error before the eval burns hours of wall time and API spend.
+          2. Proxy intercepted the call and returned a response from a
+             DIFFERENT model (e.g. ``OPENAI_BASE_URL`` pointed at LM Studio,
+             which has Gemma loaded but responded to a request for
+             ``gpt-4.1-mini``) → fail-fast with the actual returned model
+             name in the error message.
+
+        The v0.4.4 ``api_base`` auto-pin (in ``Harness.__init__``) is the
+        primary defense; this preflight is defense-in-depth so a future
+        regression OR a user's custom routing CAN'T silently misroute the
+        fallback and waste a multi-hour run.
+        """
+        if self.fallback_llm is None:
+            return
+
+        try:
+            r = await self.fallback_llm.complete(
+                [{"role": "user", "content": "ok"}],
+                max_tokens=5,
+                temperature=0,
+            )
+        except Exception as exc:
+            raise LLMNotConfiguredError(
+                "Fallback LLM pre-flight check failed — the harness cannot "
+                "reach the configured fallback and refused to start the "
+                "evaluation.\n\n"
+                f"  Fallback model:    {self.fallback_llm.model}\n"
+                f"  Fallback api_base: {self.fallback_llm.api_base or '<provider default>'}\n"
+                f"  Error:             {type(exc).__name__}: {exc}\n\n"
+                "Likely causes:\n"
+                "  1. Missing API key — check that the provider-matching env\n"
+                "     var is set (ANTHROPIC_API_KEY / OPENAI_API_KEY /\n"
+                "     GEMINI_API_KEY) IN THE SAME shell that launched the run.\n"
+                "  2. Network issue — verify api.openai.com / api.anthropic.com\n"
+                "     is reachable from this machine.\n"
+                "  3. Wrong endpoint — if you have OPENAI_BASE_URL set for a\n"
+                "     local proxy AND your fallback is openai/*, v0.4.4 pins\n"
+                "     api_base=https://api.openai.com/v1 automatically. For\n"
+                "     custom endpoints (Azure, vLLM), pass the fallback as a\n"
+                "     pre-built LLM instance with explicit api_base=.\n\n"
+                "Aborting before evaluation starts. No real tokens spent on "
+                "the eval (one tiny preflight call may have been billed)."
+            ) from exc
+
+        # Model-identity check — confirm a proxy didn't silently respond
+        # with a different model than requested.
+        returned_model = ""
+        try:
+            returned_model = (r.raw or {}).get("model") or ""
+        except Exception:
+            returned_model = ""
+
+        if returned_model and not _models_match(
+            self.fallback_llm.model, returned_model
+        ):
+            raise LLMNotConfiguredError(
+                "Fallback LLM responded — but from a DIFFERENT model than "
+                "configured. Aborting to prevent silently scoring with the "
+                "wrong fallback.\n\n"
+                f"  Requested fallback: {self.fallback_llm.model}\n"
+                f"  Provider returned:  {returned_model}\n"
+                f"  Fallback api_base:  {self.fallback_llm.api_base or '<provider default>'}\n\n"
+                "This means a proxy or routing layer intercepted the request\n"
+                "and returned a response from a different model. Likely:\n"
+                "  - OPENAI_BASE_URL points to a local proxy (LM Studio, vLLM)\n"
+                "    that doesn't have the requested model and silently\n"
+                "    answered with whatever model it does have loaded.\n"
+                "  - An Azure OpenAI deployment ID is shadowing the requested\n"
+                "    model name.\n\n"
+                "Fix by EITHER:\n"
+                "  a) Passing the fallback as a pre-built LLM instance with\n"
+                "     an explicit api_base= that points at the right endpoint.\n"
+                "  b) Unsetting OPENAI_BASE_URL (or equivalent env var) for\n"
+                "     this run.\n\n"
+                "Aborting before evaluation starts."
+            )
+
 class LLMNotConfiguredError(RuntimeError):
     """Raised when the Harness LLM cannot authenticate, reach the provider,"""
+
+
+def _models_match(requested: str, returned: str) -> bool:
+    """Fuzzy match between a requested model id and what the provider
+    returned. Permissive on both sides — providers often strip the
+    'openai/' prefix and add version dates / deployment IDs.
+
+    Examples that should MATCH:
+      openai/gpt-4.1-mini          ↔ gpt-4.1-mini-2025-04-14
+      claude-haiku-4-5-20251001    ↔ claude-haiku-4-5
+      anthropic/claude-sonnet-4-6  ↔ claude-sonnet-4-6
+
+    Examples that should NOT match (the misrouting we're catching):
+      openai/gpt-4.1-mini          ↔ gemma-4-e4b-it-mlx
+      claude-haiku-4-5-20251001    ↔ gpt-4.1-mini
+    """
+    def _normalize(m: str) -> str:
+        m = m.lower().strip()
+        # Strip provider prefix.
+        if "/" in m:
+            m = m.split("/", 1)[1]
+        # Strip common version-date suffixes (-YYYYMMDD or -YYYY-MM-DD).
+        import re as _re
+        m = _re.sub(r"-\d{8}$", "", m)
+        m = _re.sub(r"-\d{4}-\d{2}-\d{2}$", "", m)
+        return m
+
+    a = _normalize(requested)
+    b = _normalize(returned)
+    # Match if either is a substring of the other (handles version drift
+    # in both directions: requested 'haiku-4-5' vs returned 'haiku-4-5-20251001',
+    # or requested 'gpt-4.1-mini' vs returned 'gpt-4.1-mini-2025-04-14').
+    return a in b or b in a
 
 def _compose_callbacks(
     *callbacks: Callable[[Event], None] | None,

@@ -288,6 +288,157 @@ async def test_fallback_max_tokens_respects_user_lower_setting(
 
 
 @pytest.mark.asyncio
+async def test_llm_api_base_passed_to_litellm(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """v0.4.4: LLM.api_base, if set, is forwarded to litellm.acompletion
+    on every call. Pins the endpoint regardless of OPENAI_BASE_URL env var."""
+    _patch_litellm["responses"] = ['{"x": 1}']
+    llm = LLM(model="openai/gpt-4.1-mini", api_base="https://api.openai.com/v1")
+
+    await llm.complete_json([{"role": "user", "content": "x"}])
+
+    call = _patch_litellm["call_log"][0]
+    assert call["kwargs"].get("api_base") == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_harness_auto_sets_api_base_for_openai_fallback(
+    _patch_litellm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.4.4: when fallback_llm is an openai/* string, Harness pins
+    api_base=https://api.openai.com/v1 on the constructed LLM. This bypasses
+    any OPENAI_BASE_URL env var the user set for a local proxy (LM Studio).
+
+    Without this, the OpenAI fallback would inherit the proxy URL and try
+    to call gpt-4.1-mini against LM Studio — which would 400 with 'No
+    models loaded'.
+    """
+    from proofagent_harness.harness import Harness
+
+    # Simulate the asymmetric benchmark's wire_proxy() side effect.
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+
+    h = Harness(
+        llm="claude-sonnet-4-6",
+        fallback_llm="openai/gpt-4.1-mini",
+    )
+    # Fallback LLM constructed by Harness should have api_base pinned.
+    assert h.fallback_llm is not None
+    assert h.fallback_llm.api_base == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_harness_preserves_user_llm_instance_api_base(
+    _patch_litellm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.4.4: when the user passes a pre-built LLM instance for the
+    fallback (e.g. Azure OpenAI with a custom api_base), Harness MUST NOT
+    override their configuration. This is the escape hatch for users on
+    OpenAI-compatible endpoints other than api.openai.com."""
+    from proofagent_harness.harness import Harness
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+
+    user_fallback = LLM(
+        model="openai/gpt-4.1-mini",
+        api_base="https://my-azure-deployment.openai.azure.com/v1",
+    )
+    h = Harness(llm="claude-sonnet-4-6", fallback_llm=user_fallback)
+
+    # User's api_base is respected, NOT overridden to api.openai.com.
+    assert h.fallback_llm is user_fallback
+    assert h.fallback_llm.api_base == "https://my-azure-deployment.openai.azure.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_harness_does_not_pin_api_base_for_anthropic_fallback(
+    _patch_litellm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.4.4: Anthropic/Gemini fallback strings do NOT get an api_base
+    pinned — they use the provider's native endpoint via ANTHROPIC_API_KEY /
+    GOOGLE_API_KEY, which never collides with OPENAI_BASE_URL."""
+    from proofagent_harness.harness import Harness
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
+
+    h = Harness(
+        llm="openai/gemma-...",
+        fallback_llm="anthropic/claude-haiku-4-5-20251001",
+    )
+    assert h.fallback_llm is not None
+    # Anthropic models route via api.anthropic.com automatically — no
+    # api_base override needed.
+    assert h.fallback_llm.api_base is None
+
+
+def test_models_match_fuzzy_normalization() -> None:
+    """v0.4.4: _models_match handles provider-prefix stripping + version-date
+    normalization so legitimate fallback responses aren't flagged as misrouted."""
+    from proofagent_harness.harness import _models_match
+    # Should MATCH (legitimate variants):
+    assert _models_match("openai/gpt-4.1-mini", "gpt-4.1-mini-2025-04-14")
+    assert _models_match("claude-haiku-4-5-20251001", "claude-haiku-4-5")
+    assert _models_match("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6")
+    assert _models_match("gpt-4.1-mini", "gpt-4.1-mini")
+    # Should NOT match (the misrouting we're catching):
+    assert not _models_match("openai/gpt-4.1-mini", "gemma-4-e4b-it-mlx")
+    assert not _models_match("claude-haiku-4-5", "gpt-4.1-mini")
+    assert not _models_match("openai/gpt-4.1-mini", "claude-haiku-4-5")
+
+
+@pytest.mark.asyncio
+async def test_fallback_preflight_catches_misrouted_response(
+    _patch_litellm: dict[str, Any],
+) -> None:
+    """v0.4.4: when the preflight returns from a DIFFERENT model than asked,
+    Harness aborts before the eval starts (instead of running the whole
+    eval with the wrong model silently scoring everything)."""
+    # Primary OK, fallback "responds" but the response.model is the wrong one
+    # (e.g. LM Studio answered for gpt-4.1-mini with gemma-4-e4b-it-mlx).
+    # We patch _fake_acompletion to return a different model for the fallback's
+    # preflight by overriding the fixture's behavior.
+    import litellm
+
+    from proofagent_harness.harness import Harness, LLMNotConfiguredError
+
+    async def _wrong_model_fallback(*, model, messages, **kwargs):
+        if "gpt" in model.lower():
+            # The "fallback" responded — but from the local proxy, not OpenAI.
+            return {
+                "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "model": "gemma-4-e4b-it-mlx",  # ← MISROUTED
+            }
+        # Primary preflight (claude) succeeds normally
+        return {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "model": model,
+        }
+    # Replace the fixture's stub for this test only.
+    import contextlib
+    with contextlib.suppress(AttributeError):
+        litellm.acompletion = _wrong_model_fallback
+
+    h = Harness(llm="claude-sonnet-4-6", fallback_llm="openai/gpt-4.1-mini", verbose=False)
+
+    # Dummy agent — must accept (message: str) and return AgentResponse
+    from proofagent_harness import AgentResponse
+    def dummy_agent(_msg: str) -> AgentResponse:
+        return AgentResponse(text="ok", tools_called=[], retrievals=[])
+
+    with pytest.raises(LLMNotConfiguredError) as exc:
+        await h.aevaluate(dummy_agent)
+
+    msg = str(exc.value)
+    assert "DIFFERENT model" in msg
+    assert "gpt-4.1-mini" in msg
+    assert "gemma" in msg
+    assert "Aborting" in msg
+
+
+@pytest.mark.asyncio
 async def test_complete_json_both_failed_says_prompt_is_broken(
     _patch_litellm: dict[str, Any],
 ) -> None:

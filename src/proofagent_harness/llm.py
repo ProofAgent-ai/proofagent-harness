@@ -109,6 +109,24 @@ class LLM:
     max_tokens: int = 8192
     seed: int | None = None
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
+    # ── v0.4.4: explicit api_base override ──
+    # When set, this is passed to litellm.acompletion as `api_base=` for
+    # every call this LLM makes. Lets the user pin a specific endpoint
+    # regardless of what's in the OPENAI_BASE_URL env var.
+    #
+    # The motivating case: in the asymmetric benchmark, wire_proxy() sets
+    # OPENAI_BASE_URL=http://localhost:1234/v1 so the PRIMARY (local Gemma
+    # via LM Studio) routes through the proxy. But the OpenAI FALLBACK
+    # (gpt-4.1-mini) would inherit that env var and ALSO get routed to
+    # LM Studio — which doesn't have gpt-4.1-mini loaded, surfacing as
+    # "BadRequestError: No models loaded".
+    #
+    # Harness.__init__ auto-sets this to https://api.openai.com/v1 when
+    # the fallback_llm string matches openai/* or gpt-*. Users who want
+    # a custom OpenAI-compatible endpoint (Azure, vLLM, etc.) should pass
+    # a pre-built LLM instance for the fallback — Harness respects the
+    # instance configuration unchanged.
+    api_base: str | None = None
     # ── v0.4.2: native cross-family fallback ──
     # When set, failed calls (empty / non-JSON / exception) route to this
     # secondary LLM, which receives the ORIGINAL messages. Counters track
@@ -188,6 +206,12 @@ class LLM:
             temperature if temperature is not None else self.temperature
         )
         call_kwargs["max_tokens"] = max_tokens or self.max_tokens
+
+        # v0.4.4: explicit api_base override pins the endpoint regardless of
+        # any OPENAI_BASE_URL / OPENAI_API_BASE env var the user may have
+        # set (e.g. local proxy). Empty string is treated as unset.
+        if self.api_base:
+            call_kwargs["api_base"] = self.api_base
 
         # Pre-strip params known-deprecated for this model (Opus 4.7 etc.).
         call_kwargs = _strip_deprecated_params(self.model, call_kwargs)
