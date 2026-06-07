@@ -235,7 +235,12 @@ class LiveReporter:
                 "X-Harness-Version": _HARNESS_VERSION,
                 "Content-Type": "application/json",
             }
-            r = httpx.post(url, json=body, headers=headers, timeout=3.0)
+            # 10s timeout (was 3s) — 3s was too tight when called from inside
+            # an async LangGraph node that's already busy with a juror LLM
+            # call. The OS thread could sleep >3s between the post() request
+            # and response under load, causing silent timeouts that lost the
+            # entire transcript and activity feed.
+            r = httpx.post(url, json=body, headers=headers, timeout=10.0)
             if 200 <= r.status_code < 300:
                 self._events_sent += 1
             else:
