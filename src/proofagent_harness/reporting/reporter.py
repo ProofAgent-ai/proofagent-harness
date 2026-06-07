@@ -291,28 +291,43 @@ class LiveReporter:
             "defects": list(defects or []),
         }
         try:
-            # Shorter timeout than the default — we don't want a slow network
-            # to slow the eval. Backend returns 204 on success.
+            # 10s timeout (was 3s) — under async/LangGraph load the sync
+            # httpx call can sleep >3s between request and response, which
+            # caused silent timeouts that lost the entire transcript.
+            # Print one-line confirmation so the user SEES per-turn POSTs
+            # actually happening — without this the SDK was silent.
             url = f"{self.cfg.base_url}{path}"
             headers = {
                 "Authorization": f"Bearer {self.cfg.api_key}",
                 "X-Harness-Version": _HARNESS_VERSION,
                 "Content-Type": "application/json",
             }
-            r = httpx.post(url, json=payload, headers=headers, timeout=3.0)
+            r = httpx.post(url, json=payload, headers=headers, timeout=10.0)
             if 200 <= r.status_code < 300:
                 self._turn_events_sent += 1
+                if self.cfg.print_progress:
+                    self._print(f"[report]    → turn {turn_index} synced ({r.status_code})")
             else:
                 self._turn_events_failed += 1
+                if self.cfg.print_progress:
+                    self._print(
+                        f"[report]    ✗ turn {turn_index} FAILED "
+                        f"({r.status_code}): {(r.text or '')[:120]}"
+                    )
                 if not self._last_failure_detail:
                     self._last_failure_detail = (
                         f"/turn-events HTTP {r.status_code}: {(r.text or '')[:200]}"
                     )
         except Exception as exc:
             # Per-turn updates are best-effort. The final /sync POST is the
-            # source of truth for the transcript anyway. Silent on failure
-            # but COUNTED so summary() can show how many were lost.
+            # source of truth for the transcript anyway. COUNTED + printed
+            # so the user sees that the live channel is failing.
             self._turn_events_failed += 1
+            if self.cfg.print_progress:
+                self._print(
+                    f"[report]    ✗ turn {turn_index} network error: "
+                    f"{type(exc).__name__}: {exc}"
+                )
             if not self._last_failure_detail:
                 self._last_failure_detail = (
                     f"/turn-events network: {type(exc).__name__}: {exc}"
