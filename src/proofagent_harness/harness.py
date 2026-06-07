@@ -523,6 +523,15 @@ class Harness:
                     self._reporter.print_summary_banner()
                 except Exception:
                     pass
+                # Production-grade lifecycle: flush + shut down the
+                # background reporting thread. Critical for pytest /
+                # CI users — without this the daemon thread sits idle
+                # after the eval and may not flush its queue if the
+                # process exits abruptly. close() is idempotent.
+                try:
+                    self._reporter.close()
+                except Exception:
+                    pass
 
     def _build_initial_state(
         self,

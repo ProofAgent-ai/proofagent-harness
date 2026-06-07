@@ -34,6 +34,11 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None  # type: ignore
 
+from proofagent_harness.reporting.background import (
+    BackgroundReporter,
+    KIND_EVENT,
+    KIND_TURN,
+)
 from proofagent_harness.reporting.errors import (
     LiveReportingError,
     ReportingAuthError,
@@ -87,28 +92,110 @@ class ReportingConfig:
 
 
 class LiveReporter:
-    """Reports completed evaluation cells to the ProofAgent dashboard."""
+    """Reports completed evaluation cells to the ProofAgent dashboard.
+
+    Production-grade design (we ship this to large customer pytest suites):
+
+      • ``announce_run_start`` + ``report_completion`` are SYNCHRONOUS —
+        they block until they get a response, because callers need the
+        ``run_id`` from announce and the final ``dashboard_url`` from sync.
+
+      • ``append_event`` + ``append_turn`` are NON-BLOCKING — they
+        enqueue to a per-instance background worker that POSTs in a
+        daemon thread with a pooled httpx.Client. Returns in microseconds
+        so they never slow down the eval, even when called from inside
+        an async LangGraph node mid-juror.
+
+      • ``flush_pending`` waits (bounded) for the background worker to
+        drain — called automatically by ``report_completion`` and at the
+        end of ``Harness.aevaluate`` so the dashboard reflects everything
+        that happened before the eval returns to the caller.
+
+      • Tunable via env vars: ``PROOFAGENT_REPORTING_MAX_QUEUE`` (default
+        1000), ``PROOFAGENT_REPORTING_TIMEOUT`` (default 10 s),
+        ``PROOFAGENT_REPORTING_FLUSH_TIMEOUT`` (default 15 s).
+    """
 
     def __init__(self, config: ReportingConfig | None = None) -> None:
         self.cfg = config or ReportingConfig()
         self._auth_disabled = False  # set True if we hit 401/403 once
         self._first_call = True
-        # Telemetry counters — surfaced at the end of every eval via
-        # ``summary()`` so the user can SEE exactly how many per-turn POSTs
-        # + event POSTs were attempted and how many succeeded. Critical
-        # for diagnosing the "nothing reached the dashboard" failure mode:
-        # without these you can't tell if the SDK swallowed silent errors.
+        # Telemetry mirrored from the background worker so the end-of-eval
+        # banner has a single read path.
         self._announce_ok: bool | None = None
         self._announce_error: str | None = None
         self._announced_run_id: str | None = None
         self._announced_dashboard_url: str | None = None
-        self._turn_events_sent = 0
-        self._turn_events_failed = 0
-        self._events_sent = 0
-        self._events_failed = 0
         self._sync_ok: bool | None = None
         self._sync_error: str | None = None
         self._last_failure_detail: str | None = None
+        # Background worker — lazy-started on first event/turn POST so we
+        # don't spin a thread for callers who only do announce + sync.
+        self._bg: BackgroundReporter | None = None
+
+    # ── Background worker accessor ─────────────────────────────────────
+
+    def _get_bg(self) -> BackgroundReporter | None:
+        """Lazy-start the per-instance background worker. Safe to call repeatedly."""
+        if self._bg is not None:
+            return self._bg
+        if not self._can_attempt():
+            return None
+        try:
+            self._bg = BackgroundReporter(
+                base_url=self.cfg.base_url,
+                api_key=self.cfg.api_key or "",
+                harness_version=_HARNESS_VERSION,
+                max_queue=int(os.environ.get("PROOFAGENT_REPORTING_MAX_QUEUE", "1000")),
+                timeout_s=float(os.environ.get("PROOFAGENT_REPORTING_TIMEOUT", "10.0")),
+            )
+        except Exception as exc:
+            # Worker thread couldn't start — fall back to silent no-op.
+            self._last_failure_detail = (
+                f"background worker init failed: {type(exc).__name__}: {exc}"
+            )
+            self._bg = None
+        return self._bg
+
+    def flush_pending(self, timeout_s: float | None = None) -> bool:
+        """Block until the background queue drains. Returns True if drained.
+
+        Called automatically by report_completion + by the harness in its
+        finally block, so customer code doesn't need to call it manually
+        unless they want a checkpoint mid-eval.
+        """
+        if self._bg is None:
+            return True
+        if timeout_s is None:
+            timeout_s = float(
+                os.environ.get("PROOFAGENT_REPORTING_FLUSH_TIMEOUT", "15.0")
+            )
+        return self._bg.flush(timeout_s=timeout_s)
+
+    def close(self) -> None:
+        """Flush + shutdown the background worker. Idempotent.
+
+        Production callers (pytest fixtures, long-lived service containers)
+        should call this explicitly. The atexit handler in background.py
+        also runs a best-effort flush on Python exit so forgetful callers
+        don't lose data.
+        """
+        if self._bg is None:
+            return
+        try:
+            self._bg.flush(timeout_s=15.0)
+        finally:
+            try:
+                self._bg.shutdown(timeout_s=5.0)
+            except Exception:
+                pass
+            self._bg = None
+
+    def __enter__(self) -> "LiveReporter":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     # ----------------------------------------------------------------- public
 
@@ -202,57 +289,35 @@ class LiveReporter:
         payload: dict[str, Any] | None = None,
         turn: int | None = None,
     ) -> None:
-        """Stream a single harness Event to the dashboard for the live
-        activity feed.
+        """Stream a harness Event to the dashboard activity feed.
 
-        Fire-and-forget — catches every exception, 3 s timeout, never
-        retries. Losing a single event is fine; the goal is the
-        terminal-style log on the dashboard, not a durable audit trail
-        (that's what /sync does at the end).
+        NON-BLOCKING — enqueues to a per-instance background worker
+        thread. Returns in microseconds even when the backend is slow or
+        unreachable. The worker POSTs with a pooled httpx.Client +
+        retries on 5xx/network errors with exponential backoff.
 
-        Why per-event POSTs instead of batching: simpler model, the
-        harness emits ~50 events per typical eval, network is cheap.
-        Backend accepts batches too via the {events:[...]} shape so
-        we can flush a queue here later if it becomes a bottleneck.
+        Safe to call from inside an async LangGraph node mid-juror; the
+        eval is never slowed down or blocked by reporting.
         """
-        if not self._can_attempt() or not run_id or not event_type:
+        if not run_id or not event_type:
             return None
-        path = f"/api/v1/runs/{run_id}/events"
-        body = {
-            "events": [
-                {
-                    "event_type": str(event_type)[:50],
-                    "detail": (detail or "")[:1000],
-                    "payload": payload or {},
-                    "turn": turn,
-                }
-            ]
-        }
-        try:
-            url = f"{self.cfg.base_url}{path}"
-            headers = {
-                "Authorization": f"Bearer {self.cfg.api_key}",
-                "X-Harness-Version": _HARNESS_VERSION,
-                "Content-Type": "application/json",
-            }
-            # 10s timeout (was 3s) — 3s was too tight when called from inside
-            # an async LangGraph node that's already busy with a juror LLM
-            # call. The OS thread could sleep >3s between the post() request
-            # and response under load, causing silent timeouts that lost the
-            # entire transcript and activity feed.
-            r = httpx.post(url, json=body, headers=headers, timeout=10.0)
-            if 200 <= r.status_code < 300:
-                self._events_sent += 1
-            else:
-                self._events_failed += 1
-                if not self._last_failure_detail:
-                    self._last_failure_detail = (
-                        f"/events HTTP {r.status_code}: {(r.text or '')[:200]}"
-                    )
-        except Exception as exc:
-            self._events_failed += 1
-            if not self._last_failure_detail:
-                self._last_failure_detail = f"/events network: {type(exc).__name__}: {exc}"
+        bg = self._get_bg()
+        if bg is None:
+            return None
+        bg.enqueue(
+            path=f"/api/v1/runs/{run_id}/events",
+            body={
+                "events": [
+                    {
+                        "event_type": str(event_type)[:50],
+                        "detail": (detail or "")[:1000],
+                        "payload": payload or {},
+                        "turn": turn,
+                    }
+                ]
+            },
+            kind=KIND_EVENT,
+        )
         return None
 
     def append_turn(
@@ -267,71 +332,31 @@ class LiveReporter:
         outcome: str = "ok",
         duration_s: float = 0.0,
     ) -> None:
-        """Stream a per-turn update to the dashboard so the progress bar climbs
-        and the transcript fills in live.
+        """Stream a per-turn structured update so the dashboard progress
+        bar climbs and the transcript fills in live.
 
-        Fire-and-forget: catches every exception. We deliberately do NOT
-        retry, queue, or warn here — losing a single turn-event is fine
-        (the final ``report_completion`` POST contains the full transcript),
-        and we must NEVER slow the eval down or raise from the conductor loop.
-
-        Times out aggressively (3 s) so even a flaky network can't bottleneck
-        the turn-by-turn loop.
+        NON-BLOCKING — enqueues to the background worker (same as
+        append_event). Backend bumps runs.turns_completed on each
+        successful POST, driving the dashboard progress bar.
         """
-        if not self._can_attempt() or not run_id:
+        if not run_id:
             return None
-        path = f"/api/v1/runs/{run_id}/turn-events"
-        payload = {
-            "turn_index": int(turn_index),
-            "trap_name": trap_name,
-            "question": (question or "")[:8000],   # belt-and-braces against
-            "answer": (answer or "")[:16000],       # accidentally huge payloads
-            "outcome": outcome or "ok",
-            "duration_s": float(duration_s or 0.0),
-            "defects": list(defects or []),
-        }
-        try:
-            # 10s timeout (was 3s) — under async/LangGraph load the sync
-            # httpx call can sleep >3s between request and response, which
-            # caused silent timeouts that lost the entire transcript.
-            # Print one-line confirmation so the user SEES per-turn POSTs
-            # actually happening — without this the SDK was silent.
-            url = f"{self.cfg.base_url}{path}"
-            headers = {
-                "Authorization": f"Bearer {self.cfg.api_key}",
-                "X-Harness-Version": _HARNESS_VERSION,
-                "Content-Type": "application/json",
-            }
-            r = httpx.post(url, json=payload, headers=headers, timeout=10.0)
-            if 200 <= r.status_code < 300:
-                self._turn_events_sent += 1
-                if self.cfg.print_progress:
-                    self._print(f"[report]    → turn {turn_index} synced ({r.status_code})")
-            else:
-                self._turn_events_failed += 1
-                if self.cfg.print_progress:
-                    self._print(
-                        f"[report]    ✗ turn {turn_index} FAILED "
-                        f"({r.status_code}): {(r.text or '')[:120]}"
-                    )
-                if not self._last_failure_detail:
-                    self._last_failure_detail = (
-                        f"/turn-events HTTP {r.status_code}: {(r.text or '')[:200]}"
-                    )
-        except Exception as exc:
-            # Per-turn updates are best-effort. The final /sync POST is the
-            # source of truth for the transcript anyway. COUNTED + printed
-            # so the user sees that the live channel is failing.
-            self._turn_events_failed += 1
-            if self.cfg.print_progress:
-                self._print(
-                    f"[report]    ✗ turn {turn_index} network error: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-            if not self._last_failure_detail:
-                self._last_failure_detail = (
-                    f"/turn-events network: {type(exc).__name__}: {exc}"
-                )
+        bg = self._get_bg()
+        if bg is None:
+            return None
+        bg.enqueue(
+            path=f"/api/v1/runs/{run_id}/turn-events",
+            body={
+                "turn_index": int(turn_index),
+                "trap_name": trap_name,
+                "question": (question or "")[:8000],
+                "answer": (answer or "")[:16000],
+                "outcome": outcome or "ok",
+                "duration_s": float(duration_s or 0.0),
+                "defects": list(defects or []),
+            },
+            kind=KIND_TURN,
+        )
         return None
 
     def report_completion(
@@ -354,6 +379,15 @@ class LiveReporter:
         """
         if not self._can_attempt():
             return None
+
+        # Drain pending background POSTs FIRST so all per-turn events have
+        # had a chance to land before the final transcript is written. This
+        # guarantees the dashboard's last poll (before /sync flips status
+        # to completed) sees the fullest possible live state.
+        try:
+            self.flush_pending()
+        except Exception:
+            pass
 
         payload = self._build_completion_payload(report_blob, transcript or [], findings or [])
         idempotency_key = self._idempotency_key(cell_label, payload)
@@ -423,24 +457,32 @@ class LiveReporter:
     def summary(self) -> dict[str, Any]:
         """Snapshot of every Live Reporting POST attempted this run.
 
-        The harness prints this after the eval finishes (see
-        ``Harness.aevaluate``) so the user sees a hard-to-miss banner with
-        exact counts + the first failure detail. Diagnoses the silent-fail
-        mode where the SDK swallowed errors and nothing reached the
-        dashboard.
+        Pulls per-event/per-turn counters from the background worker so
+        the numbers reflect what the WORKER actually did, not what the
+        caller intended. announce + sync counters stay on the reporter
+        because those are synchronous (no background queue).
         """
+        bg_stats = self._bg.stats() if self._bg is not None else {
+            "sent": {KIND_EVENT: 0, KIND_TURN: 0},
+            "failed": {KIND_EVENT: 0, KIND_TURN: 0},
+            "dropped_overflow": 0,
+            "queue_depth": 0,
+            "last_error": None,
+        }
         return {
             "announce_ok": self._announce_ok,
             "announce_error": self._announce_error,
             "run_id": self._announced_run_id,
             "dashboard_url": self._announced_dashboard_url,
-            "turn_events_sent": self._turn_events_sent,
-            "turn_events_failed": self._turn_events_failed,
-            "events_sent": self._events_sent,
-            "events_failed": self._events_failed,
+            "turn_events_sent": bg_stats["sent"].get(KIND_TURN, 0),
+            "turn_events_failed": bg_stats["failed"].get(KIND_TURN, 0),
+            "events_sent": bg_stats["sent"].get(KIND_EVENT, 0),
+            "events_failed": bg_stats["failed"].get(KIND_EVENT, 0),
+            "dropped_overflow": bg_stats["dropped_overflow"],
+            "queue_depth_remaining": bg_stats["queue_depth"],
             "sync_ok": self._sync_ok,
             "sync_error": self._sync_error,
-            "first_failure_detail": self._last_failure_detail,
+            "first_failure_detail": self._last_failure_detail or bg_stats.get("last_error"),
         }
 
     def print_summary_banner(self) -> None:
@@ -466,6 +508,10 @@ class LiveReporter:
             _line("run_id:", str(s["run_id"])[:32])
         _line("/turn-events:", f"{s['turn_events_sent']} sent / {s['turn_events_failed']} failed")
         _line("/events:", f"{s['events_sent']} sent / {s['events_failed']} failed")
+        if s.get("dropped_overflow", 0) > 0:
+            _line("queue dropped:", f"{s['dropped_overflow']} (backpressure — bump PROOFAGENT_REPORTING_MAX_QUEUE)")
+        if s.get("queue_depth_remaining", 0) > 0:
+            _line("queue at exit:", f"{s['queue_depth_remaining']} not yet flushed")
         sync_mark = "✓" if s["sync_ok"] else ("✗" if s["sync_ok"] is False else "—")
         _line("/sync:", f"{sync_mark} {s['sync_error'] or ('OK' if s['sync_ok'] else 'not called')}")
         if s["first_failure_detail"]:
