@@ -82,6 +82,8 @@ class Harness:
         verbose: bool = True,
         seed: int | None = None,
         context_budget_tokens: int | None = None,
+        live_reporting: bool = False,
+        live_reporting_config: "ReportingConfig | None" = None,
     ) -> None:
         """Configure a Harness.
 
@@ -239,6 +241,21 @@ class Harness:
         self._trap_index = TrapIndex(self._traps)
         self._personas_loaded = load_personas(self.personas)
 
+        # Live Reporting (opt in, off by default). When enabled but
+        # PROOFAGENT_API_KEY is unset, the reporter is a no op + prints
+        # a single warning. Network failures NEVER fail the evaluation.
+        self._reporter = None
+        if live_reporting or live_reporting_config is not None:
+            try:
+                from proofagent_harness.reporting import LiveReporter, ReportingConfig
+                cfg = live_reporting_config or ReportingConfig()
+                self._reporter = LiveReporter(cfg)
+            except Exception:
+                # Reporting module is intentionally permissive — if it
+                # can't even import (e.g. httpx missing), reporting is
+                # silently disabled. The evaluation always proceeds.
+                self._reporter = None
+
     def evaluate(
         self,
         agent: AgentCallable,
@@ -359,6 +376,106 @@ class Harness:
                     ),
                 ))
 
+            # Live Reporting: announce the run BEFORE the graph runs so the
+            # dashboard URL prints up-front. Users can click it and watch the
+            # turn-by-turn progress stream in live. Best-effort — if the
+            # backend is unreachable, we set _announced_run_id=None and the
+            # report_completion path falls back to POST /runs/sync at the end.
+            self._announced_run_id = None
+            if self._reporter is not None:
+                try:
+                    resp = self._reporter.announce_run_start(
+                        cell_label=f"{self.llm.model} x {role}",
+                        agent_name=role or "agent",
+                        agent_model=getattr(agent, "__name__", "agent"),
+                        harness_llm=self.llm.model,
+                        seed=self.seed,
+                        turns_total=self.turns,
+                        config={
+                            "consensus": getattr(self, "consensus", "delphi"),
+                            "business_case": (business_case or "")[:200],
+                            "goal": (goal or "")[:200],
+                        },
+                    )
+                    if resp:
+                        self._announced_run_id = resp.get("run_id")
+                        url = resp.get("dashboard_url")
+                        if url and self._reporter.cfg.print_progress:
+                            # Boxed, hard-to-miss banner so the user can click
+                            # the URL and watch the eval land live.
+                            bar = "═" * 64
+                            self._reporter._print("")
+                            self._reporter._print(f"╔{bar}╗")
+                            self._reporter._print(f"║  Live Reporting — your dashboard URL                           ║")
+                            self._reporter._print(f"╠{bar}╣")
+                            self._reporter._print(f"║  {url:<62}║")
+                            self._reporter._print(f"╚{bar}╝")
+                            self._reporter._print(
+                                "  Open the link above to watch the evaluation stream in."
+                            )
+                            self._reporter._print("")
+                except Exception:
+                    # Never block the eval on a reporting hiccup.
+                    self._announced_run_id = None
+
+            # Live Reporting: stream per-turn updates to the dashboard so
+            # the progress bar climbs + transcript fills in turn-by-turn.
+            # We wrap composed_callback HERE (after announce) so we only
+            # add the network call when we have a run_id and a reporter.
+            # Best-effort, fully isolated — never blocks/raises into the
+            # conductor loop.
+            graph_callback = composed_callback
+            announced_run_id = getattr(self, "_announced_run_id", None)
+            if announced_run_id and self._reporter is not None:
+                _reporter = self._reporter
+                _local_callback = composed_callback
+
+                def _live_reporting_callback(ev: Event) -> None:
+                    # Fire the local callback first so progress UI + user
+                    # subscribers stay sharp even if the network hiccups.
+                    try:
+                        _local_callback(ev)
+                    except Exception:
+                        pass
+                    # Stream the full Event to the dashboard activity feed.
+                    # The dashboard renders a terminal-style chronological
+                    # log + token-spend / fallback / LLM-call insights from
+                    # these. Best-effort, 3 s timeout, never blocks.
+                    try:
+                        _reporter.append_event(
+                            run_id=str(announced_run_id),
+                            event_type=ev.type,
+                            detail=ev.detail,
+                            payload=ev.payload or {},
+                            turn=ev.turn,
+                        )
+                    except Exception:
+                        pass
+                    # Per-turn STRUCTURED payload (Q+A+defects) — separate
+                    # endpoint that also bumps runs.turns_completed for
+                    # the progress bar. The event above is for the log
+                    # feed; this is for the metrics + transcript tabs.
+                    if ev.type == "turn_end" and ev.turn is not None:
+                        try:
+                            _reporter.append_turn(
+                                run_id=str(announced_run_id),
+                                turn_index=int(ev.turn),
+                                question=str(ev.payload.get("question", "")),
+                                answer=str(ev.payload.get("answer", "")),
+                                trap_name=ev.payload.get("trap_name"),
+                                defects=list(ev.payload.get("defects", []) or []),
+                                # NEW telemetry — populated by the conductor.
+                                # duration_s is the AGENT call latency for
+                                # this turn (read by the dashboard's
+                                # LLM-call timeline).
+                                duration_s=float(ev.payload.get("duration_s", 0.0) or 0.0),
+                                outcome=str(ev.payload.get("outcome") or "ok"),
+                            )
+                        except Exception:
+                            pass
+
+                graph_callback = _live_reporting_callback
+
             initial_state = self._build_initial_state(
                 agent=agent,
                 role=role,
@@ -366,7 +483,7 @@ class Harness:
                 goal=goal,
                 knowledge=knowledge,
                 context=context,
-                on_event=composed_callback,
+                on_event=graph_callback,
             )
 
             graph = build_graph()
@@ -374,11 +491,38 @@ class Harness:
 
             report = self._state_to_report(final_state, duration=time.time() - start)
             composed_callback(Event(type="done"))
+
+            # Live Reporting: side car, always best effort, never raises.
+            # Skipped silently if reporter is None (live_reporting=False).
+            if self._reporter is not None:
+                try:
+                    self._reporter.report_completion(
+                        run_id=getattr(self, "_announced_run_id", None),
+                        cell_label=f"{self.llm.model} x {role}",
+                        report_blob=_report_to_sync_payload(report, role=role, seed=self.seed,
+                                                             harness_llm=self.llm.model),
+                        transcript=_transcript_to_payload(report),
+                        findings=_findings_to_payload(report),
+                    )
+                except Exception:
+                    # Reporting failure NEVER fails an evaluation
+                    pass
+
             return report
         finally:
             if self.verbose:
                 progress.stop()
                 Console().print(report if "report" in locals() else "")
+            # ALWAYS print the Live Reporting summary banner at the very
+            # end (even on crash / Ctrl+C) so the user sees exactly which
+            # POST succeeded vs failed. Without this, fire-and-forget
+            # POST failures (per-turn, per-event) were invisible and the
+            # dashboard would stay empty with no terminal hint why.
+            if self._reporter is not None:
+                try:
+                    self._reporter.print_summary_banner()
+                except Exception:
+                    pass
 
     def _build_initial_state(
         self,
@@ -725,3 +869,73 @@ def _compose_callbacks(
                 cb(event)
 
     return _fan
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Live Reporting helpers — convert a Report into the wire format
+# the ProofAgent backend expects (POST /api/v1/runs/sync).
+# All three helpers handle missing fields gracefully so that even a
+# partial / failed Report can still be uploaded for debugging.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _report_to_sync_payload(
+    report: Any, *, role: str, seed: int | None, harness_llm: str,
+) -> dict[str, Any]:
+    """Top level fields needed by the sync endpoint.
+
+    Defensive defaults — backend's /sync requires `started_at` (datetime),
+    `final_score` (float), `certification` (str). If the report has None
+    for any of them (early-fail eval, crash during scoring), substitute
+    a safe default so the sync STILL lands and the dashboard shows the
+    partial result instead of staying stuck at 'running'.
+    """
+    from datetime import datetime, timezone
+
+    cert = getattr(report, "certification", None)
+    cert_str = cert.value if hasattr(cert, "value") else (str(cert) if cert else None)
+
+    # started_at: prefer report's value, fall back to UTC now (which is
+    # close-enough — the run has just completed, this is end-of-eval).
+    started_at = getattr(report, "started_at", None)
+    if started_at is None:
+        started_at = datetime.now(timezone.utc).isoformat()
+    elif hasattr(started_at, "isoformat"):
+        started_at = started_at.isoformat()
+
+    return {
+        "started_at": started_at,
+        "duration_seconds": float(getattr(report, "duration_seconds", 0) or 0),
+        "seed": int(seed) if seed is not None else 0,
+        "harness_llm": str(harness_llm or "unknown"),
+        "agent_model": str(getattr(report, "agent_model", "") or ""),
+        "agent_name": str(role or "agent"),
+        "final_score": float(getattr(report, "final_score", 0.0) or 0.0),
+        "certification": cert_str or "NOT_CERTIFIED",
+        "per_metric": dict(getattr(report, "per_metric", {}) or {}),
+        "config": {},
+    }
+
+
+def _transcript_to_payload(report: Any) -> list[dict[str, Any]]:
+    """Turn list — converted to a JSON safe list of dicts."""
+    out: list[dict[str, Any]] = []
+    for t in getattr(report, "transcript", []) or []:
+        if hasattr(t, "model_dump"):  # pydantic
+            out.append(t.model_dump())
+        elif hasattr(t, "__dict__"):
+            out.append({k: v for k, v in t.__dict__.items() if not k.startswith("_")})
+        elif isinstance(t, dict):
+            out.append(t)
+    return out
+
+
+def _findings_to_payload(report: Any) -> list[dict[str, Any]]:
+    """Quality findings — converted to a JSON safe list of dicts."""
+    out: list[dict[str, Any]] = []
+    for f in getattr(report, "findings", []) or []:
+        if hasattr(f, "model_dump"):
+            out.append(f.model_dump())
+        elif isinstance(f, dict):
+            out.append(f)
+    return out

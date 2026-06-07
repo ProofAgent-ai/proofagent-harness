@@ -21,6 +21,9 @@ from proofagent_harness.schemas import (
 
 async def conductor_node(state: HarnessState) -> dict[str, Any]:
     """Run a single conducted turn against the user's agent."""
+    import time as _time
+    _turn_start_wall = _time.time()
+
     plan = state["plan"]
     idx = int(state.get("current_turn") or 0)
 
@@ -46,6 +49,10 @@ async def conductor_node(state: HarnessState) -> dict[str, Any]:
         prior=list(state.get("transcript") or []),
         turn_spec=turn_spec,
     )
+
+    # Time the agent call separately from question-crafting so the
+    # dashboard timeline can attribute LLM latency vs agent latency.
+    _agent_call_start = _time.time()
 
     agent_crash: Exception | None = None
     try:
@@ -95,6 +102,9 @@ async def conductor_node(state: HarnessState) -> dict[str, Any]:
                 f"agent (model name, API key, deprecated params, etc.) and re-run."
             ) from exc
 
+    _agent_call_duration_s = round(_time.time() - _agent_call_start, 3)
+    _total_turn_duration_s = round(_time.time() - _turn_start_wall, 3)
+
     defects = _detect_defects(response, trap)
     if agent_crash is not None:
         defects.append(f"agent_crash:{type(agent_crash).__name__}")
@@ -116,8 +126,31 @@ async def conductor_node(state: HarnessState) -> dict[str, Any]:
         Event(
             type="turn_end",
             turn=idx + 1,
-            detail=f"defects: {len(defects)}",
-            payload={"answer_preview": response.text[:120]},
+            detail=(
+                f"defects: {len(defects)} · "
+                f"agent: {_agent_call_duration_s:.2f}s · "
+                f"total: {_total_turn_duration_s:.2f}s"
+            ),
+            payload={
+                "answer_preview": response.text[:120],
+                # Full turn data — consumed by Live Reporting's append_turn
+                # so the dashboard transcript fills in turn-by-turn. Local
+                # event-stream consumers can still just read answer_preview.
+                "question": question,
+                "answer": response.text,
+                "trap_name": trap.name,
+                "defects": list(defects),
+                # Telemetry — the dashboard's LLM-call timeline + per-turn
+                # cost-attribution panels read these. duration_s is the
+                # AGENT call latency (what we're measuring); total_duration_s
+                # includes question-crafting.
+                "duration_s": _agent_call_duration_s,
+                "total_duration_s": _total_turn_duration_s,
+                "tools_called": list(getattr(response, "tools_called", []) or []),
+                "is_follow_up": bool(turn_spec.is_follow_up),
+                "callback_to_turn": turn_spec.callback_to_turn,
+                "outcome": "ok" if agent_crash is None else "agent_crash",
+            },
         ),
     )
 
