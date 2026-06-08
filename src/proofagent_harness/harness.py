@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from collections.abc import Callable
 from typing import Any
@@ -520,11 +521,52 @@ class Harness:
             # Skipped silently if reporter is None (live_reporting=False).
             if self._reporter is not None:
                 try:
+                    # Collect every trap the planner used so the dashboard
+                    # can show "Tested against these adversarial scenarios"
+                    # — critical for subscription-grade reports.
+                    traps_used_list: list[dict[str, Any]] = []
+                    try:
+                        plan = (final_state or {}).get("plan") if isinstance(final_state, dict) else None
+                        if plan and hasattr(plan, "turns"):
+                            seen: set[str] = set()
+                            for ts in plan.turns:
+                                tr = getattr(ts, "trap", None)
+                                if tr and getattr(tr, "name", "") not in seen:
+                                    seen.add(tr.name)
+                                    traps_used_list.append({
+                                        "name": getattr(tr, "name", ""),
+                                        "family": getattr(tr, "family", ""),
+                                        "severity": getattr(tr, "severity", "medium"),
+                                        "metrics": list(getattr(tr, "metrics", []) or []),
+                                        "pass_criteria": (getattr(tr, "pass_criteria", "") or "")[:300],
+                                        "tags": list(getattr(tr, "tags", []) or []),
+                                    })
+                    except Exception:
+                        pass
+
+                    # Pull the agent's actual model name if the user wired
+                    # one (env, callable __name__, etc.) — falls back to
+                    # whatever the conductor recorded on report.
+                    agent_model_str = (
+                        os.environ.get("PROOFAGENT_AGENT_MODEL")
+                        or getattr(report, "agent_model", "")
+                        or getattr(agent, "__name__", "")
+                        or "unknown"
+                    )
+
                     self._reporter.report_completion(
                         run_id=getattr(self, "_announced_run_id", None),
                         cell_label=f"{self.llm.model} x {role}",
-                        report_blob=_report_to_sync_payload(report, role=role, seed=self.seed,
-                                                             harness_llm=self.llm.model),
+                        report_blob=_report_to_sync_payload(
+                            report, role=role, seed=self.seed,
+                            harness_llm=self.llm.model,
+                            business_case=business_case,
+                            goal=goal,
+                            agent_model=agent_model_str,
+                            consensus_strategy=getattr(self, "consensus", "delphi"),
+                            metrics_active=list(getattr(self, "metrics", []) or []),
+                            traps_used=traps_used_list,
+                        ),
                         transcript=_transcript_to_payload(report),
                         findings=_findings_to_payload(report),
                         # Full event log — backend backfills run_events
@@ -925,15 +967,30 @@ def _compose_callbacks(
 
 
 def _report_to_sync_payload(
-    report: Any, *, role: str, seed: int | None, harness_llm: str,
+    report: Any,
+    *,
+    role: str,
+    seed: int | None,
+    harness_llm: str,
+    business_case: str = "",
+    goal: str = "",
+    agent_model: str = "",
+    consensus_strategy: str = "",
+    metrics_active: list[str] | None = None,
+    traps_used: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Top level fields needed by the sync endpoint.
+    """Top level fields + RICH metadata for the subscription-grade dashboard.
+
+    The harness Report contains far more than the basic score: per-metric
+    confidence + spread + severity, juror consensus log, warnings, total
+    tokens, plus the eval's call context (role, business case, goal,
+    consensus strategy, list of traps thrown). Surface ALL of it so the
+    dashboard report is genuinely subscription-worthy.
 
     Defensive defaults — backend's /sync requires `started_at` (datetime),
     `final_score` (float), `certification` (str). If the report has None
     for any of them (early-fail eval, crash during scoring), substitute
-    a safe default so the sync STILL lands and the dashboard shows the
-    partial result instead of staying stuck at 'running'.
+    a safe default so the sync STILL lands.
     """
     from datetime import datetime, timezone
 
@@ -948,17 +1005,56 @@ def _report_to_sync_payload(
     elif hasattr(started_at, "isoformat"):
         started_at = started_at.isoformat()
 
+    # Pull the full juror consensus log so the dashboard can show
+    # per-juror disagreement, revote markers, confidence per metric.
+    consensus_payload: dict[str, Any] = {}
+    for metric_name, cons in (getattr(report, "consensus_log", {}) or {}).items():
+        try:
+            consensus_payload[metric_name] = cons.model_dump() if hasattr(cons, "model_dump") else dict(cons)
+        except Exception:
+            pass
+
+    # All metadata reported by the harness (personas, models, etc.)
+    metadata = dict(getattr(report, "metadata", {}) or {})
+
+    # Per-metric confidence + severity (the harness reports per-metric
+    # juror agreement strength + how serious any failure was).
+    confidence = dict(getattr(report, "confidence", {}) or {})
+    severity = {
+        k: (v.value if hasattr(v, "value") else str(v))
+        for k, v in (getattr(report, "severity", {}) or {}).items()
+    }
+
     return {
         "started_at": started_at,
         "duration_seconds": float(getattr(report, "duration_seconds", 0) or 0),
         "seed": int(seed) if seed is not None else 0,
         "harness_llm": str(harness_llm or "unknown"),
-        "agent_model": str(getattr(report, "agent_model", "") or ""),
+        "agent_model": str(agent_model or getattr(report, "agent_model", "") or ""),
         "agent_name": str(role or "agent"),
         "final_score": float(getattr(report, "final_score", 0.0) or 0.0),
         "certification": cert_str or "NOT_CERTIFIED",
         "per_metric": dict(getattr(report, "per_metric", {}) or {}),
-        "config": {},
+        # Rich subscription-grade metadata stored under config so the
+        # backend's RunSyncRequest doesn't need a wider Pydantic schema
+        # (config is a free-form dict already accepted).
+        "config": {
+            "role": str(role or ""),
+            "business_case": str(business_case or ""),
+            "goal": str(goal or ""),
+            "harness_llm": str(harness_llm or ""),
+            "agent_model": str(agent_model or ""),
+            "consensus_strategy": str(consensus_strategy or ""),
+            "metrics_active": list(metrics_active or []),
+            "traps_used": list(traps_used or []),
+            "confidence_per_metric": confidence,
+            "severity_per_metric": severity,
+            "consensus_log": consensus_payload,
+            "warnings": list(getattr(report, "warnings", []) or []),
+            "summary_text": str(getattr(report, "summary", "") or ""),
+            "tokens_used": int(getattr(report, "tokens_used", 0) or 0),
+            "harness_metadata": metadata,
+        },
     }
 
 
