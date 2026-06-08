@@ -303,6 +303,8 @@ class LiveReporter:
             return None
         bg = self._get_bg()
         if bg is None:
+            if self.cfg.print_progress:
+                self._print(f"[report] ⚠ bg worker UNAVAILABLE — event {event_type!r} DROPPED")
             return None
         bg.enqueue(
             path=f"/api/v1/runs/{run_id}/events",
@@ -318,6 +320,20 @@ class LiveReporter:
             },
             kind=KIND_EVENT,
         )
+        # VISIBLE diagnostic — print every event enqueue so the user can
+        # see in real time that the SDK is firing events and the bg
+        # worker is being fed. Without this, silent failures hide the
+        # actual problem.
+        if self.cfg.print_progress:
+            stats = bg.stats()
+            queue_depth = stats.get("queue_depth", 0)
+            sent = stats.get("sent", {}).get(KIND_EVENT, 0)
+            failed = stats.get("failed", {}).get(KIND_EVENT, 0)
+            short_type = str(event_type)[:24]
+            self._print(
+                f"[report] ↗ event {short_type:<24} "
+                f"queue={queue_depth} sent={sent} failed={failed}"
+            )
         return None
 
     def append_turn(
