@@ -385,17 +385,43 @@ class Harness:
             self._announced_run_id = None
             if self._reporter is not None:
                 try:
+                    # Resolve a meaningful agent_name (separate from role).
+                    # Priority: explicit env var, callable __name__, fallback.
+                    _agent_name = (
+                        os.environ.get("PROOFAGENT_AGENT_NAME")
+                        or getattr(agent, "__name__", None)
+                        or "agent"
+                    )
+                    if _agent_name == "<lambda>" or _agent_name == "agent":
+                        _agent_name = (role or "agent")[:64]
+
+                    _agent_model_announce = (
+                        os.environ.get("PROOFAGENT_AGENT_MODEL")
+                        or "unknown"
+                    )
+
                     resp = self._reporter.announce_run_start(
                         cell_label=f"{self.llm.model} x {role}",
-                        agent_name=role or "agent",
-                        agent_model=getattr(agent, "__name__", "agent"),
+                        agent_name=_agent_name,
+                        agent_model=_agent_model_announce,
                         harness_llm=self.llm.model,
                         seed=self.seed,
                         turns_total=self.turns,
+                        # Send EVERY piece of context the dashboard's
+                        # Run-context panel renders DURING the eval
+                        # (before /sync fires with the full report).
+                        # Backend stores these in runs.agent_config JSONB,
+                        # GET /runs/{id} surfaces them at top level.
                         config={
-                            "consensus": getattr(self, "consensus", "delphi"),
+                            "agent_name": _agent_name,
+                            "role": (role or "")[:200],
                             "business_case": (business_case or "")[:200],
                             "goal": (goal or "")[:200],
+                            "harness_llm": self.llm.model,
+                            "agent_model": _agent_model_announce,
+                            "consensus_strategy": getattr(self, "consensus", "delphi"),
+                            "metrics_active": list(getattr(self, "metrics", []) or []),
+                            "seed": int(self.seed) if self.seed is not None else None,
                         },
                     )
                     if resp:
