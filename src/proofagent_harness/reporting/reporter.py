@@ -440,6 +440,7 @@ class LiveReporter:
         report_blob: dict[str, Any],
         transcript: list[dict[str, Any]] | None = None,
         findings: list[dict[str, Any]] | None = None,
+        events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         """Send the final completion record for a cell.
 
@@ -462,7 +463,9 @@ class LiveReporter:
         except Exception:
             pass
 
-        payload = self._build_completion_payload(report_blob, transcript or [], findings or [])
+        payload = self._build_completion_payload(
+            report_blob, transcript or [], findings or [], events or [],
+        )
         idempotency_key = self._idempotency_key(cell_label, payload)
 
         path = (f"/api/v1/runs/{run_id}/sync" if run_id else "/api/v1/runs/sync")
@@ -719,6 +722,7 @@ class LiveReporter:
         report: dict[str, Any],
         transcript: list[dict[str, Any]],
         findings: list[dict[str, Any]],
+        events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Normalize the harness Report into the wire format the backend expects."""
         return {
@@ -734,4 +738,8 @@ class LiveReporter:
             "config": report.get("config", {}),
             "findings": findings,
             "turns": transcript,
+            # Full event timeline — backend backfills run_events table
+            # from this if live POSTs were lost (only when the table is
+            # empty — no duplicates with live events).
+            "events": events or [],
         }

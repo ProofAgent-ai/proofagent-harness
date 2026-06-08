@@ -430,7 +430,20 @@ class Harness:
                 _reporter = self._reporter
                 _local_callback = composed_callback
 
+                # Collect every Event into a local list so /sync can backfill
+                # the run_events table even if individual /events POSTs were
+                # lost to network failure. Makes /sync the source of truth.
+                _collected_events: list[Event] = []
+                self._collected_events = _collected_events  # for report_completion
+
                 def _live_reporting_callback(ev: Event) -> None:
+                    # Always retain locally — /sync uses this list to
+                    # backfill the run_events table as a guaranteed
+                    # backstop in case live POSTs failed.
+                    try:
+                        _collected_events.append(ev)
+                    except Exception:
+                        pass
                     # Fire the local callback first so progress UI + user
                     # subscribers stay sharp even if the network hiccups.
                     try:
@@ -514,6 +527,18 @@ class Harness:
                                                              harness_llm=self.llm.model),
                         transcript=_transcript_to_payload(report),
                         findings=_findings_to_payload(report),
+                        # Full event log — backend backfills run_events
+                        # table from this if live POSTs were lost. Makes
+                        # /sync the atomic source of truth.
+                        events=[
+                            {
+                                "event_type": getattr(ev, "type", "unknown"),
+                                "detail": getattr(ev, "detail", "") or "",
+                                "payload": dict(getattr(ev, "payload", {}) or {}),
+                                "turn": getattr(ev, "turn", None),
+                            }
+                            for ev in getattr(self, "_collected_events", [])
+                        ],
                     )
                 except Exception:
                     # Reporting failure NEVER fails an evaluation
