@@ -451,10 +451,14 @@ class Harness:
                         )
                     except Exception:
                         pass
-                    # Per-turn STRUCTURED payload (Q+A+defects) — separate
-                    # endpoint that also bumps runs.turns_completed for
-                    # the progress bar. The event above is for the log
-                    # feed; this is for the metrics + transcript tabs.
+                    # Per-turn SYNCHRONOUS commit — guarantees the
+                    # dashboard's transcript + progress bar reflects
+                    # turn N before the harness starts turn N+1. Also
+                    # prints a hard-to-miss progress bar in the terminal.
+                    # The reporter handles its own retries (3 attempts,
+                    # exponential backoff). Events from this turn are
+                    # flushed first so chronological order is preserved
+                    # on the activity feed.
                     if ev.type == "turn_end" and ev.turn is not None:
                         try:
                             _reporter.append_turn(
@@ -464,13 +468,20 @@ class Harness:
                                 answer=str(ev.payload.get("answer", "")),
                                 trap_name=ev.payload.get("trap_name"),
                                 defects=list(ev.payload.get("defects", []) or []),
-                                # NEW telemetry — populated by the conductor.
-                                # duration_s is the AGENT call latency for
-                                # this turn (read by the dashboard's
-                                # LLM-call timeline).
                                 duration_s=float(ev.payload.get("duration_s", 0.0) or 0.0),
                                 outcome=str(ev.payload.get("outcome") or "ok"),
+                                # NEW: pass total_turns so the reporter
+                                # can render a per-turn progress bar like
+                                # [report] ████████░░ 80% turn 4/5 → synced
+                                total_turns=int(self.turns),
                             )
+                            # Track per-turn sync outcome on the reporter
+                            # so summary banner shows the real number sent
+                            # (was using bg worker counters which now
+                            # aren't applicable for turn_events anymore).
+                            _reporter._turn_events_sent_sync = getattr(
+                                _reporter, "_turn_events_sent_sync", 0,
+                            ) + 1
                         except Exception:
                             pass
 

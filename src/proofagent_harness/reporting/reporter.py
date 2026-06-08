@@ -331,33 +331,106 @@ class LiveReporter:
         defects: list[str] | None = None,
         outcome: str = "ok",
         duration_s: float = 0.0,
-    ) -> None:
-        """Stream a per-turn structured update so the dashboard progress
-        bar climbs and the transcript fills in live.
+        total_turns: int | None = None,
+    ) -> bool:
+        """Commit a turn snapshot SYNCHRONOUSLY before the next turn starts.
 
-        NON-BLOCKING — enqueues to the background worker (same as
-        append_event). Backend bumps runs.turns_completed on each
-        successful POST, driving the dashboard progress bar.
+        Per-turn is the unit the dashboard cares about most — the
+        progress bar, the transcript tab, and the audit findings all key
+        off it. We block on this POST (with retries) so the dashboard is
+        guaranteed to reflect turn N before the harness moves to turn N+1.
+
+        Events (juror_scored, plan_*, etc.) remain async via the bg
+        worker — those are best-effort. Turns are durable.
+
+        Flow:
+          1. Flush the background events queue so any events fired
+             DURING this turn land on the dashboard BEFORE the turn
+             marker (preserves chronological order on the activity feed).
+          2. Sync POST /turn-events with full structured payload.
+          3. Retry up to 3 times on 5xx / network error (exponential).
+          4. Print a hard-to-miss progress bar showing N/M synced.
+
+        Returns True on success, False on failure. Failure is logged +
+        counted in the summary banner; the eval still continues
+        (the final /sync re-uploads the full transcript as a backstop).
         """
         if not run_id:
-            return None
-        bg = self._get_bg()
-        if bg is None:
-            return None
-        bg.enqueue(
-            path=f"/api/v1/runs/{run_id}/turn-events",
-            body={
-                "turn_index": int(turn_index),
-                "trap_name": trap_name,
-                "question": (question or "")[:8000],
-                "answer": (answer or "")[:16000],
-                "outcome": outcome or "ok",
-                "duration_s": float(duration_s or 0.0),
-                "defects": list(defects or []),
-            },
-            kind=KIND_TURN,
-        )
-        return None
+            return False
+
+        # 1. Flush events queue so per-turn events land before the turn marker
+        bg = self._bg
+        if bg is not None:
+            try:
+                bg.flush(timeout_s=2.0)
+            except Exception:
+                pass
+
+        # 2. Sync POST with bounded retries
+        if not self._can_attempt():
+            return False
+        url = f"{self.cfg.base_url}/api/v1/runs/{run_id}/turn-events"
+        headers = {
+            "Authorization": f"Bearer {self.cfg.api_key}",
+            "X-Harness-Version": _HARNESS_VERSION,
+            "Content-Type": "application/json",
+        }
+        body = {
+            "turn_index": int(turn_index),
+            "trap_name": trap_name,
+            "question": (question or "")[:8000],
+            "answer": (answer or "")[:16000],
+            "outcome": outcome or "ok",
+            "duration_s": float(duration_s or 0.0),
+            "defects": list(defects or []),
+        }
+
+        backoffs = (0.5, 1.5, 3.0)
+        last_err: str | None = None
+        for attempt in range(len(backoffs)):
+            try:
+                r = httpx.post(url, json=body, headers=headers, timeout=15.0)
+                if 200 <= r.status_code < 300:
+                    self._print_turn_progress(turn_index, total_turns, ok=True)
+                    return True
+                if 400 <= r.status_code < 500 and r.status_code != 429:
+                    last_err = f"HTTP {r.status_code}: {(r.text or '')[:160]}"
+                    break  # client error — don't retry
+                last_err = f"HTTP {r.status_code}: {(r.text or '')[:160]}"
+            except Exception as exc:
+                last_err = f"{type(exc).__name__}: {exc}"
+            if attempt < len(backoffs) - 1:
+                time.sleep(backoffs[attempt])
+
+        self._print_turn_progress(turn_index, total_turns, ok=False, err=last_err)
+        if not self._last_failure_detail:
+            self._last_failure_detail = f"/turn-events: {last_err}"
+        return False
+
+    def _print_turn_progress(
+        self,
+        turn_index: int,
+        total_turns: int | None,
+        *,
+        ok: bool,
+        err: str | None = None,
+    ) -> None:
+        """Hard-to-miss per-turn progress bar in the terminal."""
+        if not self.cfg.print_progress:
+            return
+        if total_turns and total_turns > 0:
+            pct = int(100 * turn_index / total_turns)
+            bar_width = 40
+            filled = int(bar_width * turn_index / total_turns)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            label = f"turn {turn_index}/{total_turns}"
+            if ok:
+                self._print(f"[report] {bar} {pct:3d}%  {label}  → synced")
+            else:
+                self._print(f"[report] {bar} {pct:3d}%  {label}  ✗ FAILED: {err}")
+        else:
+            mark = "→ synced" if ok else f"✗ FAILED: {err}"
+            self._print(f"[report] turn {turn_index} {mark}")
 
     def report_completion(
         self,
@@ -469,13 +542,15 @@ class LiveReporter:
             "queue_depth": 0,
             "last_error": None,
         }
+        # Turn POSTs are now SYNCHRONOUS (not through bg worker) — read
+        # from the sync counter we update from harness on each turn_end.
         return {
             "announce_ok": self._announce_ok,
             "announce_error": self._announce_error,
             "run_id": self._announced_run_id,
             "dashboard_url": self._announced_dashboard_url,
-            "turn_events_sent": bg_stats["sent"].get(KIND_TURN, 0),
-            "turn_events_failed": bg_stats["failed"].get(KIND_TURN, 0),
+            "turn_events_sent": getattr(self, "_turn_events_sent_sync", 0),
+            "turn_events_failed": getattr(self, "_turn_events_failed_sync", 0),
             "events_sent": bg_stats["sent"].get(KIND_EVENT, 0),
             "events_failed": bg_stats["failed"].get(KIND_EVENT, 0),
             "dropped_overflow": bg_stats["dropped_overflow"],
