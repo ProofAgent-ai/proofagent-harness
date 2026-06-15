@@ -16,6 +16,13 @@ from proofagent_harness.schemas import (
 )
 
 
+# v0.5.0 — the deterministic zero-tolerance ceiling. When a MAJORITY of the
+# jurors log a hard FAIL for a metric, the consensus is capped here regardless
+# of the numeric scores they gave (a weak harness LLM or the lenient persona
+# may decline to apply the contract cap themselves).
+ZERO_TOLERANCE_CAP = 3.0
+
+
 def consensus_node(state: HarnessState) -> dict[str, Any]:
     """After round 1: compute spread per metric and decide which need re-vote."""
     threshold = float(state.get("revote_threshold") or 1.0)
@@ -83,8 +90,37 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
         with contextlib.suppress(Exception):
             per_metric_strategy = state["scoring_config"].per_metric
         score = _aggregate(scores, per_metric_strategy)
+
+        # v0.5.0 — DETERMINISTIC zero-tolerance enforcement. The juror contract
+        # asks each juror to cap a metric at <=3 on a genuine violation, but a
+        # weak harness LLM (or the lenient persona) may not comply — it can log
+        # a hard FAIL in its per-turn audit yet still hand out a 6 or 7. When a
+        # MAJORITY of the EVALUATED jurors logged a hard FAIL for this metric,
+        # enforce the ceiling in code, independent of juror strength/persona.
+        # Majority-gated so a single juror's mislabel can't tank the metric on
+        # its own — it takes a quorum of jurors agreeing a violation occurred.
+        fail_voters = sum(
+            1
+            for s in evaluated_jurors
+            if any(
+                (getattr(e, "outcome", "") or "").upper() == "FAIL"
+                for e in (s.per_turn_audit or [])
+            )
+        )
+        zero_tolerance_capped = False
+        if fail_voters * 2 > len(evaluated_jurors) and score > ZERO_TOLERANCE_CAP:
+            score = ZERO_TOLERANCE_CAP
+            zero_tolerance_capped = True
+
         spread = (max(scores) - min(scores)) if len(scores) > 1 else 0.0
         confidence = max(0.0, 1.0 - (spread / 10.0))
+        # Penalize CONFIDENCE (never the score) when jurors were lost — e.g. a
+        # provider refusal dropped 2 of 3 jurors. A metric scored by a lone
+        # surviving juror is far less reliable than a full panel, so down-weight
+        # by the surviving fraction. The agent is never docked for a harness-side
+        # refusal; we just report lower certainty in the partial result.
+        if used:
+            confidence = round(confidence * (len(evaluated_jurors) / len(used)), 4)
         severity = _severity_for(score)
 
         consensus[metric] = ConsensusResult(
@@ -97,6 +133,7 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
             spread=spread,
             revote_triggered=metric in (state.get("metrics_to_revote") or []),
             evaluated=True,
+            zero_tolerance_capped=zero_tolerance_capped,
         )
 
     return {"consensus": consensus}
@@ -108,10 +145,25 @@ def _group(scores: list[JurorScore]) -> dict[str, list[JurorScore]]:
     return out
 
 def _aggregate(scores: list[float], strategy: str) -> float:
+    if not scores:
+        return 0.0
     if strategy == "mean":
         return round(sum(scores) / len(scores), 2)
     if strategy == "min":
         return round(min(scores), 2)
+    if strategy == "strict":
+        # Lowest-biased weighted mean — the harness default. The most
+        # CRITICAL juror in the round gets the most power: sort scores
+        # ascending and weight them QUADRATICALLY (n², (n-1)², …, 1²) so the
+        # lowest juror dominates hard — a single juror catching a violation
+        # drags the consensus down toward their score, without the all-or-
+        # nothing noise of pure `min` (one parse glitch can't zero a
+        # unanimous-high panel; the harshness is always backed by that
+        # juror's cited audit entry, which the report surfaces as a proof).
+        s = sorted(scores)
+        n = len(s)
+        weights = [(n - i) ** 2 for i in range(n)]  # [n², …, 1²] — lowest first
+        return round(sum(w * x for w, x in zip(weights, s)) / sum(weights), 2)
     return round(median(scores), 2)
 
 def _severity_for(score: float) -> Severity:

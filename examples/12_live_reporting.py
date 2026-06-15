@@ -96,6 +96,7 @@ import os
 import sys
 
 from proofagent_harness import AgentContext, AgentResponse, Harness
+from proofagent_harness.reporting.reporter import DEFAULT_BASE_URL
 
 
 # ─── System prompt — same for stub agent and real OpenAI agent ──────────
@@ -214,6 +215,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--llm", default="gpt-4.1-mini",
                    help="Harness juror LLM (default: gpt-4.1-mini, cheap + fast). "
                         "Override with any litellm-supported model id.")
+    p.add_argument("--fallback-llm", default=None,
+                   help="Backup harness LLM. If a primary juror call errors or "
+                        "returns unparseable JSON, the harness retries that one "
+                        "call on this model so a flaky response can't sink the "
+                        "run (e.g. gpt-4.1, claude-haiku-4-5). Default: none.")
     p.add_argument("--agent-model", default="gpt-4.1-mini",
                    help="OpenAI model the agent calls each turn "
                         "(default: gpt-4.1-mini). Ignored when --stub-agent.")
@@ -316,7 +322,7 @@ def main() -> int:
     elif args.self_hosted:
         os.environ["PROOFAGENT_API_BASE"] = args.self_hosted.rstrip("/")
 
-    api_base = os.environ.get("PROOFAGENT_API_BASE", "https://api.proofagent.ai")
+    api_base = os.environ.get("PROOFAGENT_API_BASE", DEFAULT_BASE_URL)
     dashboard_base = os.environ.get(
         "PROOFAGENT_DASHBOARD_BASE", "https://www.proofagent.ai",
     )
@@ -329,6 +335,7 @@ def main() -> int:
     print("Live Reporting configuration")
     print("─" * 64)
     print(f"  Harness LLM:    {args.llm}")
+    print(f"  Fallback LLM:   {args.fallback_llm or '(none)'}")
     print(f"  Agent LLM:      {agent_label}")
     print(f"  Turns:          {args.turns}    Consensus: {args.consensus}    Seed: {args.seed}")
     print(f"  Backend:        {api_base}")
@@ -380,6 +387,7 @@ def main() -> int:
     #   - On network failure: queues locally and retries; eval never blocks
     harness = Harness(
         llm=args.llm,
+        fallback_llm=args.fallback_llm,
         turns=args.turns,
         consensus=args.consensus,
         seed=args.seed,
@@ -404,13 +412,38 @@ def main() -> int:
 
     # ── Print the final score (already in the dashboard at this point) ──
     _print_banner("Evaluation complete")
+    cert_str = getattr(report.certification, 'value', report.certification)
     print(f"  Agent:          {resolved_agent_label}")
     print(f"  Harness LLM:    {args.llm}")
     print(f"  Final score:    {report.final_score}/10")
-    print(f"  Certification:  {getattr(report.certification, 'value', report.certification)}")
-    print(f"  Per metric:")
-    for k, v in (report.per_metric or {}).items():
-        print(f"    {k:<28} {v}")
+    print(f"  Certification:  {cert_str}")
+    print(f"  Per metric (score / confidence / severity):")
+    per_metric = report.per_metric or {}
+    if per_metric:
+        for k, v in per_metric.items():
+            sev = (report.severity or {}).get(k)
+            sev_str = (sev.value if hasattr(sev, "value") else str(sev)) if sev else "—"
+            conf = (report.confidence or {}).get(k)
+            conf_str = f"{conf:.2f}" if isinstance(conf, (int, float)) else "—"
+            print(f"    {k:<28} {float(v):.2f}   conf {conf_str}   {sev_str}")
+    else:
+        print("    (no metrics reported)")
+    # ── Token / reliability summary — the same info the dashboard scorecard
+    # shows. Cost is intentionally NOT printed here — it's surfaced on the
+    # dashboard for FinOps, but on the terminal we focus on signal (tokens,
+    # fallback rate, duration) not finance.
+    tokens = getattr(report, "tokens_used", 0) or 0
+    fb_rate = float(getattr(report, "fallback_rate", 0.0) or 0.0)
+    print()
+    print(f"  Tokens used:    {tokens:,}")
+    if fb_rate > 0:
+        print(f"  Fallback rate:  {fb_rate * 100:.1f}%  ({getattr(report, 'fallback_call_count', 0)} calls)")
+    duration = getattr(report, "duration_seconds", 0.0) or 0.0
+    if duration:
+        print(f"  Duration:       {duration:.1f}s")
+    findings = getattr(report, "findings", []) or []
+    if findings:
+        print(f"  Findings:       {len(findings)}  (see dashboard Audit tab for full detail)")
     print()
     live_url = getattr(report, "live_report_url", None)
     if live_url:

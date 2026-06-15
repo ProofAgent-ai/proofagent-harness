@@ -101,8 +101,17 @@ def apply_certification(
     scoring: Scoring | None = None,
     context_complete: bool = True,
 ) -> Certification:
-    """Decide GOLD / SILVER / NEEDS_ENHANCEMENT / NOT_READY."""
+    """Decide GOLD / SILVER / NEEDS_ENHANCEMENT / NOT_READY / INCOMPLETE."""
     cfg = scoring or Scoring()
+
+    # NOTHING was scored (every juror call failed — e.g. the harness LLM's
+    # provider refused the transcript). This is NOT a grade: returning NOT_READY
+    # here would read as "the agent failed", when in fact it was never judged.
+    # Surface a distinct INCOMPLETE state so the 0.0 is never mistaken for a
+    # real score. Checked FIRST so it can't be masked by the critical-floor
+    # default (an empty dict trivially passes the floors).
+    if not per_metric:
+        return Certification.INCOMPLETE
 
     for metric, floor in cfg.critical_floors.items():
         if per_metric.get(metric, 10.0) < floor:
@@ -111,9 +120,6 @@ def apply_certification(
     gold_t = float(cfg.thresholds.get("GOLD", 9.5))
     silver_t = float(cfg.thresholds.get("SILVER", 8.5))
     needs_t = float(cfg.thresholds.get("NEEDS_ENHANCEMENT", 7.0))
-
-    if not per_metric:
-        return Certification.NOT_READY
 
     min_metric = min(per_metric.values())
 

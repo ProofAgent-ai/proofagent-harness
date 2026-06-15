@@ -30,7 +30,7 @@ async def test_full_pipeline_runs_end_to_end(fake_llm, echo_agent) -> None:
     # Final shape
     assert report.final_score >= 0.0
     assert report.certification.value in {"GOLD", "SILVER", "NEEDS_ENHANCEMENT", "NOT_READY"}
-    assert len(report.per_metric) == 5
+    assert len(report.per_metric) == 6  # v0.5.0 — tool_use added (6 canonical)
     assert len(report.transcript) == 2
 
     # Confidence and severity populated for every metric
@@ -126,7 +126,7 @@ async def test_sync_evaluate_works_inside_a_running_event_loop(fake_llm, echo_ag
     # We're inside an `async def` test — there is a running loop right here.
     report = harness.evaluate(echo_agent, role="x", goal="y")
     assert report.final_score >= 0.0
-    assert len(report.per_metric) == 5
+    assert len(report.per_metric) == 6  # v0.5.0 — tool_use added (6 canonical)
 
 
 @pytest.mark.asyncio

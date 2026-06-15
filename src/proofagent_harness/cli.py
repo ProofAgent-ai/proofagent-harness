@@ -40,6 +40,16 @@ def run(
     turns: int = typer.Option(8, "--turns", min=1, max=50),
     consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
     metrics: str | None = typer.Option(None, "--metrics", help="Comma-separated metric names."),
+    extra_traps: str | None = typer.Option(
+        None, "--extra-traps",
+        help="Comma-separated paths to custom trap .md files or dirs (client report B5)."),
+    trap_packs: str | None = typer.Option(
+        None, "--trap-packs", help="Comma-separated installed trap-pack names."),
+    pin_traps: str | None = typer.Option(
+        None, "--pin-traps",
+        help="Comma-separated trap NAMES to FORCE into the plan regardless of "
+             "selection scoring (client report B2 — pin a custom trap that would "
+             "otherwise lose to domain-matched traps)."),
     knowledge: Path | None = typer.Option(None, "--knowledge", exists=True),
     llm: str | None = typer.Option(None, "--llm", help="Model id (LiteLLM target)."),
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
@@ -54,11 +64,17 @@ def run(
         else list(CANONICAL_METRICS)
     )
 
+    def _csv(s: str | None) -> list[str] | None:
+        return [x.strip() for x in s.split(",") if x.strip()] if s else None
+
     harness = Harness(
         llm=llm,
         metrics=metric_list,
         turns=turns,
         consensus=consensus,
+        extra_traps=_csv(extra_traps),
+        trap_packs=_csv(trap_packs),
+        pin_traps=_csv(pin_traps),
         verbose=not quiet,
     )
 
@@ -164,7 +180,8 @@ def traps_stats() -> None:
 def traps_validate(
     path: Path | None = typer.Argument(
         None,
-        help="Directory of trap .md files to validate. Defaults to the bundled library.",
+        help="A directory of trap .md files OR a single trap .md file. "
+             "Defaults to the bundled library.",
     ),
     strict: bool = typer.Option(
         False, "--strict", help="Treat warnings as errors (exit non-zero on any warning)."
@@ -179,7 +196,11 @@ def traps_validate(
     non-zero status when any file has errors (or, with ``--strict``, any
     warnings) — suitable for CI.
     """
-    from proofagent_harness.trap_schema import validate_trap_library
+    from proofagent_harness.trap_schema import (
+        TrapLibraryValidation,
+        validate_trap_file,
+        validate_trap_library,
+    )
 
     if path is None:
         from importlib import resources
@@ -188,12 +209,26 @@ def traps_validate(
             resources.files("proofagent_harness").joinpath("data/traps")
         ) as p:
             root = Path(p)
-    else:
+        result = validate_trap_library(root)
+    elif path.is_file():
+        # B4 (client report): a single trap .md file is valid input, not only
+        # a directory — previously this printed "No trap .md files found".
         root = path
+        result = TrapLibraryValidation(results=[validate_trap_file(path)])
+    elif path.is_dir():
+        root = path
+        result = validate_trap_library(root)
+    else:
+        console.print(f"[red]Path not found: {path}[/red]")
+        raise typer.Exit(code=1)
 
-    result = validate_trap_library(root)
     if not result.results:
-        console.print(f"[yellow]No trap .md files found under {root}[/yellow]")
+        msg = (
+            f"No trap .md files found under {root}"
+            if root.is_dir()
+            else f"Not a .md trap file: {root}"
+        )
+        console.print(f"[yellow]{msg}[/yellow]")
         raise typer.Exit(code=1)
 
     table = Table(show_header=True, header_style="bold")

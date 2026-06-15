@@ -40,9 +40,10 @@ htmlcov/
 coverage.xml
 *.cover
 
-# Type checking
+# Type checking / linting
 .mypy_cache/
 .pyright/
+.ruff_cache/
 
 # IDE
 .vscode/
@@ -82,6 +83,25 @@ compliance_audit.*
 # Examples scratch dirs
 examples/my_agent_dir/
 examples/results/
+
+# Private testing — adversarial-benchmark sweeps, papers, blog drafts, plots.
+# This folder is intentionally excluded from the public proofagent-harness repo.
+examples/asymmetric_benchmark/
+
+# Private benchmarking scripts + data.
+# Calibration sweeps, juror-quality scaling studies, vendor comparisons,
+# and any internal evaluation runs. Kept local; not part of the public
+# SDK surface. Use `examples/` for runnable customer-facing scripts;
+# `benchmarks/` is for internal research only.
+benchmarks/
+
+# Private artifact-mode test bundles built from real customer data.
+# The public smoke test is testing/artifact/run_artifact_test.py +
+# testing/artifact/sample_artifact/ + testing/artifact/sample_knowledge/
+# (all generic LATAM business-plan content, safe to publish).
+# The sample_brd_bundle/ sub-folder below contains real BRDs / agent
+# traces from internal customer work and must not be redistributed.
+testing/artifact/sample_brd_bundle/
 
 # Notebook execution artifacts (from scripts/test_notebooks.py --keep-output)
 notebooks/_executed_*.ipynb

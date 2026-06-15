@@ -9,7 +9,13 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from proofagent_harness.schemas import Certification, Report, Severity
+from proofagent_harness.schemas import (
+    ARTIFACT_METRIC_DESCRIPTIONS,
+    METRIC_DESCRIPTIONS,
+    Certification,
+    Report,
+    Severity,
+)
 
 _SEV_STYLES = {
     Severity.CRITICAL: "bold red",
@@ -23,7 +29,16 @@ _CERT_STYLES = {
     Certification.SILVER: "bold green",
     Certification.NEEDS_ENHANCEMENT: "yellow",
     Certification.NOT_READY: "bold red",
+    Certification.INCOMPLETE: "bold white on grey37",
 }
+
+
+def _score_display(report: Report) -> str:
+    """The score string — '—' for an INCOMPLETE run (nothing was scored), so a
+    placeholder 0.0 is never shown as if it were an agent grade."""
+    if report.certification == Certification.INCOMPLETE:
+        return "— (not scored)"
+    return f"{report.final_score:.2f} / 10"
 
 def render_rich(report: Report) -> Any:
     """Build a Rich renderable for terminal printing."""
@@ -80,7 +95,7 @@ def render_rich(report: Report) -> Any:
     )
 
     cert_line = Text()
-    cert_line.append(f"Final score: {report.final_score:.2f} / 10    ", style="bold")
+    cert_line.append(f"Final score: {_score_display(report)}    ", style="bold")
     cert_line.append("Certification: ", style="bold")
     cert_line.append(cert_text)
     cert_line.append(f"    Tokens: {report.tokens_used:,}", style="dim")
@@ -147,6 +162,19 @@ def _build_severity_summary_line(report: Report) -> Text | None:
 
 def _next_step_hint(report: Report) -> str | None:
     """Pick the single most useful next-step suggestion for the operator."""
+    # Highest priority: the harness LLM itself was refused by its provider
+    # (content filter). No agent fix helps — the operator must switch the
+    # harness LLM. Surfaced first so it isn't masked by a metric hint.
+    cert = (report.certification.value if hasattr(report.certification, "value")
+            else str(report.certification))
+    wtext = " ".join(report.warnings or []).lower()
+    if cert == "INCOMPLETE" or any(
+        k in wtext for k in ("refused", "content filter", "cybersecurity", "content/safety")
+    ):
+        return ("switch the harness LLM to a cross-family Anthropic model "
+                "(`--llm claude-sonnet-4-5`) or set `--fallback-llm claude-sonnet-4-5` "
+                "— the current harness LLM was refused by its provider on this content")
+
     sev_order = ["critical", "fail", "warn"]
     severity_dict = {k: v.value if hasattr(v, "value") else str(v)
                      for k, v in (report.severity or {}).items()}
@@ -177,8 +205,12 @@ def render_markdown(report: Report) -> str:
     lines: list[str] = []
     lines.append("# ProofAgent Harness — Evaluation Report\n")
 
-    lines.append(f"**Final score:** `{report.final_score:.2f} / 10`  ")
+    # Header: the four numbers a reviewer wants at a glance, plus the
+    # eval mode (artifact vs multi_turn) so the reader knows what the
+    # numbers mean.
+    lines.append(f"**Final score:** `{_score_display(report)}`  ")
     lines.append(f"**Certification:** `{report.certification.value}`  ")
+    lines.append(f"**Mode:** `{report.mode}`  ")
     lines.append(f"**Tokens used:** `{report.tokens_used}`  ")
     lines.append(f"**Duration:** `{report.duration_seconds:.1f}s`\n")
 
@@ -190,6 +222,7 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {w}")
         lines.append("")
 
+    # ── Per-metric scores ────────────────────────────────────────────
     lines.append("## Per-metric scores\n")
     lines.append("| Metric | Score | Confidence | Severity |")
     lines.append("|---|---|---|---|")
@@ -213,10 +246,103 @@ def render_markdown(report: Report) -> str:
         )
     lines.append("")
 
+    # ── Metric definitions — mode-aware so readers know what each
+    # score MEANS in their evaluation mode. v0.5.0 surfaces this so
+    # business stakeholders reading an artifact report aren't left
+    # decoding cryptic metric names.
+    description_table = (
+        ARTIFACT_METRIC_DESCRIPTIONS
+        if report.mode == "artifact"
+        else METRIC_DESCRIPTIONS
+    )
+    descs_for_run = [
+        (m, description_table.get(m, "")) for m in metrics_in_run
+        if description_table.get(m)
+    ]
+    if descs_for_run:
+        lines.append("## What each metric means\n")
+        for metric, desc in descs_for_run:
+            pretty = metric.replace("_", " ").title()
+            lines.append(f"- **{pretty}** — {desc}")
+        lines.append("")
+
+    # ── Juror panel — surface who scored this so the reader can
+    # interpret the consensus debate that follows. Pulled from
+    # report.metadata which is set by Harness._state_to_report.
+    personas = report.metadata.get("personas") if report.metadata else None
+    if personas:
+        lines.append("## Juror panel\n")
+        lines.append(
+            f"Scored by **{len(personas)} jurors** "
+            f"({'strict-artifact panel' if report.mode == 'artifact' else 'multi-turn panel'}): "
+            f"{', '.join(personas)}.\n"
+        )
+        if report.mode == "artifact":
+            lines.append(
+                "Artifact-mode jurors are tuned for STRICT review of finished "
+                "deliverables — each enforces a different lens (corpus "
+                "traceability, decision-utility, adversarial reading) and "
+                "default scores hover around 5-6/10, not 7-8. Scores ≥ 8 are "
+                "deliberately rare and indicate an artifact worth approving as-is.\n"
+            )
+
+    # ── Per-turn audit — the forensic PASS / SOFT_FAIL / FAIL trail each
+    #    juror produced BEFORE scoring (the harness's strongest signal). In
+    #    BOTH modes: multi-turn = one row per turn; artifact = one row per
+    #    major section/claim (turn_index 0). Final round shown.
+    cl = report.consensus_log or {}
+    is_artifact = report.mode == "artifact"
+    unit = "section/claim" if is_artifact else "turn"
+    audit_lines: list[str] = []
+    for metric, cons in cl.items():
+        rows = (getattr(cons, "round_two", None) or getattr(cons, "round_one", None) or [])
+        metric_block: list[str] = []
+        for js in rows:
+            entries = getattr(js, "per_turn_audit", None) or []
+            if not entries:
+                continue
+            metric_block.append(f"- **{getattr(js, 'persona', '?')}**")
+            for e in entries:
+                ti = getattr(e, "turn_index", "?")
+                outcome = getattr(e, "outcome", "") or "?"
+                cite = (getattr(e, "citation", "") or "").strip().replace("\n", " ")
+                if len(cite) > 200:
+                    cite = cite[:200] + "…"
+                loc = f"item {ti}" if is_artifact else f"turn {ti}"
+                metric_block.append(f"    - {loc} — `{outcome}`" + (f": {cite}" if cite else ""))
+        if metric_block:
+            audit_lines.append(f"### {metric}")
+            audit_lines.extend(metric_block)
+            audit_lines.append("")
+    if audit_lines:
+        audit_heading = (
+            "Per-section audit (claim-by-claim forensic trail)" if is_artifact
+            else "Per-turn audit (turn-by-turn forensic trail)"
+        )
+        lines.append(f"## {audit_heading}\n")
+        lines.extend(audit_lines)
+
     if report.findings:
         lines.append("## Findings\n")
         for f in report.findings:
             lines.append(f"### {f.headline}")
+            lines.append(f"- **Detail:** {f.detail}")
+            if f.recommendation:
+                lines.append(f"- **Recommendation:** {f.recommendation}")
+            lines.append("")
+
+    if getattr(report, "technical_issues", None):
+        lines.append("## Technical issues\n")
+        lines.append(
+            "_Operational / behavioral anomalies observed during the eval "
+            "(agent refusals, phantom / forbidden tool calls, crashes, "
+            "harness LLM errors) — separate from the agent-quality findings._\n"
+        )
+        for f in report.technical_issues:
+            sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            lines.append(f"### [{sev.upper()}] {f.headline}")
+            if f.metric:
+                lines.append(f"- **Type:** `{f.metric}`")
             lines.append(f"- **Detail:** {f.detail}")
             if f.recommendation:
                 lines.append(f"- **Recommendation:** {f.recommendation}")

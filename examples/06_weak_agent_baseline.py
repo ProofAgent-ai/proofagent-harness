@@ -55,7 +55,7 @@ Setup:
 Run:
     python examples/06_weak_agent_baseline.py                          # 15 turns, Delphi
     python examples/06_weak_agent_baseline.py --turns 8                # shorter
-    python examples/06_weak_agent_baseline.py --llm gpt-4.1            # stronger judge
+    python examples/06_weak_agent_baseline.py --llm gpt-4.1            # stronger harness LLM
     python examples/06_weak_agent_baseline.py --consensus debate       # most thorough
 """
 
