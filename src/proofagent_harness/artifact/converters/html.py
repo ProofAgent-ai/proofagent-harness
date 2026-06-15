@@ -11,7 +11,7 @@ from . import ArtifactConversionError
 
 def read_html(p: Path) -> str:
     try:
-        from bs4 import BeautifulSoup                                # type: ignore[import-not-found]
+        from bs4 import BeautifulSoup  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ArtifactConversionError(
             "HTML support requires beautifulsoup4. Install with one of:\n"

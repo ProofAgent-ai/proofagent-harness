@@ -150,7 +150,7 @@ def _render_test_results(p: Path, data: dict[str, Any]) -> str:
 def _render_generic_dict(p: Path, data: dict[str, Any], raw: str) -> str:
     parts: list[str] = [
         f"# JSON artifact: {p.name}\n",
-        f"## Top-level keys\n",
+        "## Top-level keys\n",
     ]
     for k, v in data.items():
         vt = type(v).__name__
@@ -169,7 +169,7 @@ def _render_generic_dict(p: Path, data: dict[str, Any], raw: str) -> str:
 def _render_generic_list(p: Path, data: list[Any], raw: str) -> str:
     parts: list[str] = [
         f"# JSON list artifact: {p.name}\n",
-        f"## Summary\n",
+        "## Summary\n",
         f"- {len(data)} top-level entries",
         f"- entry types: {sorted({type(x).__name__ for x in data[:50]})}",
         "",

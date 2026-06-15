@@ -34,10 +34,12 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None  # type: ignore
 
+import contextlib
+
 from proofagent_harness.reporting.background import (
-    BackgroundReporter,
     KIND_EVENT,
     KIND_TURN,
+    BackgroundReporter,
 )
 from proofagent_harness.reporting.errors import (
     LiveReportingError,
@@ -45,11 +47,12 @@ from proofagent_harness.reporting.errors import (
     ReportingQuotaError,
     ReportingUnavailableError,
 )
-from proofagent_harness.reporting.queue import default_cache_dir, write as queue_write
+from proofagent_harness.reporting.queue import default_cache_dir
+from proofagent_harness.reporting.queue import write as queue_write
 
 # The library version is the source of truth for the X-Harness-Version header
 try:
-    from proofagent_harness import __version__ as _HARNESS_VERSION
+    from proofagent_harness import __version__ as _HARNESS_VERSION  # noqa: N812
 except ImportError:  # pragma: no cover
     _HARNESS_VERSION = "unknown"
 
@@ -204,13 +207,11 @@ class LiveReporter:
         try:
             self._bg.flush(timeout_s=15.0)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 self._bg.shutdown(timeout_s=5.0)
-            except Exception:
-                pass
             self._bg = None
 
-    def __enter__(self) -> "LiveReporter":
+    def __enter__(self) -> LiveReporter:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -267,12 +268,12 @@ class LiveReporter:
                 key = self.cfg.api_key or ""
                 self._print(f"[report]    Live URL skipped — API key REJECTED by the backend ({exc}).")
                 self._print(f"            Key used: {key[:14]}…  (length {len(key)})")
-                self._print(f"            The key reached the server but was refused. Likely causes:")
-                self._print(f"              • the key is wrong, revoked, or was copied incompletely")
-                self._print(f"              • the key belongs to a different tenant / environment")
-                self._print(f"            Get a fresh key and re-export it:")
+                self._print("            The key reached the server but was refused. Likely causes:")
+                self._print("              • the key is wrong, revoked, or was copied incompletely")
+                self._print("              • the key belongs to a different tenant / environment")
+                self._print("            Get a fresh key and re-export it:")
                 self._print(f"              1. {self.cfg.dashboard_base_url}/dashboard/agents → your agent → Generate API key")
-                self._print(f'              2. export PROOFAGENT_API_KEY="apk_live_…"')
+                self._print('              2. export PROOFAGENT_API_KEY="apk_live_…"')
             return None
         except ReportingUnavailableError as exc:
             self._announce_ok = False
@@ -281,8 +282,8 @@ class LiveReporter:
                 self._print(f"[report]    Live URL skipped — backend unreachable ({exc}).")
                 self._print(f"            Tried: POST {self.cfg.base_url}/api/v1/runs/start")
                 self._print(f"            If you see 404, the backend at {self.cfg.base_url} doesn't have")
-                self._print(f"            the V2 Live Reporting routes. Point PROOFAGENT_API_BASE at the")
-                self._print(f"            backend that does (the V2 App Service URL, not the V1 one).")
+                self._print("            the V2 Live Reporting routes. Point PROOFAGENT_API_BASE at the")
+                self._print("            backend that does (the V2 App Service URL, not the V1 one).")
             return None
         except LiveReportingError as exc:
             self._announce_ok = False
@@ -299,7 +300,7 @@ class LiveReporter:
 
         if self.cfg.print_progress:
             url = resp.get("dashboard_url") or f"{self.cfg.dashboard_base_url}/dashboard/agents"  # fallback — backend dashboard_url is the canonical URL
-            self._print(f"[report]    Live run dashboard:")
+            self._print("[report]    Live run dashboard:")
             self._print(f"            {url}")
         return resp
 
@@ -406,10 +407,8 @@ class LiveReporter:
         # 1. Flush events queue so per-turn events land before the turn marker
         bg = self._bg
         if bg is not None:
-            try:
+            with contextlib.suppress(Exception):
                 bg.flush(timeout_s=2.0)
-            except Exception:
-                pass
 
         # 2. Sync POST with bounded retries
         if not self._can_attempt():
@@ -531,10 +530,8 @@ class LiveReporter:
         # had a chance to land before the final transcript is written. This
         # guarantees the dashboard's last poll (before /sync flips status
         # to completed) sees the fullest possible live state.
-        try:
+        with contextlib.suppress(Exception):
             self.flush_pending()
-        except Exception:
-            pass
 
         payload = self._build_completion_payload(
             report_blob, transcript or [], findings or [], events or [],
@@ -545,7 +542,7 @@ class LiveReporter:
         last_error: str | None = None
 
         for attempt, delay in enumerate(
-            (self.cfg.retry_delays_seconds + (0.0,))[: self.cfg.retry_attempts]
+            ((*self.cfg.retry_delays_seconds, 0.0))[: self.cfg.retry_attempts]
         ):
             try:
                 resp = self._request(
@@ -597,7 +594,7 @@ class LiveReporter:
                 f"[report] backend unreachable -> queued at {cached_path}"
             )
             self._print(
-                f"         flush later with: proofagent reporting sync"
+                "         flush later with: proofagent reporting sync"
             )
         return None
 
@@ -645,7 +642,7 @@ class LiveReporter:
         bar = "═" * 64
         self._print("")
         self._print(f"╔{bar}╗")
-        self._print(f"║  Live Reporting summary                                          ║")
+        self._print("║  Live Reporting summary                                          ║")
         self._print(f"╠{bar}╣")
 
         def _line(label: str, value: str) -> None:
@@ -666,7 +663,7 @@ class LiveReporter:
         sync_mark = "✓" if s["sync_ok"] else ("✗" if s["sync_ok"] is False else "—")
         _line("/sync:", f"{sync_mark} {s['sync_error'] or ('OK' if s['sync_ok'] else 'not called')}")
         if s["first_failure_detail"]:
-            self._print(f"║  first failure detail:                                           ║")
+            self._print("║  first failure detail:                                           ║")
             # Wrap long failure text into multiple boxed lines.
             detail = s["first_failure_detail"]
             while detail:
@@ -675,7 +672,7 @@ class LiveReporter:
                 text = text[:64] + " " * max(0, 64 - len(text))
                 self._print(f"║{text}║")
         if s["dashboard_url"]:
-            self._print(f"║                                                                  ║")
+            self._print("║                                                                  ║")
             _line("Dashboard:", "")
             url = s["dashboard_url"]
             while url:
@@ -835,10 +832,8 @@ class LiveReporter:
         raise LiveReportingError(f"{r.status_code}: {body}")
 
     def _print(self, msg: str) -> None:
-        try:
+        with contextlib.suppress(Exception):
             print(msg, file=sys.stderr if not self.cfg.print_progress else sys.stdout, flush=True)
-        except Exception:
-            pass
 
     def _print_once_no_key(self) -> None:
         if not self._first_call:

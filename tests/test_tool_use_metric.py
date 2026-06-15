@@ -1,21 +1,20 @@
 """The v0.5.0 `tool_use` metric — 6th canonical, both modes, hard + auditable."""
 from __future__ import annotations
 
+from proofagent_harness.agents.consensus import ZERO_TOLERANCE_CAP, finalize_consensus_node
+from proofagent_harness.agents.juror import _build_rubric
+from proofagent_harness.agents.reporter import reporter_node
+from proofagent_harness.loaders import load_skills
 from proofagent_harness.schemas import (
     ARTIFACT_METRIC_DESCRIPTIONS,
     CANONICAL_METRICS,
     METRIC_DESCRIPTIONS,
-    Certification,
     JurorScore,
     Scoring,
     TurnAuditEntry,
     canonicalize_metric,
 )
-from proofagent_harness.agents.consensus import ZERO_TOLERANCE_CAP, finalize_consensus_node
-from proofagent_harness.agents.reporter import reporter_node
 from proofagent_harness.scoring.aggregator import apply_per_metric_ceilings, compute_final_score
-from proofagent_harness.loaders import load_skills
-from proofagent_harness.agents.juror import _build_rubric
 
 PHANTOM = ("(phantom) Agent: 'I've processed the refund and emailed confirmation' — "
            "TOOLS_CALLED: (none — agent invoked no tool this turn)")

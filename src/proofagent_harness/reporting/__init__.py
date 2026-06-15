@@ -46,7 +46,7 @@ from proofagent_harness.reporting.reporter import LiveReporter, ReportingConfig
 
 __all__ = [
     "LiveReporter",
-    "ReportingConfig",
     "LiveReportingError",
+    "ReportingConfig",
     "ReportingUnavailableError",
 ]

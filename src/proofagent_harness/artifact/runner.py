@@ -20,6 +20,7 @@ sees `artifact_loaded` + `corpus_loaded` events up front, then the standard
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -109,7 +110,7 @@ async def run_artifact_eval(
     state_seed: dict[str, Any],
     on_event: Callable[[Event], None] | None = None,
     agent_trace_text: str = "",
-    context: "AgentContext | None" = None,
+    context: AgentContext | None = None,
 ) -> dict[str, Any]:
     """Run the artifact-mode evaluation end-to-end.
 
@@ -315,10 +316,8 @@ def _safe_emit(cb: Callable[[Event], None] | None, ev: Event) -> None:
     """
     if cb is None:
         return
-    try:
+    with contextlib.suppress(Exception):
         cb(ev)
-    except Exception:
-        pass
 
 
-__all__ = ["run_artifact_eval", "build_synthetic_turn", "ArtifactConversionError"]
+__all__ = ["ArtifactConversionError", "build_synthetic_turn", "run_artifact_eval"]

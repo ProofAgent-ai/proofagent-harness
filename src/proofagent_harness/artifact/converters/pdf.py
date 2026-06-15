@@ -9,7 +9,7 @@ from . import ArtifactConversionError
 
 def read_pdf(p: Path) -> str:
     try:
-        from pypdf import PdfReader                                  # type: ignore[import-not-found]
+        from pypdf import PdfReader  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ArtifactConversionError(
             "PDF support requires pypdf. Install with one of:\n"

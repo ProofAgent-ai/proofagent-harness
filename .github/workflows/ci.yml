@@ -71,13 +71,6 @@ jobs:
             python -c "import ast; ast.parse(open('$f').read())"
           done
 
-      - name: Verify benchmarks parse
-        run: |
-          for f in benchmarks/*.py; do
-            echo "Parsing: $f"
-            python -c "import ast; ast.parse(open('$f').read())"
-          done
-
       - name: Verify all bundled markdown skills/traps/personas have valid frontmatter
         run: |
           python -c "

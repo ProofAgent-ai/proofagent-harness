@@ -16,7 +16,7 @@ Unknown domains return empty (juror uses base prompt unchanged).
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 CANONICAL_DOMAINS: list[str] = [
     "airline", "healthcare", "fintech", "retail", "logistics", "gov",

@@ -292,7 +292,6 @@ def render_markdown(report: Report) -> str:
     #    major section/claim (turn_index 0). Final round shown.
     cl = report.consensus_log or {}
     is_artifact = report.mode == "artifact"
-    unit = "section/claim" if is_artifact else "turn"
     audit_lines: list[str] = []
     for metric, cons in cl.items():
         rows = (getattr(cons, "round_two", None) or getattr(cons, "round_one", None) or [])

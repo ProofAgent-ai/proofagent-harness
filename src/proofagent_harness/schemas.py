@@ -495,8 +495,9 @@ class AgentArtifact(BaseModel):
         (no pypdf / python-docx) only pay the import cost when they actually
         hand in a non-text file.
         """
-        from proofagent_harness.artifact.converters import convert_to_text
         from pathlib import Path
+
+        from proofagent_harness.artifact.converters import convert_to_text
 
         p = Path(path).expanduser()
         text = convert_to_text(p)

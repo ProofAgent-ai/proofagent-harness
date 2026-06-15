@@ -7,7 +7,7 @@ import contextlib
 import os
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
@@ -42,6 +42,9 @@ from proofagent_harness.schemas import (
     canonicalize_metric,
 )
 
+if TYPE_CHECKING:
+    from proofagent_harness.reporting import ReportingConfig
+
 # Resolved once at import (no package-__init__ circular import). Used to
 # stamp the SDK version into the Live Reporting announce config so the
 # dashboard's Run-context "SDK version" tile is populated for every mode.
@@ -73,28 +76,24 @@ def _resolve_agent_trace(agent_trace: Any, on_event: Callable[[Event], None] | N
         return agent_trace
     # Path-like.
     try:
-        from pathlib import Path as _P
+        from pathlib import Path as _P  # noqa: N814
         p = _P(agent_trace).expanduser()
         if not p.exists() or not p.is_file():
             return str(agent_trace)  # treat as raw text
         from proofagent_harness.artifact.converters import convert_to_text
         text = convert_to_text(p)
         if on_event:
-            try:
+            with contextlib.suppress(Exception):
                 on_event(Event(
                     type="agent_trace_loaded",
                     detail=f"agent execution trace summarized from {p.name} → {len(text):,} chars",
                     payload={"path": str(p), "chars": len(text), "format": p.suffix.lstrip(".")},
                 ))
-            except Exception:
-                pass
         return text
     except Exception as exc:
         if on_event:
-            try:
+            with contextlib.suppress(Exception):
                 on_event(Event(type="error", detail=f"agent_trace load failed: {type(exc).__name__}: {exc}"))
-            except Exception:
-                pass
         return ""
 
 
@@ -144,7 +143,7 @@ class Harness:
         seed: int | None = None,
         context_budget_tokens: int | None = None,
         live_reporting: bool = False,
-        live_reporting_config: "ReportingConfig | None" = None,
+        live_reporting_config: ReportingConfig | None = None,
         custom_rubrics: dict[str, Any] | None = None,
     ) -> None:
         """Configure a Harness.
@@ -383,13 +382,13 @@ class Harness:
         knowledge: Any = None,
         context: AgentContext | None = None,
         # ── artifact-only ───────────────────────────────────────────────
-        artifact: "AgentArtifact | None" = None,
-        artifact_bundle: "AgentArtifactBundle | None" = None,
-        knowledge_corpus: "KnowledgeCorpus | None" = None,
+        artifact: AgentArtifact | None = None,
+        artifact_bundle: AgentArtifactBundle | None = None,
+        knowledge_corpus: KnowledgeCorpus | None = None,
         tools_used: list[str] | None = None,
         memory: Any | None = None,
-        agent_trace: "str | Any" = None,
-        compare_to: "AgentArtifact | None" = None,
+        agent_trace: str | Any = None,
+        compare_to: AgentArtifact | None = None,
     ) -> Report:
         """Run a full evaluation. Synchronous wrapper around `aevaluate`.
 
@@ -455,13 +454,13 @@ class Harness:
         knowledge: Any = None,
         context: AgentContext | None = None,
         # ── artifact-only ───────────────────────────────────────────────
-        artifact: "AgentArtifact | None" = None,
-        artifact_bundle: "AgentArtifactBundle | None" = None,
-        knowledge_corpus: "KnowledgeCorpus | None" = None,
+        artifact: AgentArtifact | None = None,
+        artifact_bundle: AgentArtifactBundle | None = None,
+        knowledge_corpus: KnowledgeCorpus | None = None,
         tools_used: list[str] | None = None,
         memory: Any | None = None,
-        agent_trace: "str | Any" = None,
-        compare_to: "AgentArtifact | None" = None,
+        agent_trace: str | Any = None,
+        compare_to: AgentArtifact | None = None,
     ) -> Report:
         """Run a full evaluation asynchronously.
 
@@ -645,7 +644,7 @@ class Harness:
                             bar = "═" * 64
                             self._reporter._print("")
                             self._reporter._print(f"╔{bar}╗")
-                            self._reporter._print(f"║  Live Reporting — your dashboard URL                           ║")
+                            self._reporter._print("║  Live Reporting — your dashboard URL                           ║")
                             self._reporter._print(f"╠{bar}╣")
                             self._reporter._print(f"║  {url:<62}║")
                             self._reporter._print(f"╚{bar}╝")
@@ -679,16 +678,12 @@ class Harness:
                     # Always retain locally — /sync uses this list to
                     # backfill the run_events table as a guaranteed
                     # backstop in case live POSTs failed.
-                    try:
+                    with contextlib.suppress(Exception):
                         _collected_events.append(ev)
-                    except Exception:
-                        pass
                     # Fire the local callback first so progress UI + user
                     # subscribers stay sharp even if the network hiccups.
-                    try:
+                    with contextlib.suppress(Exception):
                         _local_callback(ev)
-                    except Exception:
-                        pass
                     # Stream the full Event to the dashboard activity feed.
                     # The dashboard renders a terminal-style chronological
                     # log + token-spend / fallback / LLM-call insights from
@@ -706,13 +701,11 @@ class Harness:
                         # dashboard derive turn progress / transcript from the
                         # stream when the backend's row write lags.
                         _ev_payload = dict(ev.payload or {})
-                        try:
+                        with contextlib.suppress(Exception):
                             _ev_payload.setdefault(
                                 "tokens_used",
                                 int(getattr(self.llm, "total_tokens", 0) or 0),
                             )
-                        except Exception:
-                            pass
                         _reporter.append_event(
                             run_id=str(announced_run_id),
                             event_type=ev.type,
@@ -870,19 +863,15 @@ class Harness:
             # POST failures (per-turn, per-event) were invisible and the
             # dashboard would stay empty with no terminal hint why.
             if self._reporter is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._reporter.print_summary_banner()
-                except Exception:
-                    pass
                 # Production-grade lifecycle: flush + shut down the
                 # background reporting thread. Critical for pytest /
                 # CI users — without this the daemon thread sits idle
                 # after the eval and may not flush its queue if the
                 # process exits abruptly. close() is idempotent.
-                try:
+                with contextlib.suppress(Exception):
                     self._reporter.close()
-                except Exception:
-                    pass
 
     def _build_initial_state(
         self,
@@ -1092,10 +1081,8 @@ class Harness:
             # in real time (same shape as multi-turn).
             self._collected_events: list[Event] = []
             def _collect(ev: Event) -> None:
-                try:
+                with contextlib.suppress(Exception):
                     self._collected_events.append(ev)
-                except Exception:
-                    pass
 
             # Live Reporting announce — same boxed banner as multi-turn.
             # Must run BEFORE we build the graph callback so the resulting
@@ -1135,12 +1122,10 @@ class Harness:
                     )
                     if announcement and announcement.get("run_id"):
                         self._announced_run_id = announcement["run_id"]
-                        try:
+                        with contextlib.suppress(Exception):
                             self._reporter._send_count = (
                                 getattr(self._reporter, "_send_count", 0)
                             ) + 1
-                        except Exception:
-                            pass
                 except Exception:
                     self._announced_run_id = None
 
@@ -1158,17 +1143,13 @@ class Harness:
             if _reporter is not None and _announced_run_id is not None:
                 def _artifact_live_event_callback(ev: Event) -> None:
                     # Terminal output + caller's callback + backstop collector.
-                    try:
+                    with contextlib.suppress(Exception):
                         composed_callback(ev)
-                    except Exception:
-                        pass
-                    try:
+                    with contextlib.suppress(Exception):
                         _collect(ev)
-                    except Exception:
-                        pass
                     # Stream the event to the dashboard activity feed.
                     # Best-effort, 3s timeout per call, never blocks.
-                    try:
+                    with contextlib.suppress(Exception):
                         _reporter.append_event(
                             run_id=str(_announced_run_id),
                             event_type=ev.type,
@@ -1176,8 +1157,6 @@ class Harness:
                             payload=ev.payload or {},
                             turn=ev.turn,
                         )
-                    except Exception:
-                        pass
 
                 graph_callback: Callable[[Event], None] = _artifact_live_event_callback
             else:
@@ -1259,12 +1238,10 @@ class Harness:
                             tokens_used=cur_tokens,
                             display_label=jury_label,
                         )
-                        try:
+                        with contextlib.suppress(Exception):
                             self._reporter._turn_events_sent_sync = getattr(
                                 self._reporter, "_turn_events_sent_sync", 0,
                             ) + 1
-                        except Exception:
-                            pass
                 except Exception:
                     pass
 
@@ -1293,7 +1270,7 @@ class Harness:
             # Live Reporting completion — same pattern as multi-turn but
             # with mode="artifact" baked into the config payload.
             if self._reporter is not None:
-                try:
+                try:  # noqa: SIM105
                     self._reporter.report_completion(
                         run_id=getattr(self, "_announced_run_id", None),
                         cell_label=f"{self.llm.model} x artifact:{artifact.type or 'untyped'}",
@@ -1328,14 +1305,10 @@ class Harness:
                 progress.stop()
                 Console().print(report if "report" in locals() else "")
             if self._reporter is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._reporter.print_summary_banner()
-                except Exception:
-                    pass
-                try:
+                with contextlib.suppress(Exception):
                     self._reporter.close()
-                except Exception:
-                    pass
 
     async def _aevaluate_artifact_bundle(
         self,
@@ -1368,7 +1341,6 @@ class Harness:
             consensus_* / report_* events as it processes.
           * bundle_consistency_check fires after the consistency pass.
         """
-        from proofagent_harness.schemas import Finding
 
         if not bundle.artifacts:
             raise ValueError("AgentArtifactBundle.artifacts cannot be empty")
@@ -1467,8 +1439,9 @@ class Harness:
         Returns a list of Finding objects. No LLM call — runs as a simple
         text-overlap heuristic.
         """
-        from proofagent_harness.schemas import Finding, Severity
         import re as _re
+
+        from proofagent_harness.schemas import Finding, Severity
 
         if len(bundle.artifacts) < 2:
             return []
@@ -1832,10 +1805,8 @@ def _report_to_sync_payload(
     # per-juror disagreement, revote markers, confidence per metric.
     consensus_payload: dict[str, Any] = {}
     for metric_name, cons in (getattr(report, "consensus_log", {}) or {}).items():
-        try:
+        with contextlib.suppress(Exception):
             consensus_payload[metric_name] = cons.model_dump() if hasattr(cons, "model_dump") else dict(cons)
-        except Exception:
-            pass
 
     # All metadata reported by the harness (personas, models, etc.)
     metadata = dict(getattr(report, "metadata", {}) or {})
@@ -1855,12 +1826,10 @@ def _report_to_sync_payload(
     # severity enum to a plain string and guarantees JSON-serializability.
     bundle_findings_payload: list[dict[str, Any]] = []
     for fnd in (getattr(report, "bundle_consistency_findings", []) or []):
-        try:
+        with contextlib.suppress(Exception):
             bundle_findings_payload.append(
                 fnd.model_dump(mode="json") if hasattr(fnd, "model_dump") else dict(fnd)
             )
-        except Exception:
-            pass
     # per_artifact_scores keys are ints (artifact index) — JSON object keys
     # must be strings, so stringify them here; the dashboard parses back.
     per_artifact_payload = {
@@ -1875,12 +1844,10 @@ def _report_to_sync_payload(
     # model_dump(mode="json") coerces the severity enum to a plain string.
     technical_issues_payload: list[dict[str, Any]] = []
     for ti in (getattr(report, "technical_issues", []) or []):
-        try:
+        with contextlib.suppress(Exception):
             technical_issues_payload.append(
                 ti.model_dump(mode="json") if hasattr(ti, "model_dump") else dict(ti)
             )
-        except Exception:
-            pass
 
     # v0.5.x — FULL token accounting. The report already separates prompt
     # vs completion, primary vs fallback model, call counts, and a per-stage

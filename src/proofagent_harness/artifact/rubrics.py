@@ -33,8 +33,9 @@ Unknown types with no custom rubric fall through to an empty checklist
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # Public list of types that ship with a custom rubric pack.
 CANONICAL_ARTIFACT_TYPES: list[str] = [

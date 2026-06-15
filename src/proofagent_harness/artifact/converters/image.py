@@ -30,7 +30,6 @@ import base64
 from pathlib import Path
 from typing import Any
 
-
 # Recognized image MIME types for the OpenAI / Anthropic vision payload.
 _MIME_TYPES: dict[str, str] = {
     ".png":  "image/png",

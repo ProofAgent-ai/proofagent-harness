@@ -39,6 +39,7 @@ Key design properties — required when shipping this in customer pytest suites:
 from __future__ import annotations
 
 import atexit
+import contextlib
 import queue
 import threading
 import time
@@ -210,15 +211,13 @@ class BackgroundReporter:
         if self._shutdown.is_set():
             return
         self._shutdown.set()
-        try:
+        try:  # noqa: SIM105
             self._queue.put_nowait(None)  # wake worker
         except queue.Full:
             pass
         self._thread.join(timeout=float(timeout_s))
-        try:
+        with contextlib.suppress(Exception):
             self._client.close()
-        except Exception:
-            pass
 
     def stats(self) -> dict[str, Any]:
         """Snapshot of telemetry. Read by LiveReporter for the summary banner."""

@@ -134,7 +134,7 @@ def _semantic_chunk(text: str, policy: ChunkingPolicy) -> list[Chunk]:
     for start, end, heading, level in sections:
         # Update parent chain BEFORE deciding whether to flush.
         if level <= 2:
-            parent_chain = parent_chain[: level - 1] + [heading]
+            parent_chain = [*parent_chain[:level - 1], heading]
 
         sec_len = end - start
         if cur_end != cur_start and (cur_end - cur_start + sec_len) > policy.max_chunk_chars:

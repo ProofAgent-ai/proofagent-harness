@@ -11,7 +11,7 @@ from . import ArtifactConversionError
 
 def read_docx(p: Path) -> str:
     try:
-        import docx                                                  # type: ignore[import-not-found]
+        import docx  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ArtifactConversionError(
             "DOCX support requires python-docx. Install with one of:\n"

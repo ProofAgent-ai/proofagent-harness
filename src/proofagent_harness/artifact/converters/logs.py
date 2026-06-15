@@ -28,7 +28,6 @@ from typing import Any
 
 from . import ArtifactConversionError
 
-
 # ─── .log files ───────────────────────────────────────────────────────────────
 
 # Recognized log-line shapes (timestamp + level + message).

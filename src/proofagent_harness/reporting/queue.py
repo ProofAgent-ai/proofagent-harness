@@ -21,6 +21,7 @@ is NEVER written to disk — only the payload and the idempotency key.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -35,10 +36,8 @@ def default_cache_dir() -> Path:
     d = home / ".proofagent" / "pending_reports"
     d.mkdir(parents=True, exist_ok=True)
     # Owner only: 0700
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(d, 0o700)
-    except OSError:
-        pass
     return d
 
 
@@ -71,10 +70,8 @@ def write(
         "last_error": last_error,
         "payload": payload,
     }, indent=2, default=str))
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(out, 0o600)
-    except OSError:
-        pass
     return out
 
 

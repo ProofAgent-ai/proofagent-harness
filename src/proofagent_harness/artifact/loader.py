@@ -103,7 +103,7 @@ def load_corpus(corpus: KnowledgeCorpus) -> LoadedCorpus:
             continue
         # Header: relative path if possible, full path otherwise.
         header = f"--- {f.name} ---"
-        try:
+        try:  # noqa: SIM105
             # Best-effort: relative to current working directory.
             header = f"--- {f.resolve().relative_to(Path.cwd().resolve())} ---"
         except Exception:

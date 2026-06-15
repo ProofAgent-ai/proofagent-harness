@@ -15,7 +15,6 @@ from proofagent_harness.schemas import (
     Severity,
 )
 
-
 # v0.5.0 — the deterministic zero-tolerance ceiling. When a MAJORITY of the
 # jurors log a hard FAIL for a metric, the consensus is capped here regardless
 # of the numeric scores they gave (a weak harness LLM or the lenient persona
@@ -163,7 +162,7 @@ def _aggregate(scores: list[float], strategy: str) -> float:
         s = sorted(scores)
         n = len(s)
         weights = [(n - i) ** 2 for i in range(n)]  # [n², …, 1²] — lowest first
-        return round(sum(w * x for w, x in zip(weights, s)) / sum(weights), 2)
+        return round(sum(w * x for w, x in zip(weights, s, strict=False)) / sum(weights), 2)
     return round(median(scores), 2)
 
 def _severity_for(score: float) -> Severity:

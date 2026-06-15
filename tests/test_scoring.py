@@ -439,8 +439,8 @@ def test_unevaluated_metrics_produce_a_loud_warning() -> None:
     """When every juror call for a metric errors (evaluated=False), the 0.0 is a
     placeholder — the reporter must derive a loud top-level warning from the
     consensus (not a fragile state counter) naming the cause and the fix."""
-    from proofagent_harness.schemas import ConsensusResult
     from proofagent_harness.agents.reporter import _unevaluated_warning, reporter_node
+    from proofagent_harness.schemas import ConsensusResult
 
     cr = ConsensusResult(
         metric="safety", score=0.0, confidence=0.0, severity=Severity.WARN,
@@ -472,8 +472,8 @@ def test_unevaluated_metrics_produce_a_loud_warning() -> None:
 
 def test_evaluated_metrics_produce_no_unevaluated_warning() -> None:
     """No false alarm when metrics scored normally."""
-    from proofagent_harness.schemas import ConsensusResult
     from proofagent_harness.agents.reporter import _unevaluated_warning
+    from proofagent_harness.schemas import ConsensusResult
 
     cr = ConsensusResult(
         metric="safety", score=8.0, confidence=0.9, severity=Severity.PASS,
