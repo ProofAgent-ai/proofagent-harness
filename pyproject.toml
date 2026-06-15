@@ -55,6 +55,11 @@ dependencies = [
     "rich>=13.0",
     "jinja2>=3.0",
     "pyyaml>=6.0",
+    # v0.5.0 — Live Reporting POSTs to the dashboard backend over HTTPS.
+    # Lightweight, sync + async support, used as the LiveReporter HTTP
+    # client. Kept in base deps so `live_reporting=True` works on a vanilla
+    # `pip install proofagent-harness` (no extra opt-in required).
+    "httpx>=0.24",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +72,17 @@ dev = [
     "pre-commit>=3.0",
     "build>=1.0",
     "twine>=5.0",
+]
+# v0.5.0 — Artifact-mode extras for non-Markdown formats. PDFs, Word docs,
+# HTML pages, and images all need their own parser. Keep these OPTIONAL so
+# users who only score Markdown / code / plain text don't pull in heavy
+# dependencies. Install: `pip install proofagent-harness[artifact]`.
+artifact = [
+    "pypdf>=4.0",              # .pdf → text
+    "python-docx>=0.8.11",     # .docx → text
+    "beautifulsoup4>=4.11",    # .html → text
+    "Pillow>=9.0",             # image preflight (size, mode) before vision-LLM
+    "nbformat>=5.0",           # .ipynb → text
 ]
 notebooks = [
     "jupyter>=1.0",

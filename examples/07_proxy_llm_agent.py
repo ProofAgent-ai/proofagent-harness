@@ -9,7 +9,7 @@ Why this exists:
 What this configures:
   - The AGENT under test → talks to the OpenAI-compatible proxy below.
   - The HARNESS LLM (planner / conductor / juror) → still uses the model
-    you pass with `--llm` (defaults to gpt-4.1-mini, cross-family judge).
+    you pass with `--llm` (defaults to gpt-4.1-mini, cross-family harness LLM).
 
 If you want to also run the HARNESS LLM through the proxy, set the env
 vars before running:

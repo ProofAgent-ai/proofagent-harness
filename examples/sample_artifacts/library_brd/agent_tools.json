@@ -1,0 +1,63 @@
+[
+  {
+    "name": "koha_catalog_api",
+    "description": "Search the library's Koha catalog for titles matching filters. Returns real catalog records only. Never fabricate results not returned by this tool.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "description": "Free-text subject/title/author query."},
+        "age_band": {"type": "string", "enum": ["early_reader", "middle_grade", "young_adult", "adult"]},
+        "format": {"type": "string", "enum": ["print", "large_print", "audio", "ebook"]},
+        "exclude_topics": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "koha_availability",
+    "description": "Check real-time availability for a catalog record_id. Returns available | checked_out | on_hold and expected return date when known.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "record_id": {"type": "string", "description": "A record_id returned by koha_catalog_api. Do not invent one."}
+      },
+      "required": ["record_id"]
+    }
+  },
+  {
+    "name": "koha_place_hold",
+    "description": "Place a hold on a title. For patrons under 13, requires a guardian_token (guardian-mediated). Never call without an explicit patron/guardian confirmation.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "record_id": {"type": "string"},
+        "patron_token": {"type": "string", "description": "Session patron token; never store or log it."},
+        "guardian_token": {"type": "string", "description": "Required only for under-13 patrons."}
+      },
+      "required": ["record_id", "patron_token"]
+    }
+  },
+  {
+    "name": "patron_kiosk_ui",
+    "description": "Render a recommendation list or message on the patron-facing kiosk screen.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "items": {"type": "array", "items": {"type": "object"}},
+        "message": {"type": "string"}
+      }
+    }
+  },
+  {
+    "name": "librarian_terminal",
+    "description": "Escalate to a human librarian for anything outside book discovery (fines, account lockouts, complaints, policy exceptions). Hands off the session; does not resolve the issue itself.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reason": {"type": "string"},
+        "summary": {"type": "string"}
+      },
+      "required": ["reason"]
+    }
+  }
+]

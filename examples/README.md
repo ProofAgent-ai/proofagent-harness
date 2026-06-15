@@ -20,7 +20,15 @@ flags that matter.
 | [`09_asymmetric_single_cell.py`](09_asymmetric_single_cell.py) | Small local Harness LLM vs frontier agent across four bundled domains |
 | [`10_load_custom_traps.py`](10_load_custom_traps.py) | **Trap loader inspection** — minimal demo of `load_traps()` + `TrapIndex` (no LLM calls) |
 | [`11_live_trace_evaluation.py`](11_live_trace_evaluation.py) | **Advanced / observability** — live per-turn trace (trap card + Q + A + cumulative coverage) for debugging *why* an agent failed. Shares `examples/agents/*.json` with `09_*`. |
+| [`12_live_reporting.py`](12_live_reporting.py) | **Live Reporting** — stream an in-progress eval to the proofagent.ai dashboard in real time. Free API key. |
+| [`13_live_reporting_regression.py`](13_live_reporting_regression.py) | **Live Reporting — regression** — compare versions of the same agent on one project; per-metric deltas surface in the dashboard. |
+| [`14_live_reporting_smoke_test.py`](14_live_reporting_smoke_test.py) | **Live Reporting smoke test** — exercise every reporting endpoint against the backend end-to-end. No LLM keys required. |
+| [`15_pytest_fixture.py`](15_pytest_fixture.py) | **Pytest fixture** — the canonical pattern for shipping Live Reporting inside a large customer pytest suite. |
+| [`16_load_test_reporter.py`](16_load_test_reporter.py) | **Load test** — proves the async BackgroundReporter holds up under burst load (overflow-drop-oldest, non-blocking). |
+| [`17_artifact_eval.py`](17_artifact_eval.py) | **Artifact mode** — score a pre-generated BRD / code / report / architecture doc against a knowledge corpus (no live agent needed). Bundled fully-fictional library BRD example runs as-is after clone. |
+| [`18_local_report_extend.py`](18_local_report_extend.py) | **Local report** — run the harness fully offline and write one standard JSON + Markdown report to disk. No ProofAgent API key. |
 | [`agents/`](agents/) | Four production-style domain agent specs + multi-provider factory |
+| [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled BRD + knowledge corpus used by `17_artifact_eval.py` |
 | [`custom_traps/`](custom_traps/) | Sample trap used by `08_custom_trap.py` |
 
 ---

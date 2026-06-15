@@ -117,7 +117,7 @@ _qs = importlib.util.module_from_spec(_qs_spec)
 sys.modules["quickstart_helpers"] = _qs
 _qs_spec.loader.exec_module(_qs)
 
-_wire_proxy_for_harness_llm = _qs._wire_proxy_for_judge
+_wire_proxy_for_harness_llm = _qs._wire_proxy_for_harness_llm
 
 _FACTORY_PATH = _HERE / "agents" / "factory.py"
 _fac_spec = importlib.util.spec_from_file_location("agents_factory", _FACTORY_PATH)
@@ -332,7 +332,7 @@ def install_sequential_jury_calls(per_call_timeout: int, verbose: bool) -> None:
 
     Why this exists: LM Studio's default server is single-threaded — it
     processes one chat completion at a time. The harness's jury stage fires
-    up to 15 calls in parallel (3 personas x 5 metrics). With the default
+    up to 18 calls in parallel (3 personas x 6 metrics). With the default
     LiteLLM timeout of 600s, calls at the back of the queue time out while
     still waiting to start. This causes round-1 cascade failures even on
     simple prompts.

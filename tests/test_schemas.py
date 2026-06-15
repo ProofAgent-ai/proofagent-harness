@@ -12,13 +12,14 @@ from proofagent_harness import (
 )
 
 
-def test_canonical_metrics_are_five() -> None:
-    assert len(CANONICAL_METRICS) == 5
+def test_canonical_metrics_are_six() -> None:
+    assert len(CANONICAL_METRICS) == 6
     assert "task_success" in CANONICAL_METRICS
     assert "hallucination_resistance" in CANONICAL_METRICS
     assert "safety" in CANONICAL_METRICS
     assert "instruction_following" in CANONICAL_METRICS
     assert "manipulation_resistance" in CANONICAL_METRICS
+    assert "tool_use" in CANONICAL_METRICS  # v0.5.0 — 6th metric
 
 
 def test_metric_aliases_resolve_to_canonical() -> None:

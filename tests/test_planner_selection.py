@@ -5,7 +5,11 @@ from __future__ import annotations
 import math
 
 from proofagent_harness.agents.planner import (
+    MIN_COMPOSITE_TRAPS,
+    MIN_DOMAIN_TRAPS,
     MIN_FACTUALITY_TRAPS,
+    _difficulty,
+    _is_composite,
     _is_critical,
     _is_factuality,
     _select_traps,
@@ -233,3 +237,63 @@ def test_is_factuality_classifier() -> None:
     assert not _is_factuality(by_name["instruction_override"])
     assert not _is_factuality(by_name["pricing_manipulation"])
     assert not _is_factuality(by_name["protected_class_bias"])
+
+
+# ─── v0.5.0 — sharper / more challenging selection ──────────────────────────
+
+
+def test_composite_floor_in_large_plan() -> None:
+    """A 20-turn plan must include >=MIN_COMPOSITE_TRAPS composite/chained attacks
+    (the hardest class) — not a stack of single-shot traps."""
+    traps = load_traps()
+    chosen = _select_traps(traps, ["safety"], domains=["payments", "support"], n=20)
+    n_composite = sum(1 for t in chosen if _is_composite(t))
+    assert n_composite >= MIN_COMPOSITE_TRAPS, (
+        f"expected >={MIN_COMPOSITE_TRAPS} composite attacks, got {n_composite}: "
+        f"{[t.name for t in chosen if _is_composite(t)]}"
+    )
+
+
+def test_domain_matched_floor_when_domains_inferred() -> None:
+    """When domains are inferred and matched traps exist, the plan guarantees a
+    floor of domain-matched traps (not just a score nudge)."""
+    traps = load_traps()
+    domains = ["payments", "support", "finance"]
+    available = sum(1 for t in traps if t.domains and (set(t.domains) & set(domains)))
+    chosen = _select_traps(traps, ["safety"], domains=domains, n=20)
+    matched = sum(1 for t in chosen if t.domains and (set(t.domains) & set(domains)))
+    assert matched >= min(MIN_DOMAIN_TRAPS, available), (
+        f"expected >={min(MIN_DOMAIN_TRAPS, available)} domain-matched traps, got {matched}"
+    )
+
+
+def test_family_diversity_in_large_plan() -> None:
+    """A 20-turn plan should span MANY attack families (broad coverage), not
+    repeat one family — the family-diverse fill in action."""
+    traps = load_traps()
+    chosen = _select_traps(traps, ["safety"], domains=["payments"], n=20)
+    families = {t.family for t in chosen}
+    assert len(families) >= 8, f"expected >=8 distinct families, got {len(families)}: {families}"
+
+
+def test_selection_prefers_harder_traps() -> None:
+    """The sharpened selection should be meaningfully harder than a random draw:
+    its mean difficulty must beat the library's average difficulty."""
+    traps = load_traps()
+    lib_mean = sum(_difficulty(t) for t in traps) / len(traps)
+    chosen = _select_traps(traps, ["safety"], domains=["payments", "support"], n=20)
+    sel_mean = sum(_difficulty(t) for t in chosen) / len(chosen)
+    assert sel_mean > lib_mean, (
+        f"selection mean difficulty {sel_mean:.2f} should exceed library mean {lib_mean:.2f}"
+    )
+
+
+def test_is_composite_classifier() -> None:
+    """_is_composite recognizes chained / compound / multi-step attacks."""
+    traps = load_traps()
+    by_name = {t.name: t for t in traps}
+    assert _is_composite(by_name["universal_jailbreak_chain"])
+    assert _is_composite(by_name["social_engineering_combined_chain"])
+    assert _is_composite(by_name["gradual_escalation"])
+    # a plain single-shot trap is not composite
+    assert not _is_composite(by_name["pricing_manipulation"])

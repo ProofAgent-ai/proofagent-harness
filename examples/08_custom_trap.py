@@ -28,18 +28,18 @@ Usage
   # 0) Wiring sanity check — loads trap index, prints summary, NO API calls.
   python examples/08_custom_trap.py --list-only
 
-  # 1) Default: bundled demo trap + Claude agent + Claude judge.
+  # 1) Default: bundled demo trap + Claude agent + Claude harness LLM.
   python examples/08_custom_trap.py --turns 8
 
-  # 2) Pick the agent model and judge model (same as 01_quickstart).
+  # 2) Pick the agent model and harness LLM (same as 01_quickstart).
   python examples/08_custom_trap.py --turns 3 --consensus debate \\
       --agent-model gpt-4.1 --llm gpt-4.1
 
-  # 3) Cross-family judging — Claude agent, GPT judge.
+  # 3) Cross-family scoring — Claude agent, GPT harness LLM.
   python examples/08_custom_trap.py --turns 8 \\
       --agent-model claude-opus-4-7 --llm gpt-4.1
 
-  # 4) Proxy juror — keep the agent on real OpenAI, route the JUDGE
+  # 4) Proxy juror — keep the agent on real OpenAI, route the Harness LLM
   #    to a local mlx / vllm / lm-studio / ngrok endpoint.
   python examples/08_custom_trap.py --turns 8 \\
       --agent-model gpt-4.1-mini \\
@@ -53,8 +53,8 @@ Usage
 Setup
 -----
     pip install proofagent-harness anthropic openai
-    export OPENAI_API_KEY=sk-...           # OpenAI agents + LiteLLM judge
-    export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic agents + default Claude judge
+    export OPENAI_API_KEY=sk-...           # OpenAI agents + LiteLLM harness LLM
+    export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic agents + default Claude harness LLM
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ TOOLS                   = _qs.TOOLS
 TOOLS_ANTHROPIC         = _qs.TOOLS_ANTHROPIC
 KNOWLEDGE               = _qs.KNOWLEDGE
 _is_anthropic_model     = _qs._is_anthropic_model
-_wire_proxy_for_judge   = _qs._wire_proxy_for_judge
+_wire_proxy_for_harness_llm = _qs._wire_proxy_for_harness_llm
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,14 +183,14 @@ def parse_args() -> argparse.Namespace:
     # ── Proxy juror (mirror 01_quickstart)
     p.add_argument(
         "--proxy-url", type=str, default=None, metavar="URL",
-        help="Redirect the JUDGE (--llm) to an OpenAI-compatible proxy at "
+        help="Redirect the Harness LLM (--llm) to an OpenAI-compatible proxy at "
              "this URL (e.g., a local mlx/vllm endpoint or ngrok tunnel). The "
              "AGENT stays on its real provider endpoint regardless.",
     )
     p.add_argument(
         "--context-budget", "--ctx", type=int, default=None, metavar="TOKENS",
-        help="Override the harness's context budget for the JUDGE. Required "
-             "when the judge runs on a small-context proxy model (e.g., 4B "
+        help="Override the harness's context budget for the Harness LLM. Required "
+             "when the Harness LLM runs on a small-context proxy model (e.g., 4B "
              "local mlx with 8K context — pass --ctx 6000 to leave room "
              "for output).",
     )
@@ -243,7 +243,7 @@ def main() -> int:
             return 0
 
         # ── Resolve juror routing (proxy or direct)
-        judge_model = args.llm
+        harness_llm_model = args.llm
         agent_provider = (
             "Anthropic" if _is_anthropic_model(args.agent_model) else "OpenAI"
         )
@@ -257,20 +257,20 @@ def main() -> int:
             else ""
         )
         if args.proxy_url:
-            judge_model = _wire_proxy_for_judge(args.proxy_url, args.llm)
+            harness_llm_model = _wire_proxy_for_harness_llm(args.proxy_url, args.llm)
 
         print("\n[eval]")
         print(f"  agent  → {args.agent_model} via {agent_endpoint}{pin_note}")
         if args.proxy_url:
-            print(f"  judge  → {judge_model} via {args.proxy_url}")
+            print(f"  harness LLM → {harness_llm_model} via {args.proxy_url}")
         else:
-            print(f"  judge  → {judge_model} (default routing)")
+            print(f"  harness LLM → {harness_llm_model} (default routing)")
         print(f"  turns  → {args.turns}    consensus={args.consensus}    "
               f"seed={args.seed}")
 
         if args.proxy_url and args.context_budget is None:
             print(
-                "[warn] proxy judge selected without --context-budget. If the "
+                "[warn] proxy Harness LLM selected without --context-budget. If the "
                 "proxy model has a small context window (e.g., 4B mlx@8bit ~8K "
                 "tokens) the juror prompts WILL exceed it. Recommended: "
                 "--context-budget 6000 for 8K models, 16000 for 32K models.",
@@ -285,7 +285,7 @@ def main() -> int:
         )
 
         report = Harness(
-            llm=judge_model,
+            llm=harness_llm_model,
             turns=args.turns,
             consensus=args.consensus,
             seed=args.seed,
@@ -310,15 +310,15 @@ def main() -> int:
         )
 
         RESULTS_DIR.mkdir(exist_ok=True)
-        judge_tag = (
-            judge_model.replace("openai/", "proxy_")
+        harness_tag = (
+            harness_llm_model.replace("openai/", "proxy_")
             .replace("/", "_").replace("@", "_")
         )
         trap_tag = trap_dir.name.replace("/", "_")
         stem = (
             f"custom_trap_{trap_tag}"
             f"_agent-{args.agent_model.replace('/', '_')}"
-            f"_judge-{judge_tag}"
+            f"_harness-{harness_tag}"
             f"_{args.turns}turn_seed{args.seed}"
         )
         out_json = RESULTS_DIR / f"{stem}.json"

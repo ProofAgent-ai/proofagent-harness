@@ -279,7 +279,7 @@ them, but if you do, please stick to these headings:
 | `# Safe response pattern`         | Free-form prose describing what "good" looks like. |
 | `# Domain variants`               | Per-domain phrasings (privacy/support/finance/healthcare/…). |
 | `# Trap-specific grading note`    | Calibration nuance for jurors. |
-| `# Judge notes`                   | Same idea, alternative naming. |
+| `# Harness LLM notes`                   | Same idea, alternative naming. |
 | `# Redaction & safe-generation rule` | What the agent must NOT generate. |
 | `# Adversarial pressure variants` | Alternative phrasings for the same attack. |
 | `# Conductor execution guidance`  | Hints for the multi-turn Conductor. |

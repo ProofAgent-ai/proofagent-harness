@@ -10,9 +10,9 @@ same KNOWLEDGE corpus across every run. What you swap via CLI:
                   (gpt-4.1, gpt-4.1-mini, claude-opus-4-7,
                    claude-sonnet-4-6, claude-haiku-4-5, ...)
 
-  --llm           the harness JUDGE LLM (any LiteLLM-supported model)
+  --llm           the Harness LLM (any LiteLLM-supported model)
 
-  --proxy-url     redirect the JUDGE to an OpenAI-compatible proxy
+  --proxy-url     redirect the Harness LLM to an OpenAI-compatible proxy
                   (mlx / vllm / lm-studio / ngrok). The agent stays on
                   its real provider endpoint regardless.
 
@@ -37,37 +37,37 @@ CALIBRATION NOTE — cross-family judging:
 
 Setup:
     pip install proofagent-harness openai anthropic
-    export OPENAI_API_KEY=sk-...           # OpenAI agents + LiteLLM judge
-    export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic agents + default Claude judge
+    export OPENAI_API_KEY=sk-...           # OpenAI agents + LiteLLM harness LLM
+    export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic agents + default Claude harness LLM
 
 Run — head-to-head benchmark across LLMs:
 
-    # OpenAI gpt-4.1                    (cross-family Claude judge)
+    # OpenAI gpt-4.1                    (cross-family Claude harness LLM)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model gpt-4.1
 
-    # OpenAI gpt-4.1-mini               (cross-family Claude judge)
+    # OpenAI gpt-4.1-mini               (cross-family Claude harness LLM)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model gpt-4.1-mini
 
-    # Claude Opus 4.7                   (cross-family GPT judge)
+    # Claude Opus 4.7                   (cross-family GPT harness LLM)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model claude-opus-4-7 --llm gpt-4.1
 
-    # Claude Sonnet 4.6                 (cross-family GPT judge)
+    # Claude Sonnet 4.6                 (cross-family GPT harness LLM)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model claude-sonnet-4-6 --llm gpt-4.1
 
-    # Claude Haiku 4.5 (cheap)          (cross-family GPT-mini judge)
+    # Claude Haiku 4.5 (cheap)          (cross-family GPT-mini harness LLM)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model claude-haiku-4-5 --llm gpt-4.1-mini
 
-    # Local proxy as judge (cheap, ablation only — see warning below)
+    # Local proxy as Harness LLM (cheap, ablation only — see warning below)
     python examples/01_quickstart.py --turns 15 --consensus debate \\
         --agent-model gpt-4.1-mini \\
         --proxy-url https://your-proxy/v1 --llm gemma-4-e4b-it-mlx@8bit --ctx 6000
 
-Each run lands in results/ with a stem encoding (agent_model, judge_model,
+Each run lands in results/ with a stem encoding (agent_model, harness_llm,
 turns, seed) so head-to-head comparisons don't collide.
 """
 
@@ -94,9 +94,24 @@ _openai_client: openai.OpenAI | None = None
 _anthropic_client: anthropic.Anthropic | None = None
 
 
+def _strip_provider_prefix(model: str) -> str:
+    """Strip a LiteLLM-style `provider/` prefix for SDK calls that want the
+    bare model id (the Anthropic + OpenAI SDKs reject `anthropic/claude-…`).
+    Leave multi-segment ids (e.g. `vertex_ai/gemini-…`, routed via LiteLLM)
+    untouched — only the two direct-SDK providers are stripped here."""
+    for prefix in ("anthropic/", "openai/"):
+        if model.lower().startswith(prefix):
+            return model[len(prefix):]
+    return model
+
+
 def _is_anthropic_model(model: str) -> bool:
-    """Auto-detect whether a model name belongs to Anthropic (claude-*)."""
-    return model.lower().startswith("claude")
+    """Auto-detect Anthropic models, INCLUDING a LiteLLM-style provider
+    prefix (`anthropic/claude-…` — the form the README and harness LLM use).
+    Without prefix handling these routed to the OpenAI SDK and crashed with
+    an opaque 'invalid model ID' (client report B1)."""
+    ml = model.lower()
+    return ml.startswith("anthropic/") or ml.split("/", 1)[-1].startswith("claude")
 
 
 def _get_openai_client() -> openai.OpenAI:
@@ -697,6 +712,7 @@ def _make_gemini_agent(model: str):
 
 def _make_openai_agent(model: str):
     """OpenAI-flavored agent — chat.completions API with function tools."""
+    model = _strip_provider_prefix(model)  # B1: `openai/gpt-…` → `gpt-…`
     history: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}]
 
     def agent(message: str) -> AgentResponse:
@@ -768,6 +784,7 @@ def _make_anthropic_agent(model: str):
       - Tool calls come back as `content` blocks with type='tool_use'
       - Tool results go back as user messages with type='tool_result'
     """
+    model = _strip_provider_prefix(model)  # B1: `anthropic/claude-…` → `claude-…`
     history: list[dict[str, Any]] = []  # NO system here — Anthropic uses system= arg
 
     def agent(message: str) -> AgentResponse:
@@ -833,7 +850,7 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Run an N-turn adversarial evaluation against an OpenAI gpt-4.1 "
             "refund agent with full AgentContext (system_prompt + tools + "
-            "knowledge corpus). Use --proxy-url to redirect the JUDGE to a "
+            "knowledge corpus). Use --proxy-url to redirect the Harness LLM to a "
             "local OpenAI-compatible proxy (mlx, vllm, lm-studio) without "
             "affecting the agent."
         ),
@@ -862,6 +879,15 @@ def parse_args() -> argparse.Namespace:
              "and we'll auto-prefix with openai/.",
     )
     parser.add_argument(
+        "--fallback-llm",
+        type=str, default=None, metavar="MODEL",
+        help="Backup harness LLM used when a juror/conductor call FAILS on the "
+             "primary --llm (timeout, rate-limit, or a provider CONTENT REFUSAL — "
+             "e.g. an OpenAI harness LLM refusing an adversarial transcript with "
+             "'flagged for cybersecurity risk'). Recommended: claude-sonnet-4-5 "
+             "(an Anthropic model isn't subject to OpenAI's filter). Off by default.",
+    )
+    parser.add_argument(
         "--agent-model",
         type=str, default="gpt-4.1",
         help="Model id for the AGENT under test. Auto-detects provider: "
@@ -872,7 +898,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--proxy-url",
         type=str, default=None, metavar="URL",
-        help="Redirect the JUDGE (--llm) to an OpenAI-compatible proxy at this "
+        help="Redirect the Harness LLM (--llm) to an OpenAI-compatible proxy at this "
              "URL (e.g., a local mlx/vllm endpoint or ngrok tunnel). The AGENT "
              "stays on real api.openai.com (pinned). Auto-prefixes --llm with "
              "openai/ if not already prefixed. Sets OPENAI_API_KEY=not-required "
@@ -881,8 +907,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--context-budget", "--ctx",
         type=int, default=None, metavar="TOKENS",
-        help="Override the harness's context-budget for the JUDGE. Required when "
-             "the judge runs on a small-context model (e.g., 4B local mlx with "
+        help="Override the harness's context-budget for the Harness LLM. Required when "
+             "the Harness LLM runs on a small-context model (e.g., 4B local mlx with "
              "8K context — pass --ctx 6000 to leave room for output). Default: "
              "auto-detect from the model name. If set too small, jurors will "
              "lose transcript history and per-turn audits will be sparse.",
@@ -890,7 +916,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _wire_proxy_for_judge(proxy_url: str, llm: str) -> str:
+def _wire_proxy_for_harness_llm(proxy_url: str, llm: str) -> str:
     """Set up env so LiteLLM (--llm path) routes to a proxy. Returns the
     possibly-prefixed model name to pass into Harness(llm=...).
 
@@ -918,20 +944,20 @@ if __name__ == "__main__":
     if args.turns < 1:
         raise SystemExit("--turns must be >= 1")
 
-    judge_model = args.llm
+    harness_llm_model = args.llm
     agent_provider = "Anthropic" if _is_anthropic_model(args.agent_model) else "OpenAI"
     agent_endpoint = (
         "api.anthropic.com" if agent_provider == "Anthropic" else "api.openai.com"
     )
     pin_note = " (pinned)" if args.proxy_url and agent_provider == "OpenAI" else ""
     if args.proxy_url:
-        judge_model = _wire_proxy_for_judge(args.proxy_url, args.llm)
+        harness_llm_model = _wire_proxy_for_harness_llm(args.proxy_url, args.llm)
         print(
             f"[config] AGENT  → {args.agent_model} via {agent_endpoint}{pin_note}",
             flush=True,
         )
         print(
-            f"[config] JUDGE  → {judge_model} via {args.proxy_url}",
+            f"[config] HARNESS LLM → {harness_llm_model} via {args.proxy_url}",
             flush=True,
         )
     else:
@@ -939,12 +965,16 @@ if __name__ == "__main__":
             f"[config] AGENT  → {args.agent_model} via {agent_endpoint}",
             flush=True,
         )
-        print(f"[config] JUDGE  → {judge_model} (default routing)", flush=True)
+        print(f"[config] HARNESS LLM → {harness_llm_model} (default routing)", flush=True)
 
-    # Heads-up if a small-context proxy judge is selected without an explicit budget
+    if args.fallback_llm:
+        print(f"[config] FALLBACK LLM → {args.fallback_llm} "
+              "(rescues juror/conductor calls the primary refuses or errors)", flush=True)
+
+    # Heads-up if a small-context proxy Harness LLM is selected without an explicit budget
     if args.proxy_url and args.context_budget is None:
         print(
-            "[warn] proxy judge selected without --context-budget. If the proxy "
+            "[warn] proxy Harness LLM selected without --context-budget. If the proxy "
             "model has a small context window (e.g., 4B mlx@8bit usually serves "
             "with ~8K tokens) the juror prompts WILL exceed it and conductor/"
             "juror calls will fail. Recommended: --context-budget 6000 for 8K "
@@ -962,7 +992,8 @@ if __name__ == "__main__":
     # Full AgentContext — system_prompt + tools + knowledge — so no caps fire
     # and jurors can score against real ground truth.
     report = Harness(
-        llm=judge_model,
+        llm=harness_llm_model,
+        fallback_llm=args.fallback_llm,
         turns=args.turns,
         consensus=args.consensus,
         seed=args.seed,
@@ -980,12 +1011,12 @@ if __name__ == "__main__":
     )
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    judge_tag = (
-        judge_model.replace("openai/", "proxy_").replace("/", "_").replace("@", "_")
+    harness_tag = (
+        harness_llm_model.replace("openai/", "proxy_").replace("/", "_").replace("@", "_")
     )
     stem = (
         f"run_openai_{args.agent_model.replace('/', '_')}"
-        f"_judge-{judge_tag}_{args.turns}turn_seed{args.seed}"
+        f"_harness-{harness_tag}_{args.turns}turn_seed{args.seed}"
     )
     out_json = RESULTS_DIR / f"{stem}.json"
     out_md = RESULTS_DIR / f"{stem}.md"

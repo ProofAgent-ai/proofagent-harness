@@ -54,7 +54,19 @@ except ImportError:  # pragma: no cover
     _HARNESS_VERSION = "unknown"
 
 
-DEFAULT_BASE_URL = "https://api.proofagent.ai"
+# Live Reporting backend (v0.5.0+).
+#
+# IMPORTANT — this is NOT the public api.proofagent.ai V1 host. The Live
+# Reporting routes (/api/v1/runs/start, /turn-events, /events, /sync) live
+# on the dedicated Azure App Service that the dashboard also pins to. The
+# legacy api.proofagent.ai host does NOT have these routes — POSTing to
+# `api.proofagent.ai/api/v1/runs/start` returns 405 because the V1 router
+# matches `start` as a `{run_id}` path param for the GET endpoint and then
+# refuses the POST method.
+#
+# If you self-host the Live Reporting backend, override at runtime:
+#   export PROOFAGENT_API_BASE=https://your-backend.example.com
+DEFAULT_BASE_URL = "https://apiproofagent-bmgnhxeeekf4awd2.centralus-01.azurewebsites.net"
 DEFAULT_DASHBOARD_BASE = "https://www.proofagent.ai"
 
 
@@ -79,6 +91,13 @@ class ReportingConfig:
     def __post_init__(self) -> None:
         if self.api_key is None:
             self.api_key = os.environ.get("PROOFAGENT_API_KEY")
+        # Defensive: strip stray whitespace/newlines from the key. A trailing
+        # "\n" — extremely common from copy-paste or `export VAR=$(…)` — makes
+        # the "Authorization: Bearer <key>" header illegal, so httpx refuses to
+        # send it and live reporting dies with a cryptic "Illegal header value".
+        # Stripping both ends makes that entire failure class impossible.
+        if isinstance(self.api_key, str):
+            self.api_key = self.api_key.strip() or None
         # Allow PROOFAGENT_API_BASE / DASHBOARD_BASE overrides for self hosting
         self.base_url = os.environ.get("PROOFAGENT_API_BASE", self.base_url).rstrip("/")
         self.dashboard_base_url = os.environ.get(
@@ -245,11 +264,15 @@ class LiveReporter:
             self._announce_ok = False
             self._announce_error = f"auth: {exc}"
             if self.cfg.print_progress:
-                self._print(f"[report]    Live URL skipped — auth rejected ({exc}).")
-                self._print(f"            Key prefix used: {(self.cfg.api_key or '')[:18]}***")
-                self._print(f"            Live Reporting keys start with 'live_eval_'. V1 'apk_live_*' keys")
-                self._print(f"            cannot authenticate against /api/v1/runs/start. Register an agent")
-                self._print(f"            on the dashboard ('+ New agent') to issue a live_eval_* key.")
+                key = self.cfg.api_key or ""
+                self._print(f"[report]    Live URL skipped — API key REJECTED by the backend ({exc}).")
+                self._print(f"            Key used: {key[:14]}…  (length {len(key)})")
+                self._print(f"            The key reached the server but was refused. Likely causes:")
+                self._print(f"              • the key is wrong, revoked, or was copied incompletely")
+                self._print(f"              • the key belongs to a different tenant / environment")
+                self._print(f"            Get a fresh key and re-export it:")
+                self._print(f"              1. {self.cfg.dashboard_base_url}/dashboard/agents → your agent → Generate API key")
+                self._print(f'              2. export PROOFAGENT_API_KEY="apk_live_…"')
             return None
         except ReportingUnavailableError as exc:
             self._announce_ok = False
@@ -348,6 +371,12 @@ class LiveReporter:
         outcome: str = "ok",
         duration_s: float = 0.0,
         total_turns: int | None = None,
+        tokens_used: int | None = None,
+        # v0.5.0 — artifact-mode display. When set, the terminal print
+        # uses a jury-style label ("jury complete", "scoring chunk 3/8")
+        # instead of the meaningless "turn 0/1" multi-turn label.
+        # Wire-level payload is unchanged (still goes to /turn-events).
+        display_label: str | None = None,
     ) -> bool:
         """Commit a turn snapshot SYNCHRONOUSLY before the next turn starts.
 
@@ -399,6 +428,11 @@ class LiveReporter:
             "outcome": outcome or "ok",
             "duration_s": float(duration_s or 0.0),
             "defects": list(defects or []),
+            # Progressive token reporting — running total at end of turn N.
+            # Backend bumps runs.agent_config.tokens_used so the dashboard
+            # KPI tile ticks up turn-by-turn instead of waiting for /sync.
+            # `None` (omitted) = field absent; backend leaves prior value.
+            "tokens_used": int(tokens_used) if tokens_used is not None else None,
         }
 
         backoffs = (0.5, 1.5, 3.0)
@@ -407,7 +441,9 @@ class LiveReporter:
             try:
                 r = httpx.post(url, json=body, headers=headers, timeout=15.0)
                 if 200 <= r.status_code < 300:
-                    self._print_turn_progress(turn_index, total_turns, ok=True)
+                    self._print_turn_progress(turn_index, total_turns,
+                                              ok=True, tokens_used=tokens_used,
+                                              display_label=display_label)
                     return True
                 if 400 <= r.status_code < 500 and r.status_code != 429:
                     last_err = f"HTTP {r.status_code}: {(r.text or '')[:160]}"
@@ -418,7 +454,9 @@ class LiveReporter:
             if attempt < len(backoffs) - 1:
                 time.sleep(backoffs[attempt])
 
-        self._print_turn_progress(turn_index, total_turns, ok=False, err=last_err)
+        self._print_turn_progress(turn_index, total_turns,
+                                  ok=False, err=last_err,
+                                  display_label=display_label)
         if not self._last_failure_detail:
             self._last_failure_detail = f"/turn-events: {last_err}"
         return False
@@ -430,23 +468,42 @@ class LiveReporter:
         *,
         ok: bool,
         err: str | None = None,
+        tokens_used: int | None = None,
+        display_label: str | None = None,
     ) -> None:
-        """Hard-to-miss per-turn progress bar in the terminal."""
+        """Hard-to-miss progress bar in the terminal.
+
+        ``display_label`` overrides the default ``turn X/Y`` label — used
+        for artifact mode ("jury complete (182k tok)") and other modes
+        where per-turn progression is meaningless.
+        """
         if not self.cfg.print_progress:
             return
+        # Running token count shown alongside the bar so the user sees
+        # cost accruing in real time (no need to wait for the end-of-eval
+        # banner to know whether the eval is on budget).
+        tok_str = ""
+        if tokens_used is not None and tokens_used > 0:
+            tok_str = f"  ({tokens_used:,} tok)" if tokens_used < 10_000 else f"  ({tokens_used/1000:.1f}k tok)"
         if total_turns and total_turns > 0:
-            pct = int(100 * turn_index / total_turns)
+            # Artifact mode: turn_index=0/total_turns=1 would render 0% —
+            # use a full bar for "jury complete" by computing as turn+1.
+            # Display the override label if given (jury-style) instead of
+            # the multi-turn "turn X/Y".
+            denom = max(1, total_turns)
+            numer = max(1, turn_index) if display_label else turn_index
+            pct = min(100, int(100 * numer / denom))
             bar_width = 40
-            filled = int(bar_width * turn_index / total_turns)
+            filled = min(bar_width, int(bar_width * numer / denom))
             bar = "█" * filled + "░" * (bar_width - filled)
-            label = f"turn {turn_index}/{total_turns}"
+            label = display_label or f"turn {turn_index}/{total_turns}"
             if ok:
-                self._print(f"[report] {bar} {pct:3d}%  {label}  → synced")
+                self._print(f"[report] {bar} {pct:3d}%  {label}  → synced{tok_str}")
             else:
                 self._print(f"[report] {bar} {pct:3d}%  {label}  ✗ FAILED: {err}")
         else:
             mark = "→ synced" if ok else f"✗ FAILED: {err}"
-            self._print(f"[report] turn {turn_index} {mark}")
+            self._print(f"[report] turn {turn_index} {mark}{tok_str}")
 
     def report_completion(
         self,
@@ -629,6 +686,69 @@ class LiveReporter:
         self._print(f"╚{bar}╝")
         self._print("")
 
+        # v0.5.0 — LOUD diagnostic block when something looks wrong.
+        # If /sync failed OR /turn-events all failed OR /events all
+        # failed, print a hard-to-miss banner explaining what to check.
+        # The previous boxed summary was easy to miss in a noisy terminal;
+        # this lines-up the most-likely root causes for a "dashboard
+        # says in-progress / metrics empty" report.
+        sync_failed = s["sync_ok"] is False
+        no_turns = (
+            s.get("turn_events_sent", 0) == 0
+            and s.get("turn_events_failed", 0) > 0
+        )
+        no_events = (
+            s.get("events_sent", 0) == 0
+            and s.get("events_failed", 0) > 0
+        )
+        auth_dead = bool(s.get("announce_error")) and "auth" in str(s.get("announce_error", "")).lower()
+        any_problem = sync_failed or no_turns or no_events or auth_dead or (s["announce_ok"] is False)
+        if any_problem:
+            self._print("┌──────────────────────────────────────────────────────────────────┐")
+            self._print("│  DASHBOARD WILL NOT REFLECT THIS RUN — Live Reporting failed     │")
+            self._print("│                                                                  │")
+            if auth_dead or s["announce_ok"] is False:
+                self._print("│  Most likely:  invalid or missing PROOFAGENT_API_KEY             │")
+                self._print("│  Fix:          1. https://www.proofagent.ai/dashboard/agents     │")
+                self._print("│                2. click your agent  →  copy a NEW apk_live_…     │")
+                self._print("│                3. export PROOFAGENT_API_KEY=\"apk_live_…\"         │")
+            elif sync_failed:
+                # Wrap the full SQL error across as many boxed lines as needed
+                # so the user can see the actual DBAPIError / column name /
+                # constraint violation, not a truncated head. Hidden errors
+                # are the main reason people can't diagnose /sync failures.
+                self._print("│  /sync failed — backend rejected the completion payload.         │")
+                self._print("│  Full error:                                                     │")
+                err = str(s.get("sync_error", "")) or "(no error message)"
+                # Print outside the box so terminals that drop combining chars
+                # still render the full string. The box drawing is decorative;
+                # the error needs to be readable verbatim.
+                self._print("└──────────────────────────────────────────────────────────────────┘")
+                self._print(f"    {err}")
+                self._print("")
+                self._print("    What to do:")
+                self._print("      • Paste the full error above when reporting this.")
+                self._print("      • If it mentions a column / NOT NULL / type mismatch, the")
+                self._print("        backend deploy is behind the SDK — wait for the latest")
+                self._print("        backend to deploy, then re-run.")
+                self._print("      • Local data is queued at the cache dir — flush after")
+                self._print("        the backend fix with:  proofagent reporting sync")
+                self._print("")
+                # Suppress the closing box border later — we already printed
+                # an early `└` above to escape the box around the error.
+                return
+            elif no_turns or no_events:
+                self._print("│  Per-turn / per-event POSTs all failed — dashboard cannot show   │")
+                self._print("│  progress bar, transcript, or audit until /sync (end of eval)    │")
+                self._print("│  lands. Most common cause: PROOFAGENT_API_BASE points at the     │")
+                self._print("│  wrong backend. A 405 on /api/v1/runs/start means you're hitting │")
+                self._print("│  api.proofagent.ai (V1 host — no Live Reporting routes).         │")
+                self._print("│  Fix:    unset PROOFAGENT_API_BASE     # use SDK default         │")
+                self._print("│       OR export PROOFAGENT_API_BASE=https://apiproofagent-       │")
+                self._print("│             bmgnhxeeekf4awd2.centralus-01.azurewebsites.net      │")
+            self._print("└──────────────────────────────────────────────────────────────────┘")
+            self._print("")
+
     # ---------------------------------------------------------------- helpers
 
     def _can_attempt(self) -> bool:
@@ -637,6 +757,16 @@ class LiveReporter:
         if not self.cfg.api_key:
             if self._first_call:
                 self._print_once_no_key()
+            return False
+        key_problem = self._api_key_header_problem()
+        if key_problem is not None:
+            # A malformed key (control chars / non-ASCII) can never form a valid
+            # Authorization header. Fail loudly ONCE with an actionable message,
+            # then disable reporting for the session so we don't repeat it every
+            # turn. Replaces the old cryptic "Illegal header value" skip.
+            if self._first_call:
+                self._print_once_bad_key(key_problem)
+            self._auth_disabled = True
             return False
         if httpx is None:
             if self._first_call:
@@ -717,6 +847,45 @@ class LiveReporter:
         self._print(
             "[report] live_reporting=True but PROOFAGENT_API_KEY is not set.\n"
             "         reporting disabled for this session. set the env var to enable."
+        )
+
+    def _api_key_header_problem(self) -> str | None:
+        """Return a human-readable reason the API key can't form a valid HTTP
+        ``Authorization`` header, or ``None`` if it's well-formed.
+
+        Catches the single most common Live Reporting support issue: a stray
+        newline / tab inside the key (copy-paste or ``export``). The key is
+        already ``.strip()``-ed in ReportingConfig, so leading/trailing
+        whitespace is gone by here — this catches the rarer *internal* control
+        char and a non-ASCII (corrupted / truncated) key.
+        """
+        key = self.cfg.api_key or ""
+        if not key:
+            return None
+        ctrl = sorted({c for c in key if ord(c) < 0x20 or ord(c) == 0x7F})
+        if ctrl:
+            shown = ", ".join(repr(c) for c in ctrl)
+            return (
+                f"the key contains a control character ({shown}) — almost always a "
+                "stray newline. Re-export it on one line, no trailing newline:\n"
+                '             export PROOFAGENT_API_KEY="apk_live_…"'
+            )
+        try:
+            key.encode("latin-1")  # the encoding httpx uses for header values
+        except UnicodeEncodeError:
+            return (
+                "the key contains non-ASCII characters — it looks corrupted or "
+                "truncated. Copy a fresh key from "
+                f"{self.cfg.dashboard_base_url}/dashboard/agents"
+            )
+        return None
+
+    def _print_once_bad_key(self, reason: str) -> None:
+        self._first_call = False
+        self._print(
+            "[report] PROOFAGENT_API_KEY is MALFORMED — live reporting disabled "
+            "for this run.\n"
+            f"         {reason}"
         )
 
     def _print_once_auth_disabled(self, detail: str) -> None:
