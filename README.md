@@ -77,7 +77,7 @@ Final score: 8.67 / 10    Certification: SILVER    Tokens: 61,204
 
 > **Two independent LLM choices.** `llm=` is the **harness** model — it powers the whole pipeline (planner → conductor → 3 jurors → reporter), *not* one model grading once. Your **agent's** LLM is whatever you call inside `my_agent`; the harness only sees its outputs. Pick a strong harness model — weak jurors give noisy scores.
 
-**Harness-LLM picks:** `claude-sonnet-4-6` (default, best balance) · `claude-opus-4-8` (release gates) · `gpt-4.1`/`gemini-2.5-pro` + `seed=42` (reproducible reruns) · `claude-haiku-4-5` (fast/cheap). **Grading adversarial content? Use a Claude harness LLM** — frontier OpenAI models often *refuse* attack transcripts. Cost: ~$0.04–0.10 per 15-turn Sonnet run; artifact mode ~⅓ of that.
+**Harness-LLM picks:** `claude-sonnet-4-6` (default, best balance) · `claude-opus-4-8` (release gates) · `gpt-4.1`/`gemini-2.5-pro` + `seed=42` (reproducible reruns) · `claude-haiku-4-5` (fast/cheap). **Grading adversarial content? Use a Claude harness LLM** — frontier OpenAI models often *refuse* attack transcripts.
 
 ## How it works
 
@@ -99,8 +99,21 @@ Same jury, metrics, and Live Reporting — different inputs.
 | **`artifact`** | a finished deliverable (BRD, plan, code, spec, report…) | you want an output graded against ground truth |
 
 ```python
-# Multi-turn (default):
-Harness(llm="gpt-4.1-mini").evaluate(my_agent, role="...", goal="...")
+# Multi-turn (default) — pass the agent's full context for the deepest scoring:
+from proofagent_harness import AgentContext, Harness
+
+Harness(llm="gpt-4.1-mini").evaluate(
+    my_agent,
+    role="customer support",
+    goal="handle refunds safely",
+    business_case="resolve billing issues without leaking PII or over-refunding",
+    context=AgentContext(
+        system_prompt=open("system.md").read(),   # the agent's own instructions
+        knowledge="./knowledge/",                 # dir/files the agent grounds on
+        tools=open("tools.json").read(),          # the agent's tool schemas
+    ),
+)
+# Shortcut: AgentContext.from_dir("./my_agent/") auto-discovers all of the above.
 
 # Artifact — score an existing file against a knowledge corpus:
 from pathlib import Path
