@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.5.1] — 2026-06-15
+
+Docs & packaging polish — **no functional changes** (the evaluation engine,
+metrics, scoring, and public API are byte-for-byte identical to 0.5.0; all
+tests pass unchanged).
+
+- **Docs** — condensed the README to a focused "how to run it 360°" guide
+  (deep methodology now lives in the paper + docs site); the multi-turn
+  example shows the full `AgentContext` (system prompt / knowledge / tools);
+  the printed scorecard includes the 6th metric (`tool_use`); removed cost
+  figures from all docs (cost stays excluded from every display).
+- **Lint / CI** — `ruff`-clean across `src` + `tests`; dropped the obsolete
+  private-`benchmarks/` parse step from CI.
+
 ## [0.5.0] — 2026-06-15
 
 ### Added — full token accounting in Live Reporting `/sync`
