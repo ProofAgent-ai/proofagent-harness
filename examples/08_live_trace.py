@@ -6,9 +6,9 @@ what the conductor is picking, what it's asking, what the agent answers, and
 how coverage is accumulating turn by turn. Use this when you want to
 understand *why* an agent failed, not when you want a batch eval score.
 
-For canonical batch evaluation, prefer `09_asymmetric_single_cell.py`. This
-example shares the same agent specs (`examples/agents/*.json`) and the same
-factory (`examples/agents/factory.py`) — no duplication.
+For batch evaluation, run this against each agent spec. This example shares the
+same agent specs (`examples/agents/*.json`) and the same factory
+(`examples/agents/factory.py`) — no duplication.
 
 What this example uniquely shows
 --------------------------------
@@ -39,13 +39,13 @@ your own agent. The spec schema is documented in `examples/agents/README.md`.
 Usage
 -----
     # List available agents (no API calls)
-    python examples/11_live_trace_evaluation.py --list-agents
+    python examples/08_live_trace.py --list-agents
 
     # Wire check (loads trap library + selected agent, no API calls)
-    python examples/11_live_trace_evaluation.py --agent privacy_security_agent --list-only
+    python examples/08_live_trace.py --agent privacy_security_agent --list-only
 
     # Real run — local Gemma harness LLM + gpt-4.1-mini agent
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent          medical_triage_assistant \\
         --agent-model    gpt-4.1-mini \\
         --harness-llm    gemma-4-E4B-it-MLX-8bit \\
@@ -57,27 +57,27 @@ Usage
         --sequential
 
     # Cross-family — Claude Opus agent + cloud Sonnet harness LLM
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent privacy_security_agent \\
         --agent-model claude-opus-4-7 \\
         --harness-llm anthropic/claude-sonnet-4-6 \\
         --no-proxy --turns 10 --consensus debate
 
     # Verbose — no truncation of pattern / Q / A
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent privacy_security_agent --verbose --turns 5 --sequential
 
     # Merge an external trap directory on top of the bundled 183-trap library.
     # Useful when you keep an experimental / private trap pack outside the
     # main harness repo. Custom traps override bundled traps with the same name
     # ("last wins").
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent privacy_security_agent \\
         --extra-traps ~/projects/my-benchmark/hacker_traps/ \\
         --turns 8
 
     # Multiple external dirs + a pip-installed trap pack at the same time.
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent customer_support_agent \\
         --extra-traps ./internal_traps/ ./pilot_traps/ \\
         --trap-packs finance healthcare \\
@@ -88,7 +88,7 @@ Usage
     # (forced through api.openai.com). Without this, silent juror failures
     # collapse the final score to 0/10 with no findings. The fallback only
     # fires on actual failures, so cost is bounded by your primary's failure rate.
-    python examples/11_live_trace_evaluation.py \\
+    python examples/08_live_trace.py \\
         --agent           customer_support_agent \\
         --extra-traps     /path/to/hacker_traps/ \\
         --agent-model     gpt-4.1 \\
@@ -145,8 +145,7 @@ console = Console()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Reuse the agent factory + spec loader from examples/agents/factory.py.
-# Same pattern as 09_asymmetric_single_cell.py — single source of truth for
-# agent construction across the examples folder.
+# Single source of truth for agent construction across the examples folder.
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -174,7 +173,7 @@ def discover_bundled_agents() -> list[str]:
 
 def resolve_agent_spec_path(agent_arg: str) -> Path:
     """Accept short name (`customer_support_agent`), filename (`...json`), or
-    absolute path. Mirrors 09_asymmetric_single_cell.py resolution."""
+    absolute path."""
     p = Path(agent_arg).expanduser()
     if p.is_absolute() and p.exists():
         return p
@@ -190,8 +189,8 @@ def resolve_agent_spec_path(agent_arg: str) -> Path:
 # ═════════════════════════════════════════════════════════════════════════════
 # Proxy wiring + sequential jury + think-tag stripper
 #
-# Inlined — small, self-contained, no cross-script imports. Same logic as
-# 09_asymmetric_single_cell.py (kept consistent for parity across examples).
+# Inlined — small, self-contained, no cross-script imports (kept consistent for
+# parity across examples).
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -527,12 +526,12 @@ class LiveTraceCollector:
 def parse_args() -> argparse.Namespace:
     bundled = discover_bundled_agents()
     p = argparse.ArgumentParser(
-        prog="11_live_trace_evaluation.py",
+        prog="08_live_trace.py",
         description=(
             "Advanced observability example — live cumulative trace of an "
             "evaluation. Watch the harness pick traps and probe the agent in "
             "real time. Use for debugging WHY an agent failed; for batch "
-            "evaluation see 09_asymmetric_single_cell.py."
+            "evaluation run it against each agent spec."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -670,7 +669,7 @@ def main() -> int:
         Panel.fit(
             "[bold cyan]Advanced observability example — live trace[/bold cyan]\n"
             "Watching the harness pick traps and probe the agent in real time.\n"
-            "[dim]For batch evaluation use 09_asymmetric_single_cell.py.[/dim]",
+            "[dim]For batch evaluation, run it against each agent spec.[/dim]",
             border_style="cyan",
         )
     )
@@ -870,7 +869,6 @@ def main() -> int:
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
 
     return 0

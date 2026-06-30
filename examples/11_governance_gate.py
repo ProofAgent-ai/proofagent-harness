@@ -23,31 +23,22 @@ Everything is driven from the terminal
 ``--upload`` /        opt in to the network call. Off by default — offline, the
 ``--no-upload``       example writes the payload it WOULD send to
                       ``examples/_governance_payload.sample.json`` for inspection.
-``--api-key`` /       credentials. Flags win over PROOFAGENT_API_KEY /
-``--api-url``         PROOFAGENT_API_BASE_URL env vars. The base URL defaults to
-                      ProofAgent Cloud; point it at an Enterprise / on-prem URL
-                      (e.g. ``https://proofagent.acme-corp.internal``) to upload
-                      there instead — nothing else differs (same payload, same
-                      endpoint path, same gate semantics).
+``--api-key``         credentials. The flag wins over the PROOFAGENT_API_KEY env
+                      var. Uploads always go to ProofAgent Cloud.
 
 ──────────────────────────────────────────────────────────────────────────────
 Run it
 ──────────────────────────────────────────────────────────────────────────────
 Offline (uses a bundled saved report — no keys, no network):
 
-    python examples/12_governance_gate.py
+    python examples/11_governance_gate.py
 
 Upload + gate a release (Cloud by default):
 
-    python examples/12_governance_gate.py \\
+    python examples/11_governance_gate.py \\
         --upload --api-key pa_live_... \\
         --agent "Refund Agent" --agent-version v1.8.2 \\
         --profile airline_customer_support --source ci_cd --fail-on block
-
-On-prem / Enterprise — only the URL changes:
-
-    python examples/12_governance_gate.py --upload \\
-        --api-key pa_live_... --api-url https://proofagent.acme-corp.internal
 
 ──────────────────────────────────────────────────────────────────────────────
 The gate, in CI
@@ -131,11 +122,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--api-key", default=None, metavar="KEY",
         help="Governance API key. Defaults to env PROOFAGENT_API_KEY.",
-    )
-    p.add_argument(
-        "--api-url", default=None, metavar="URL",
-        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, "
-             "then ProofAgent Cloud. Override for Enterprise / on-prem.",
     )
     return p.parse_args()
 
@@ -257,9 +243,10 @@ def main() -> int:
 
     _print_payload_summary(payload, report_path)
 
-    # Credentials: flag wins, env is the fallback, Cloud is the default URL.
+    # Credentials: flag wins, env is the fallback. Upload target is hard-locked
+    # to ProofAgent Cloud.
     api_key = args.api_key or os.environ.get("PROOFAGENT_API_KEY")
-    api_url = args.api_url or os.environ.get("PROOFAGENT_API_BASE_URL") or DEFAULT_API_BASE_URL
+    api_url = DEFAULT_API_BASE_URL
 
     if not args.upload:
         SAMPLE_OUT.write_text(json.dumps(payload, indent=2))
@@ -268,8 +255,8 @@ def main() -> int:
         print(f"Wrote the payload that WOULD be uploaded to: "
               f"{SAMPLE_OUT.relative_to(REPO_ROOT)}")
         print()
-        print("To upload + gate (Cloud or on-prem — only --api-url changes):")
-        print("  python examples/12_governance_gate.py --upload \\")
+        print("To upload + gate (uploads to ProofAgent Cloud):")
+        print("  python examples/11_governance_gate.py --upload \\")
         print('      --api-key pa_live_...   # or set PROOFAGENT_API_KEY')
         return 0
 

@@ -1,8 +1,8 @@
 # Production-style domain agents
 
-This folder bundles four production-style domain agents used by
-[`examples/09_asymmetric_single_cell.py`](../09_asymmetric_single_cell.py)
-to reproduce the asymmetric evaluation cells reported in the paper.
+This folder bundles four production-style domain agents used by the example
+[`08_live_trace.py`](../08_live_trace.py) (and reusable as a starting point for
+your own agent specs).
 
 Each `.json` file is a self-contained agent specification with system prompt,
 role / business case / goal, knowledge corpus, declared guardrails, and a
@@ -109,9 +109,9 @@ proxy's model id as the model name.
 5. Run:
 
    ```bash
-   python examples/09_asymmetric_single_cell.py \
+   python examples/08_live_trace.py \
      --agent your_agent \
-     --agent-llm gpt-5.5 \
+     --agent-model gpt-5.5 \
      --harness-llm anthropic/claude-haiku-4-5 \
      --turns 25 --seed 42 --consensus debate
    ```

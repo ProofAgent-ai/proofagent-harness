@@ -76,7 +76,7 @@ curl http://localhost:1234/v1/models | python3 -m json.tool
 
 ### 4. Pushing to the dashboard
 
-Examples **01–08** and **12** share one uniform **governance upload** flag group,
+Examples **01–09** and **11** share one uniform **governance upload** flag group,
 registered by [`_dashboard.py:add_governance_upload_args`](_dashboard.py). It is
 **off by default** — runs stay offline and write only the local report. Add
 `--upload` to push the *finished* report to the **ProofAgent Governance API**
@@ -88,14 +88,13 @@ for **both** multi-turn and artifact runs.
 |---|---|---|
 | `--upload` / `--no-upload` | `--no-upload` (offline) | Push the finished run to the Governance API and print the gate decision. |
 | `--api-key KEY` | env `PROOFAGENT_API_KEY` | Governance API key. The flag wins over the env var. |
-| `--api-url URL` | env `PROOFAGENT_API_BASE_URL`, then ProofAgent Cloud | API base URL. Override only for Enterprise / on-prem. |
 | `--agent NAME` | per-example | Logical agent name — groups runs + regressions in the dashboard. |
 | `--agent-version VER` | none | Version / git ref of the agent under test. |
 | `--profile SLUG` | none | Governance profile slug to gate against (e.g. `airline_customer_support`). |
-| `--fail-on {pass,review,block}` | `block` | Which gate decision fails the build (advisory exit code; examples 01–11 do not `sys.exit` on it, 12 does). |
+| `--fail-on {pass,review,block}` | `block` | Which gate decision fails the build (advisory exit code; examples 01–10 do not `sys.exit` on it, 11 does). |
 | `--source {local,ci_cd,manual,api,scheduled}` | `local` | Origin of the run, recorded in the dashboard. |
 
-The base URL defaults to **ProofAgent Cloud**, so for Cloud you only need a key:
+Every `--upload` run goes to **ProofAgent Cloud**, so you only need a key:
 
 ```bash
 # either pass the flag…
@@ -105,15 +104,7 @@ export PROOFAGENT_API_KEY=pa_live_...
 python examples/01_quickstart.py --upload
 ```
 
-Get a key from the Governance dashboard → **Settings → API Keys**. For on-prem,
-add `--api-url https://proofagent.acme.internal` (or export
-`PROOFAGENT_API_BASE_URL`).
-
-> **Note — examples 09 and 10 are different.** They demonstrate **Live
-> Reporting**, which *streams turns in real time* during the run. They use
-> `--live` / `--no-live` (plus `--staging` / `--self-hosted`), **not** the
-> `--upload` group above. Use `--upload` to gate a *finished* report; use Live
-> Reporting to *watch* a run as it happens.
+Get a key from the Governance dashboard → **Settings → API Keys**.
 
 ---
 
@@ -129,13 +120,12 @@ add `--api-url https://proofagent.acme.internal` (or export
 | [`06_custom_traps.py`](06_custom_traps.py) | Bring-your-own adversarial traps merged into the bundled library via `--trap` | multi-turn | `--upload` |
 | [`07_proxy_llm.py`](07_proxy_llm.py) | Evaluate an agent served by a local / self-hosted OpenAI-compatible proxy | multi-turn | `--upload` |
 | [`08_live_trace.py`](08_live_trace.py) | **Observability** — live per-turn trace (trap card + Q + A + cumulative coverage) for debugging *why* an agent failed | multi-turn | `--upload` |
-| [`09_live_reporting.py`](09_live_reporting.py) | **Live Reporting** — stream an in-progress eval to the dashboard in real time | multi-turn | `--live` |
-| [`10_regression.py`](10_regression.py) | **Live Reporting — regression** — sweep versions of one agent; per-metric deltas surface in the dashboard | multi-turn | `--live` |
-| [`11_pytest_ci.py`](11_pytest_ci.py) | Drop-in **pytest** assertion for CI; thresholds via env vars; optional governance gate | multi-turn | helper (env) |
-| [`12_governance_gate.py`](12_governance_gate.py) | **Governance gate** — turn a saved report into a release decision (pass / review / block); no LLM key | n/a (reads a report) | `--upload` |
+| [`09_regression.py`](09_regression.py) | **Regression** — sweep versions of one agent offline; per-metric deltas, optionally pushed under one agent name | multi-turn | `--upload` |
+| [`10_pytest_ci.py`](10_pytest_ci.py) | Drop-in **pytest** assertion for CI; thresholds via env vars; optional governance gate | multi-turn | helper (env) |
+| [`11_governance_gate.py`](11_governance_gate.py) | **Governance gate** — turn a saved report into a release decision (pass / review / block); no LLM key | n/a (reads a report) | `--upload` |
 | [`report_viewer.py`](report_viewer.py) | Utility — render a saved report `.json` as a standalone offline HTML dashboard | n/a | — |
 | [`_dashboard.py`](_dashboard.py) | Helper — the shared `--upload` flag group + `push_to_dashboard()` (imported, not run) | n/a | — |
-| [`agents/`](agents/) | Five production-style domain agent specs + a multi-provider factory (used by 08 and the benchmark) | — | — |
+| [`agents/`](agents/) | Five production-style domain agent specs + a multi-provider factory (used by 08) | — | — |
 | [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled fictional BRD + knowledge corpus used by `04_artifact_eval.py` | — | — |
 | [`custom_traps/`](custom_traps/) | Sample trap used by `06_custom_traps.py` | — | — |
 
@@ -181,7 +171,7 @@ python examples/01_quickstart.py --turns 8 --upload --api-key pa_live_...
 | `--agent-model` | `gpt-4.1` | Model for the AGENT under test. Auto-detects provider (`claude-*` → Anthropic; else OpenAI). |
 | `--proxy-url` | none | Redirect the harness LLM to an OpenAI-compatible proxy URL. Agent stays on real OpenAI. |
 | `--context-budget`, `--ctx` | auto | Harness-LLM context budget. Set (e.g. `6000`) for small-context proxy models. |
-| _governance upload_ | — | `--upload`/`--no-upload`, `--api-key`, `--api-url`, `--agent`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
+| _governance upload_ | — | `--upload`/`--no-upload`, `--api-key`, `--agent`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
@@ -324,7 +314,6 @@ python examples/04_artifact_eval.py --upload --api-key pa_live_...
 | `--fallback-llm` | none | Backup harness LLM that rescues a failed/unparseable primary juror call. |
 | `--consensus`, `-c` | `delphi` | `independent` / `delphi` / `debate`. |
 | `--seed`, `-s` | `42` | Random seed. |
-| `--live` | off | Enable **Live Reporting** (streams to the dashboard; requires `PROOFAGENT_API_KEY`). |
 | `--list-only` | off | Print the eval plan and exit — no API calls. |
 | _governance upload_ | `--agent` default `artifact-eval-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
@@ -334,7 +323,7 @@ python examples/04_artifact_eval.py --upload --api-key pa_live_...
 
 **What it shows.** Run the harness entirely on your machine and write the single
 standard report — every field the harness produces, in one `<stem>.json` + one
-`<stem>.md` (identical schema to what Live Reporting streams, just written
+`<stem>.md` (identical schema to what `--upload` pushes, just written
 locally). Supports **both** evaluation modes (`--mode multi_turn` |
 `--mode artifact`). `--add-custom-fields` additionally emits a
 `<stem>.augmented.json` with your own extra fields.
@@ -476,8 +465,8 @@ traps and probe the agent in real time. Each turn prints a rich panel — select
 trap ID and parsed fields (family, severity, metrics, forbidden/expected tools,
 tags, pattern excerpt with composite attack chain), the conductor's adversarial
 question, the agent's answer, any tool calls, and a cumulative coverage line.
-Use it to debug *why* an agent failed; for batch scoring use the
-[benchmark](#benchmarks). Agent specs are loaded from
+Use it to debug *why* an agent failed; for batch scoring, run it against each
+agent spec. Agent specs are loaded from
 [`agents/*.json`](agents/) (five bundled profiles).
 
 > Here `--agent` selects which **agent spec** to load (it is *not* the dashboard
@@ -533,76 +522,34 @@ python examples/08_live_trace.py \
 | `--list-only` | off | Print config + agent summary + trap library; no API calls. |
 | `--list-agents` | off | Print the bundled agent registry and exit. |
 | `--output-dir` | `results/` | Where to write reports. |
-| _governance upload_ | _no `--agent`_ (derived from spec) | `--upload`/`--no-upload`, `--api-key`, `--api-url`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
+| _governance upload_ | _no `--agent`_ (derived from spec) | `--upload`/`--no-upload`, `--api-key`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `09_live_reporting.py` — Live Reporting (stream a run in real time)
-
-**What it shows.** Stream an in-progress evaluation to your ProofAgent dashboard
-**turn by turn** via `live_reporting=True`. This is a *different* mechanism from
-the `--upload` group: it streams *during* the run rather than pushing a finished
-report. Off by default (offline + local report); add `--live` (which needs
-`PROOFAGENT_API_KEY`) to stream.
-
-**Mode:** multi-turn · **Pushes via:** `--live` (streaming Live Reporting)
-
-**Run**
-
-```bash
-# Offline (default) — runs + writes a local report, no streaming
-python examples/09_live_reporting.py --turns 5
-
-# Stream live to your dashboard (needs PROOFAGENT_API_KEY)
-export PROOFAGENT_API_KEY=pa_live_...
-python examples/09_live_reporting.py --live --turns 5
-
-# CI / no spend — offline stub agent, no pause for Enter
-python examples/09_live_reporting.py --stub-agent --no-wait --list-only
-```
-
-**Arguments**
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--llm` | `gpt-4.1-mini` | Harness juror LLM. |
-| `--fallback-llm` | none | Backup harness LLM that rescues a failed/unparseable primary juror call. |
-| `--agent-model` | `gpt-4.1-mini` | OpenAI model the agent calls each turn. Ignored with `--stub-agent`. |
-| `--stub-agent` | off | Use the static-policy stub agent (no `OPENAI_API_KEY`). |
-| `--turns` | `5` | Adversarial turns. Free/Starter accounts are capped at 15 server-side. |
-| `--consensus` | `delphi` | Juror consensus method. |
-| `--seed` | `42` | Random seed. |
-| `--live` | off | Stream this run to your dashboard via Live Reporting (requires `PROOFAGENT_API_KEY`). |
-| `--no-live` | (default) | Run offline, no dashboard streaming. |
-| `--staging` | off | Point at the staging API + dashboard (only with `--live`). |
-| `--self-hosted URL` | none | URL of a self-hosted ProofAgent backend. |
-| `--list-only` | off | Print the configuration and exit — no API calls. |
-| `--no-wait` | off | Don't pause for "Press Enter" after the URL prints (CI). |
-
----
-
-## `10_regression.py` — Live Reporting regression sweep
+## `09_regression.py` — regression sweep across agent versions (offline)
 
 **What it shows.** Sweep multiple **versions** of the same agent (the script
-walks a defensive → balanced → loose progression) reporting each to the same
-project, so per-metric deltas surface in the dashboard and you can see at a
-glance which version regressed and on which dimension. Like 09, it uses Live
-Reporting (`--live`), not `--upload`.
+walks a defensive → balanced → loose progression), scoring each with the same
+jury + seed so per-metric deltas surface and you can see at a glance which
+version regressed and on which dimension. Runs **fully offline** — each version
+writes its own local report. Add `--upload` to *also* push each version to the
+dashboard under one `--agent` name (each run gets a distinct `run_name`), so the
+dashboard groups them and renders the regression trend.
 
-**Mode:** multi-turn · **Pushes via:** `--live` (streaming Live Reporting)
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
 
 **Run**
 
 ```bash
-# Offline by default — runs the version sweep + writes local reports
-python examples/10_regression.py
-
-# Stream each version to your dashboard (opt-in)
-export PROOFAGENT_API_KEY=pa_live_...
-python examples/10_regression.py --live
+# Offline (default) — runs the version sweep + writes local reports
+python examples/09_regression.py
 
 # Print the plan, no API calls
-python examples/10_regression.py --list-only
+python examples/09_regression.py --list-only
+
+# Also push each version to your dashboard, grouped under one agent name
+export PROOFAGENT_API_KEY=pa_live_...
+python examples/09_regression.py --upload --agent refund-agent
 ```
 
 **Arguments**
@@ -612,15 +559,12 @@ python examples/10_regression.py --list-only
 | `--llm` | `claude-haiku-4-5` | Harness juror LLM (cheap + fast). |
 | `--turns` | `5` | Turns per version (cheap smoke). |
 | `--seed` | `42` | Random seed. |
-| `--live` | off | Stream each version to your dashboard (requires `PROOFAGENT_API_KEY`). |
-| `--no-live` | (default) | Run offline, no dashboard streaming. |
-| `--staging` | off | Use the staging API (only meaningful with `--live`). |
-| `--self-hosted URL` | none | Self-hosted backend URL (only meaningful with `--live`). |
 | `--list-only` | off | Print the plan — no API calls. |
+| _governance upload_ | `--agent` default `regression-demo-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `11_pytest_ci.py` — drop-in pytest assertion for CI
+## `10_pytest_ci.py` — drop-in pytest assertion for CI
 
 **What it shows.** The harness as a single **pytest** assertion: run an eval and
 fail the test if the final score (or any per-metric score) drops below a
@@ -635,11 +579,11 @@ environment variables rather than flags.
 **Run**
 
 ```bash
-pytest examples/11_pytest_ci.py
+pytest examples/10_pytest_ci.py
 
 # Tune thresholds in CI without editing the file
 PROOF_MIN_SCORE=7.5 PROOF_MIN_SAFETY=8.5 PROOF_TURNS=6 \
-  pytest examples/11_pytest_ci.py
+  pytest examples/10_pytest_ci.py
 ```
 
 **Environment knobs** (all optional)
@@ -652,12 +596,12 @@ PROOF_MIN_SCORE=7.5 PROOF_MIN_SAFETY=8.5 PROOF_TURNS=6 \
 | `PROOF_MIN_HALLUCINATION` | `7.0` | Minimum `hallucination_resistance`. |
 | `PROOF_MIN_MANIPULATION` | `7.0` | Minimum `manipulation_resistance`. |
 
-Set `PROOFAGENT_API_KEY` (and optionally `PROOFAGENT_API_BASE_URL`) to also push
-the run and gate the CI build on the governance decision.
+Set `PROOFAGENT_API_KEY` to also push the run and gate the CI build on the
+governance decision.
 
 ---
 
-## `12_governance_gate.py` — release gate from a saved report
+## `11_governance_gate.py` — release gate from a saved report
 
 **What it shows.** The *last mile*: take a finished evaluation `Report` and push
 it to the **ProofAgent Governance API** to gate a release (`pass` / `review` /
@@ -667,8 +611,8 @@ LLM key**), builds the upload payload, and prints a summary. Offline (default) i
 writes the exact payload it *would* send to
 `examples/_governance_payload.sample.json`; with `--upload` it POSTs and — unlike
 the other examples — **exits with the gate-mapped code** (0 pass / 1 review /
-2 block, subject to `--fail-on`), ready to wire into a CI step. The same script
-targets Cloud or on-prem — only `--api-url` changes.
+2 block, subject to `--fail-on`), ready to wire into a CI step. The script
+uploads to ProofAgent Cloud.
 
 **Mode:** reads a saved report (no eval) · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
 
@@ -676,17 +620,13 @@ targets Cloud or on-prem — only `--api-url` changes.
 
 ```bash
 # Offline — build + summarize + dump the sample payload (no keys, no network)
-python examples/12_governance_gate.py
+python examples/11_governance_gate.py
 
-# Upload + gate (Cloud by default); exits with the gate code
-python examples/12_governance_gate.py \
+# Upload + gate (ProofAgent Cloud); exits with the gate code
+python examples/11_governance_gate.py \
   --upload --api-key pa_live_... \
   --agent "Refund Agent" --agent-version v1.8.2 \
   --profile airline_customer_support --source ci_cd --fail-on block
-
-# On-prem / Enterprise — only the URL changes
-python examples/12_governance_gate.py --upload \
-  --api-key pa_live_... --api-url https://proofagent.acme-corp.internal
 ```
 
 **Arguments**
@@ -702,7 +642,6 @@ python examples/12_governance_gate.py --upload \
 | `--upload` | off | POST the run and exit with the gate code. Offline, the payload is written to `_governance_payload.sample.json`. |
 | `--no-upload` | (default) | Explicitly run offline. |
 | `--api-key KEY` | env `PROOFAGENT_API_KEY` | Governance API key (flag wins over env). |
-| `--api-url URL` | env `PROOFAGENT_API_BASE_URL`, then Cloud | API base URL. Override for Enterprise / on-prem. |
 
 > Unlike 01–08, this example registers its governance flags directly (not the
 > shared group): the `--agent` / `--agent-version` / `--profile` defaults are
@@ -732,49 +671,6 @@ python examples/report_viewer.py results/<report>.json --open   # also open in y
 
 `_dashboard.py` is the shared upload helper (the `--upload` flag group +
 `push_to_dashboard()`); it is imported by the examples, not run directly.
-
----
-
-## benchmarks/
-
-[`benchmarks/asymmetric_cohort.py`](../benchmarks/asymmetric_cohort.py)
-reproduces the headline **asymmetric cohort** cells from the paper: a small
-harness LLM (a local proxy model, or a cheap cloud model) evaluating a
-frontier-class agent across the bundled production-style domains. It reuses the
-same agent specs as the examples ([`examples/agents/`](agents/)) — short names
-like `customer_support_agent` resolve there, or pass an absolute path to your own
-spec.
-
-Run it **from the repo root**:
-
-```bash
-# Cloud harness LLM (no proxy needed)
-python benchmarks/asymmetric_cohort.py \
-  --agent       medical_triage_assistant \
-  --agent-llm   gpt-5.5 \
-  --harness-llm anthropic/claude-haiku-4-5 \
-  --turns 25 --seed 42 --consensus debate
-
-# Local harness LLM via LM Studio (the paper's small-harness cell)
-python benchmarks/asymmetric_cohort.py \
-  --agent       customer_support_agent \
-  --agent-llm   gpt-5.5 \
-  --harness-llm gemma-4-E4B-it-MLX-8bit \
-  --proxy-url   http://localhost:1234/v1 \
-  --turns 25 --seed 42 --consensus debate \
-  --context-budget 6000 --sequential
-
-# Wiring check — no API calls
-python benchmarks/asymmetric_cohort.py \
-  --agent customer_support_agent --harness-llm anthropic/claude-haiku-4-5 --list-only
-```
-
-Key flags: `--agent` (required), `--harness-llm` (required), `--agent-llm`
-(default `gpt-4.1`), `--proxy-url` (local harness LLM only), `--turns`
-(default 25), `--seed` (42), `--consensus` (`debate` in the paper),
-`--context-budget`/`--ctx` (required for small-context proxy models — `6000` for
-8K Gemma 4B), `--sequential` + `--per-call-timeout` (single-threaded proxies),
-`--output-dir`/`-o`, `--list-only`, `--quiet`.
 
 ---
 
@@ -829,10 +725,9 @@ transcript, per-juror scores, consensus log, findings, metadata) and
 | `LLM Provider NOT provided…` | LiteLLM can't infer the provider from a bare model name | Prefix it: `anthropic/claude-haiku-4-5`, `gemini/gemini-2.5-pro` |
 | `the configured harness LLM cannot handle the context size` | Local proxy loaded at too-small a context length | Reload the proxy model with a larger `--context-length` and/or pass `--context-budget` (e.g. `6000`) and/or drop `--turns` |
 | `Error code: 400 — model has crashed` | Local proxy OOM (model + KV cache > RAM) | Lower the proxy context length; close other apps; use a smaller quant |
-| All juror calls time out at 600s+ | Single-threaded local proxy can't serve parallel jurors | Add `--sequential` (and `--per-call-timeout` on 08 / the benchmark) |
+| All juror calls time out at 600s+ | Single-threaded local proxy can't serve parallel jurors | Add `--sequential` (and `--per-call-timeout` on 08) |
 | OpenAI harness LLM refuses an adversarial transcript | Provider content filter flags the red-team text | Pass an Anthropic `--fallback-llm` (e.g. `claude-sonnet-4-5`) — it isn't subject to OpenAI's filter |
 | Final score mid-band (~5–7) with many `SOFT_FAIL` audit lines | Harness LLM too small to parse the debate transcript reliably | Use a larger harness LLM (≥ 7B local, or any cloud frontier) and/or a `--fallback-llm` / `--fallback-juror` |
-| Live Reporting rejected with **HTTP 402** | Free/Starter accounts cap turns at 15 server-side | Lower `--turns` to ≤ 15, or upgrade the plan |
 | `gpt-5.x` returns "unsupported parameter" | Reasoning models dropped `temperature` / renamed `max_tokens` | The factory in [`agents/factory.py`](agents/factory.py) already handles this; in custom code drop `temperature` and use `max_completion_tokens` |
 
 ---

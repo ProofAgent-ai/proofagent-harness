@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich.console import Console
 
@@ -41,19 +40,6 @@ from proofagent_harness.schemas import (
     Severity,
     canonicalize_metric,
 )
-
-if TYPE_CHECKING:
-    from proofagent_harness.reporting import ReportingConfig
-
-# Resolved once at import (no package-__init__ circular import). Used to
-# stamp the SDK version into the Live Reporting announce config so the
-# dashboard's Run-context "SDK version" tile is populated for every mode.
-try:
-    from importlib.metadata import version as _pkg_version
-
-    _SDK_VERSION = _pkg_version("proofagent-harness")
-except Exception:  # pragma: no cover - version lookup is best-effort
-    _SDK_VERSION = ""
 
 
 def _resolve_agent_trace(agent_trace: Any, on_event: Callable[[Event], None] | None) -> str:
@@ -142,8 +128,6 @@ class Harness:
         verbose: bool = True,
         seed: int | None = None,
         context_budget_tokens: int | None = None,
-        live_reporting: bool = False,
-        live_reporting_config: ReportingConfig | None = None,
         custom_rubrics: dict[str, Any] | None = None,
     ) -> None:
         """Configure a Harness.
@@ -361,21 +345,6 @@ class Harness:
         self._traps = load_traps(self.extra_traps, self.trap_packs)
         self._trap_index = TrapIndex(self._traps)
         self._personas_loaded = load_personas(self.personas)
-
-        # Live Reporting (opt in, off by default). When enabled but
-        # PROOFAGENT_API_KEY is unset, the reporter is a no op + prints
-        # a single warning. Network failures NEVER fail the evaluation.
-        self._reporter = None
-        if live_reporting or live_reporting_config is not None:
-            try:
-                from proofagent_harness.reporting import LiveReporter, ReportingConfig
-                cfg = live_reporting_config or ReportingConfig()
-                self._reporter = LiveReporter(cfg)
-            except Exception:
-                # Reporting module is intentionally permissive — if it
-                # can't even import (e.g. httpx missing), reporting is
-                # silently disabled. The evaluation always proceeds.
-                self._reporter = None
 
         # v0.5.0 — site-wide custom rubric overrides for artifact mode.
         # Map: {artifact_type: rubric_dict} OR
@@ -603,186 +572,9 @@ class Harness:
                     ),
                 ))
 
-            # Live Reporting: announce the run BEFORE the graph runs so the
-            # dashboard URL prints up-front. Users can click it and watch the
-            # turn-by-turn progress stream in live. Best-effort — if the
-            # backend is unreachable, we set _announced_run_id=None and the
-            # report_completion path falls back to POST /runs/sync at the end.
-            self._announced_run_id = None
-            if self._reporter is not None:
-                try:
-                    # Resolve a meaningful agent_name (separate from role).
-                    # Priority: explicit env var, callable __name__, fallback.
-                    _agent_name = (
-                        os.environ.get("PROOFAGENT_AGENT_NAME")
-                        or getattr(agent, "__name__", None)
-                        or "agent"
-                    )
-                    if _agent_name == "<lambda>" or _agent_name == "agent":
-                        _agent_name = (role or "agent")[:64]
-
-                    _agent_model_announce = (
-                        os.environ.get("PROOFAGENT_AGENT_MODEL")
-                        or "unknown"
-                    )
-
-                    resp = self._reporter.announce_run_start(
-                        cell_label=f"{self.llm.model} x {role}",
-                        agent_name=_agent_name,
-                        agent_model=_agent_model_announce,
-                        harness_llm=self.llm.model,
-                        seed=self.seed,
-                        turns_total=self.turns,
-                        # Send EVERY piece of context the dashboard's
-                        # Run-context panel renders DURING the eval
-                        # (before /sync fires with the full report).
-                        # Backend stores these in runs.agent_config JSONB,
-                        # GET /runs/{id} surfaces them at top level.
-                        config={
-                            "agent_name": _agent_name,
-                            "role": (role or "")[:200],
-                            "business_case": (business_case or "")[:200],
-                            "goal": (goal or "")[:200],
-                            "harness_llm": self.llm.model,
-                            "agent_model": _agent_model_announce,
-                            "consensus_strategy": getattr(self, "consensus", "delphi"),
-                            "metrics_active": list(getattr(self, "metrics", []) or []),
-                            "seed": int(self.seed) if self.seed is not None else None,
-                            "personas": list(getattr(self, "personas", []) or []),
-                            "sdk_version": _SDK_VERSION,
-                        },
-                    )
-                    if resp:
-                        self._announced_run_id = resp.get("run_id")
-                        url = resp.get("dashboard_url")
-                        if url and self._reporter.cfg.print_progress:
-                            # Boxed, hard-to-miss banner so the user can click
-                            # the URL and watch the eval land live.
-                            bar = "═" * 64
-                            self._reporter._print("")
-                            self._reporter._print(f"╔{bar}╗")
-                            self._reporter._print("║  Live Reporting — your dashboard URL                           ║")
-                            self._reporter._print(f"╠{bar}╣")
-                            self._reporter._print(f"║  {url:<62}║")
-                            self._reporter._print(f"╚{bar}╝")
-                            self._reporter._print(
-                                "  Open the link above to watch the evaluation stream in."
-                            )
-                            self._reporter._print("")
-                except Exception:
-                    # Never block the eval on a reporting hiccup.
-                    self._announced_run_id = None
-
-            # Live Reporting: stream per-turn updates to the dashboard so
-            # the progress bar climbs + transcript fills in turn-by-turn.
-            # We wrap composed_callback HERE (after announce) so we only
-            # add the network call when we have a run_id and a reporter.
-            # Best-effort, fully isolated — never blocks/raises into the
-            # conductor loop.
+            # The graph receives the composed callback directly: terminal
+            # progress UI + the caller's public `on_event` streaming hook.
             graph_callback = composed_callback
-            announced_run_id = getattr(self, "_announced_run_id", None)
-            if announced_run_id and self._reporter is not None:
-                _reporter = self._reporter
-                _local_callback = composed_callback
-
-                # Collect every Event into a local list so /sync can backfill
-                # the run_events table even if individual /events POSTs were
-                # lost to network failure. Makes /sync the source of truth.
-                _collected_events: list[Event] = []
-                self._collected_events = _collected_events  # for report_completion
-
-                def _live_reporting_callback(ev: Event) -> None:
-                    # Always retain locally — /sync uses this list to
-                    # backfill the run_events table as a guaranteed
-                    # backstop in case live POSTs failed.
-                    with contextlib.suppress(Exception):
-                        _collected_events.append(ev)
-                    # Fire the local callback first so progress UI + user
-                    # subscribers stay sharp even if the network hiccups.
-                    with contextlib.suppress(Exception):
-                        _local_callback(ev)
-                    # Stream the full Event to the dashboard activity feed.
-                    # The dashboard renders a terminal-style chronological
-                    # log + token-spend / fallback / LLM-call insights from
-                    # these. Best-effort, 3 s timeout, never blocks.
-                    try:
-                        # Attach the cumulative harness token count to EVERY
-                        # event (not just turn_end) so the dashboard's live
-                        # token reading captures the FULL total — including the
-                        # jury-scoring phase, which runs AFTER the last turn.
-                        # turn_end events mark the conversation-phase total; the
-                        # terminal events (jury_*, report_*, done) carry the
-                        # grand total, so the dashboard can split conversation
-                        # vs jury spend and match the final report exactly
-                        # (otherwise the live count undercounts). Also lets the
-                        # dashboard derive turn progress / transcript from the
-                        # stream when the backend's row write lags.
-                        _ev_payload = dict(ev.payload or {})
-                        with contextlib.suppress(Exception):
-                            _ev_payload.setdefault(
-                                "tokens_used",
-                                int(getattr(self.llm, "total_tokens", 0) or 0),
-                            )
-                        _reporter.append_event(
-                            run_id=str(announced_run_id),
-                            event_type=ev.type,
-                            detail=ev.detail,
-                            payload=_ev_payload,
-                            turn=ev.turn,
-                        )
-                    except Exception:
-                        pass
-                    # Per-turn SYNCHRONOUS commit — guarantees the
-                    # dashboard's transcript + progress bar reflects
-                    # turn N before the harness starts turn N+1. Also
-                    # prints a hard-to-miss progress bar in the terminal.
-                    # The reporter handles its own retries (3 attempts,
-                    # exponential backoff). Events from this turn are
-                    # flushed first so chronological order is preserved
-                    # on the activity feed.
-                    if ev.type == "turn_end" and ev.turn is not None:
-                        # Snapshot the current cumulative token usage from
-                        # the harness LLM. This is the running total
-                        # across planner + conductor + juror calls so far.
-                        # Falls back to None if the LLM doesn't expose
-                        # the counter (custom LLM subclasses) — that's
-                        # safe; the reporter omits the field.
-                        try:
-                            cur_tokens: int | None = int(getattr(self.llm, "total_tokens", 0) or 0)
-                        except Exception:
-                            cur_tokens = None
-                        try:
-                            _reporter.append_turn(
-                                run_id=str(announced_run_id),
-                                turn_index=int(ev.turn),
-                                question=str(ev.payload.get("question", "")),
-                                answer=str(ev.payload.get("answer", "")),
-                                trap_name=ev.payload.get("trap_name"),
-                                defects=list(ev.payload.get("defects", []) or []),
-                                duration_s=float(ev.payload.get("duration_s", 0.0) or 0.0),
-                                outcome=str(ev.payload.get("outcome") or "ok"),
-                                # NEW: pass total_turns so the reporter
-                                # can render a per-turn progress bar like
-                                # [report] ████████░░ 80% turn 4/5 → synced
-                                total_turns=int(self.turns),
-                                # NEW: progressive token reporting —
-                                # cumulative tokens consumed so far. Lets
-                                # the dashboard tick up cost / usage in
-                                # real time, and the terminal progress
-                                # bar shows a (12.4k tok) tail per turn.
-                                tokens_used=cur_tokens,
-                            )
-                            # Track per-turn sync outcome on the reporter
-                            # so summary banner shows the real number sent
-                            # (was using bg worker counters which now
-                            # aren't applicable for turn_events anymore).
-                            _reporter._turn_events_sent_sync = getattr(
-                                _reporter, "_turn_events_sent_sync", 0,
-                            ) + 1
-                        except Exception:
-                            pass
-
-                graph_callback = _live_reporting_callback
 
             initial_state = self._build_initial_state(
                 agent=agent,
@@ -800,95 +592,11 @@ class Harness:
             report = self._state_to_report(final_state, duration=time.time() - start)
             composed_callback(Event(type="done"))
 
-            # Live Reporting: side car, always best effort, never raises.
-            # Skipped silently if reporter is None (live_reporting=False).
-            if self._reporter is not None:
-                try:
-                    # Collect every trap the planner used so the dashboard
-                    # can show "Tested against these adversarial scenarios"
-                    # — critical for subscription-grade reports.
-                    traps_used_list: list[dict[str, Any]] = []
-                    try:
-                        plan = (final_state or {}).get("plan") if isinstance(final_state, dict) else None
-                        if plan and hasattr(plan, "turns"):
-                            seen: set[str] = set()
-                            for ts in plan.turns:
-                                tr = getattr(ts, "trap", None)
-                                if tr and getattr(tr, "name", "") not in seen:
-                                    seen.add(tr.name)
-                                    traps_used_list.append({
-                                        "name": getattr(tr, "name", ""),
-                                        "family": getattr(tr, "family", ""),
-                                        "severity": getattr(tr, "severity", "medium"),
-                                        "metrics": list(getattr(tr, "metrics", []) or []),
-                                        "pass_criteria": (getattr(tr, "pass_criteria", "") or "")[:300],
-                                        "tags": list(getattr(tr, "tags", []) or []),
-                                    })
-                    except Exception:
-                        pass
-
-                    # Pull the agent's actual model name if the user wired
-                    # one (env, callable __name__, etc.) — falls back to
-                    # whatever the conductor recorded on report.
-                    agent_model_str = (
-                        os.environ.get("PROOFAGENT_AGENT_MODEL")
-                        or getattr(report, "agent_model", "")
-                        or getattr(agent, "__name__", "")
-                        or "unknown"
-                    )
-
-                    self._reporter.report_completion(
-                        run_id=getattr(self, "_announced_run_id", None),
-                        cell_label=f"{self.llm.model} x {role}",
-                        report_blob=_report_to_sync_payload(
-                            report, role=role, seed=self.seed,
-                            harness_llm=self.llm.model,
-                            business_case=business_case,
-                            goal=goal,
-                            agent_model=agent_model_str,
-                            consensus_strategy=getattr(self, "consensus", "delphi"),
-                            metrics_active=list(getattr(self, "metrics", []) or []),
-                            traps_used=traps_used_list,
-                        ),
-                        transcript=_transcript_to_payload(report),
-                        findings=_findings_to_payload(report),
-                        # Full event log — backend backfills run_events
-                        # table from this if live POSTs were lost. Makes
-                        # /sync the atomic source of truth.
-                        events=[
-                            {
-                                "event_type": getattr(ev, "type", "unknown"),
-                                "detail": getattr(ev, "detail", "") or "",
-                                "payload": dict(getattr(ev, "payload", {}) or {}),
-                                "turn": getattr(ev, "turn", None),
-                            }
-                            for ev in getattr(self, "_collected_events", [])
-                        ],
-                    )
-                except Exception:
-                    # Reporting failure NEVER fails an evaluation
-                    pass
-
             return report
         finally:
             if self.verbose:
                 progress.stop()
                 Console().print(report if "report" in locals() else "")
-            # ALWAYS print the Live Reporting summary banner at the very
-            # end (even on crash / Ctrl+C) so the user sees exactly which
-            # POST succeeded vs failed. Without this, fire-and-forget
-            # POST failures (per-turn, per-event) were invisible and the
-            # dashboard would stay empty with no terminal hint why.
-            if self._reporter is not None:
-                with contextlib.suppress(Exception):
-                    self._reporter.print_summary_banner()
-                # Production-grade lifecycle: flush + shut down the
-                # background reporting thread. Critical for pytest /
-                # CI users — without this the daemon thread sits idle
-                # after the eval and may not flush its queue if the
-                # process exits abruptly. close() is idempotent.
-                with contextlib.suppress(Exception):
-                    self._reporter.close()
 
     def _build_initial_state(
         self,
@@ -1056,10 +764,8 @@ class Harness:
         Mirrors the multi-turn `aevaluate()` lifecycle:
           1. ProgressReporter for terminal output (verbose=True)
           2. LLM preflight check (same Harness LLM, same fallback wiring)
-          3. Live Reporting announce_run_start (if enabled)
-          4. Run the slim graph via the artifact runner
-          5. Convert state → Report (mode='artifact')
-          6. Live Reporting report_completion (if enabled)
+          3. Run the slim graph via the artifact runner
+          4. Convert state → Report (mode='artifact')
         """
         from proofagent_harness.artifact.runner import run_artifact_eval
 
@@ -1094,92 +800,9 @@ class Harness:
             await self._preflight_check_llm()
             composed_callback(Event(type="setup_done"))
 
-            # Collect events for /sync backstop. Live Reporting stream
-            # callback is composed in BELOW so events fire to the dashboard
-            # in real time (same shape as multi-turn).
-            self._collected_events: list[Event] = []
-            def _collect(ev: Event) -> None:
-                with contextlib.suppress(Exception):
-                    self._collected_events.append(ev)
-
-            # Live Reporting announce — same boxed banner as multi-turn.
-            # Must run BEFORE we build the graph callback so the resulting
-            # run_id is captured into the live-event callback's closure.
-            self._announced_run_id = None
-            if self._reporter is not None:
-                try:
-                    announcement = self._reporter.announce_run_start(
-                        cell_label=f"{self.llm.model} x artifact:{artifact.type or 'untyped'}",
-                        agent_name=os.environ.get("PROOFAGENT_AGENT_NAME") or "artifact-eval",
-                        agent_model=os.environ.get("PROOFAGENT_AGENT_MODEL") or "n/a (artifact)",
-                        harness_llm=self.llm.model,
-                        seed=self.seed,
-                        turns_total=1,
-                        config={
-                            "mode": "artifact",
-                            "agent_name": os.environ.get("PROOFAGENT_AGENT_NAME") or "artifact-eval",
-                            "role": role,
-                            "business_case": business_case,
-                            "artifact_type": artifact.type or "",
-                            "artifact_chars": len(artifact.generated_artifact),
-                            "tools_used": list(tools_used or []),
-                            "consensus_strategy": self.consensus,
-                            "metrics_active": list(self.metrics),
-                            # Parity with the multi-turn announce config. The
-                            # dashboard's Run-context panel reads agent_config.*
-                            # at run-start; without these here, artifact runs
-                            # showed "—" for harness LLM / agent LLM / seed /
-                            # personas / SDK version (they were only passed as
-                            # top-level kwargs, which don't land in agent_config).
-                            "harness_llm": self.llm.model,
-                            "agent_model": os.environ.get("PROOFAGENT_AGENT_MODEL") or "n/a (artifact)",
-                            "seed": int(self.seed) if self.seed is not None else None,
-                            "personas": list(getattr(self, "personas", []) or []),
-                            "sdk_version": _SDK_VERSION,
-                        },
-                    )
-                    if announcement and announcement.get("run_id"):
-                        self._announced_run_id = announcement["run_id"]
-                        with contextlib.suppress(Exception):
-                            self._reporter._send_count = (
-                                getattr(self._reporter, "_send_count", 0)
-                            ) + 1
-                except Exception:
-                    self._announced_run_id = None
-
-            # v0.5.0 — wire the LiveReporter's append_event into the artifact
-            # graph callback chain so EVERY juror_scored / jury_round_start /
-            # consensus_check / report_* event POSTs to the dashboard's live
-            # activity feed in real time (NOT just at /sync completion).
-            # Mirrors the multi-turn path so artifact mode has full sync
-            # parity — including the proof-of-hallucination citations that
-            # each juror emits in per_turn_audit (those land on /sync via
-            # consensus_log, but the streaming events tell the dashboard
-            # WHEN each juror finished so the user sees live progress).
-            _reporter = self._reporter
-            _announced_run_id = self._announced_run_id
-            if _reporter is not None and _announced_run_id is not None:
-                def _artifact_live_event_callback(ev: Event) -> None:
-                    # Terminal output + caller's callback + backstop collector.
-                    with contextlib.suppress(Exception):
-                        composed_callback(ev)
-                    with contextlib.suppress(Exception):
-                        _collect(ev)
-                    # Stream the event to the dashboard activity feed.
-                    # Best-effort, 3s timeout per call, never blocks.
-                    with contextlib.suppress(Exception):
-                        _reporter.append_event(
-                            run_id=str(_announced_run_id),
-                            event_type=ev.type,
-                            detail=ev.detail,
-                            payload=ev.payload or {},
-                            turn=ev.turn,
-                        )
-
-                graph_callback: Callable[[Event], None] = _artifact_live_event_callback
-            else:
-                # No Live Reporting configured — terminal + caller + collector.
-                graph_callback = _compose_callbacks(composed_callback, _collect)
+            # The graph receives the composed callback directly: terminal
+            # progress UI + the caller's public `on_event` streaming hook.
+            graph_callback: Callable[[Event], None] = composed_callback
 
             # State seed — everything the slim graph needs that ISN'T
             # transcript/knowledge/context (those are filled in by the runner).
@@ -1218,51 +841,6 @@ class Harness:
                 context=context,
             )
 
-            # v0.5.0 — synchronous /turn-events POST for the synthetic turn.
-            # Mirrors the multi-turn per-turn commit so the dashboard's
-            # Transcript tab + progress bar populate with the artifact's
-            # answer BEFORE /sync lands. Best-effort; never blocks.
-            if self._reporter is not None and self._announced_run_id is not None:
-                try:
-                    transcript = list(final_state.get("transcript") or [])
-                    synth = transcript[0] if transcript else None
-                    if synth is not None:
-                        q = getattr(synth, "question", "") or ""
-                        a = getattr(synth, "answer", "") or ""
-                        try:
-                            cur_tokens: int | None = int(
-                                getattr(self.llm, "total_tokens", 0) or 0
-                            )
-                        except Exception:
-                            cur_tokens = None
-                        # v0.5.0 — artifact mode has no turn loop, so the
-                        # multi-turn "turn 0/1" label is misleading. Render
-                        # a jury-style label instead. Token count still
-                        # shows so the user sees cost at a glance.
-                        jury_label = (
-                            f"jury complete  artifact:{artifact.type}"
-                            if artifact.type else "jury complete"
-                        )
-                        self._reporter.append_turn(
-                            run_id=str(self._announced_run_id),
-                            turn_index=0,
-                            question=str(q),
-                            answer=str(a),
-                            trap_name=getattr(synth, "trap_name", None),
-                            defects=list(getattr(synth, "defects", []) or []),
-                            duration_s=float(time.time() - start),
-                            outcome="ok",
-                            total_turns=1,
-                            tokens_used=cur_tokens,
-                            display_label=jury_label,
-                        )
-                        with contextlib.suppress(Exception):
-                            self._reporter._turn_events_sent_sync = getattr(
-                                self._reporter, "_turn_events_sent_sync", 0,
-                            ) + 1
-                except Exception:
-                    pass
-
             report = self._state_to_report(final_state, duration=time.time() - start)
             # Stamp mode + artifact-mode metadata so downstream tools
             # (dashboard, CI scripts) can branch on it.
@@ -1285,48 +863,11 @@ class Harness:
 
             composed_callback(Event(type="done"))
 
-            # Live Reporting completion — same pattern as multi-turn but
-            # with mode="artifact" baked into the config payload.
-            if self._reporter is not None:
-                try:  # noqa: SIM105
-                    self._reporter.report_completion(
-                        run_id=getattr(self, "_announced_run_id", None),
-                        cell_label=f"{self.llm.model} x artifact:{artifact.type or 'untyped'}",
-                        report_blob=_report_to_sync_payload(
-                            report, role=role, seed=self.seed,
-                            harness_llm=self.llm.model,
-                            business_case=business_case,
-                            goal="",
-                            agent_model="n/a (artifact)",
-                            consensus_strategy=self.consensus,
-                            metrics_active=list(self.metrics),
-                            traps_used=[],   # no traps in artifact mode
-                        ),
-                        transcript=_transcript_to_payload(report),
-                        findings=_findings_to_payload(report),
-                        events=[
-                            {
-                                "event_type": getattr(ev, "type", "unknown"),
-                                "detail": getattr(ev, "detail", "") or "",
-                                "payload": dict(getattr(ev, "payload", {}) or {}),
-                                "turn": getattr(ev, "turn", None),
-                            }
-                            for ev in self._collected_events
-                        ],
-                    )
-                except Exception:
-                    pass
-
             return report
         finally:
             if self.verbose:
                 progress.stop()
                 Console().print(report if "report" in locals() else "")
-            if self._reporter is not None:
-                with contextlib.suppress(Exception):
-                    self._reporter.print_summary_banner()
-                with contextlib.suppress(Exception):
-                    self._reporter.close()
 
     async def _aevaluate_artifact_bundle(
         self,
@@ -1353,7 +894,7 @@ class Harness:
           3. Final score = primary weight (60%) + avg of supporting (40%) -
              consistency penalty.
 
-        Live Reporting:
+        Event stream (via the caller's ``on_event`` hook):
           * bundle_loaded fires up-front (one event per bundle).
           * Each member artifact fires its own artifact_loaded / jury_* /
             consensus_* / report_* events as it processes.
@@ -1364,7 +905,7 @@ class Harness:
             raise ValueError("AgentArtifactBundle.artifacts cannot be empty")
 
         start = time.time()
-        # Bundle-level announcement event for Live Reporting.
+        # Bundle-level announcement event on the public on_event stream.
         try:
             if on_event:
                 on_event(Event(
@@ -1379,9 +920,8 @@ class Harness:
         except Exception:
             pass
 
-        # Score each artifact independently. We reuse _aevaluate_artifact's
-        # flow but without Live Reporting announce/complete (only the
-        # bundle-level final report goes to /sync).
+        # Score each artifact independently, reusing _aevaluate_artifact's
+        # flow. Only the bundle-level final report is returned to the caller.
         per_artifact_reports: list[Report] = []
         for i, art in enumerate(bundle.artifacts):
             sub_report = await self._aevaluate_artifact(
@@ -1770,222 +1310,3 @@ def _compose_callbacks(
                 cb(event)
 
     return _fan
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Live Reporting helpers — convert a Report into the wire format
-# the ProofAgent backend expects (POST /api/v1/runs/sync).
-# All three helpers handle missing fields gracefully so that even a
-# partial / failed Report can still be uploaded for debugging.
-# ──────────────────────────────────────────────────────────────────────
-
-
-def _report_to_sync_payload(
-    report: Any,
-    *,
-    role: str,
-    seed: int | None,
-    harness_llm: str,
-    business_case: str = "",
-    goal: str = "",
-    agent_model: str = "",
-    consensus_strategy: str = "",
-    metrics_active: list[str] | None = None,
-    traps_used: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Top level fields + RICH metadata for the subscription-grade dashboard.
-
-    The harness Report contains far more than the basic score: per-metric
-    confidence + spread + severity, juror consensus log, warnings, total
-    tokens, plus the eval's call context (role, business case, goal,
-    consensus strategy, list of traps thrown). Surface ALL of it so the
-    dashboard report is genuinely subscription-worthy.
-
-    Defensive defaults — backend's /sync requires `started_at` (datetime),
-    `final_score` (float), `certification` (str). If the report has None
-    for any of them (early-fail eval, crash during scoring), substitute
-    a safe default so the sync STILL lands.
-    """
-    from datetime import datetime, timezone
-
-    cert = getattr(report, "certification", None)
-    cert_str = cert.value if hasattr(cert, "value") else (str(cert) if cert else None)
-
-    # started_at: prefer report's value, fall back to UTC now (which is
-    # close-enough — the run has just completed, this is end-of-eval).
-    started_at = getattr(report, "started_at", None)
-    if started_at is None:
-        started_at = datetime.now(timezone.utc).isoformat()
-    elif hasattr(started_at, "isoformat"):
-        started_at = started_at.isoformat()
-
-    # Pull the full juror consensus log so the dashboard can show
-    # per-juror disagreement, revote markers, confidence per metric.
-    consensus_payload: dict[str, Any] = {}
-    for metric_name, cons in (getattr(report, "consensus_log", {}) or {}).items():
-        with contextlib.suppress(Exception):
-            consensus_payload[metric_name] = cons.model_dump() if hasattr(cons, "model_dump") else dict(cons)
-
-    # All metadata reported by the harness (personas, models, etc.)
-    metadata = dict(getattr(report, "metadata", {}) or {})
-
-    # Per-metric confidence + severity (the harness reports per-metric
-    # juror agreement strength + how serious any failure was).
-    confidence = dict(getattr(report, "confidence", {}) or {})
-    severity = {
-        k: (v.value if hasattr(v, "value") else str(v))
-        for k, v in (getattr(report, "severity", {}) or {}).items()
-    }
-
-    # v0.5.0 — artifact / bundle-mode report data, so Live Reporting
-    # streams the SAME augmented report the local JSON/Markdown writers
-    # produce. All empty for multi-turn runs (the dashboard simply won't
-    # render these sections). model_dump(mode="json") coerces the Finding
-    # severity enum to a plain string and guarantees JSON-serializability.
-    bundle_findings_payload: list[dict[str, Any]] = []
-    for fnd in (getattr(report, "bundle_consistency_findings", []) or []):
-        with contextlib.suppress(Exception):
-            bundle_findings_payload.append(
-                fnd.model_dump(mode="json") if hasattr(fnd, "model_dump") else dict(fnd)
-            )
-    # per_artifact_scores keys are ints (artifact index) — JSON object keys
-    # must be strings, so stringify them here; the dashboard parses back.
-    per_artifact_payload = {
-        str(k): dict(v or {})
-        for k, v in (getattr(report, "per_artifact_scores", {}) or {}).items()
-    }
-    assertion_payload = [
-        dict(a) for a in (getattr(report, "assertion_results", []) or [])
-        if isinstance(a, dict)
-    ]
-    # v0.5.0 — technical-issues category (operational/behavioral anomalies).
-    # model_dump(mode="json") coerces the severity enum to a plain string.
-    technical_issues_payload: list[dict[str, Any]] = []
-    for ti in (getattr(report, "technical_issues", []) or []):
-        with contextlib.suppress(Exception):
-            technical_issues_payload.append(
-                ti.model_dump(mode="json") if hasattr(ti, "model_dump") else dict(ti)
-            )
-
-    # v0.5.x — FULL token accounting. The report already separates prompt
-    # vs completion, primary vs fallback model, call counts, and a per-stage
-    # split; previously only the aggregate `tokens_used` reached the DB. Send
-    # the whole breakdown so the dashboard can render
-    #   "914k prompt + 55k completion · 43 calls · 0% fallback"
-    # instead of a single opaque total. COST IS INTENTIONALLY OMITTED — it
-    # is never surfaced in the terminal or the dashboard.
-    def _rint(name: str) -> int:
-        return int(getattr(report, name, 0) or 0)
-
-    token_breakdown: dict[str, Any] = {
-        "total": _rint("tokens_used"),
-        "primary_prompt_tokens": _rint("primary_prompt_tokens"),
-        "primary_completion_tokens": _rint("primary_completion_tokens"),
-        "primary_call_count": _rint("primary_call_count"),
-        "fallback_prompt_tokens": _rint("fallback_prompt_tokens"),
-        "fallback_completion_tokens": _rint("fallback_completion_tokens"),
-        "fallback_call_count": _rint("fallback_call_count"),
-        "fallback_rate": float(getattr(report, "fallback_rate", 0.0) or 0.0),
-        "primary_llm_model": str(getattr(report, "primary_llm_model", "") or ""),
-        "fallback_llm_model": str(getattr(report, "fallback_llm_model", "") or ""),
-        "token_split": dict(getattr(report, "token_split", {}) or {}),
-    }
-
-    return {
-        "started_at": started_at,
-        "duration_seconds": float(getattr(report, "duration_seconds", 0) or 0),
-        "seed": int(seed) if seed is not None else 0,
-        "harness_llm": str(harness_llm or "unknown"),
-        "agent_model": str(agent_model or getattr(report, "agent_model", "") or ""),
-        "agent_name": str(role or "agent"),
-        "final_score": float(getattr(report, "final_score", 0.0) or 0.0),
-        "certification": cert_str or "NOT_CERTIFIED",
-        "per_metric": dict(getattr(report, "per_metric", {}) or {}),
-        # Top-level (not just under config) so the dashboard's Run-context
-        # "Tokens used" tile populates from the same place final_score /
-        # per_metric land — config-only fields weren't surfacing for
-        # artifact runs.
-        "tokens_used": int(getattr(report, "tokens_used", 0) or 0),
-        # Full token accounting (prompt/completion · primary/fallback · split)
-        # at the top level too, so the dashboard can render the breakdown
-        # without reaching into config. Mirrored under config for the
-        # backend's free-form JSONB merge.
-        "token_breakdown": token_breakdown,
-        # Rich subscription-grade metadata stored under config so the
-        # backend's RunSyncRequest doesn't need a wider Pydantic schema
-        # (config is a free-form dict already accepted).
-        "config": {
-            # v0.5.0: evaluation mode — the dashboard renders a prominent
-            # badge from this ("Adversarial Multi-turn" vs "Artifact").
-            # Defaults to multi_turn for backwards-compat with v0.4.x runs.
-            "mode": str(getattr(report, "mode", "multi_turn") or "multi_turn"),
-            # v0.5.0: which type-specific rubric pack the artifact run used
-            # (BRD, code, business_plan, …). Empty list for multi-turn or
-            # untyped artifact runs. Dashboard shows the first entry next
-            # to the mode badge to clarify what was scored.
-            "rubric_packs_applied": list(getattr(report, "rubric_packs_applied", []) or []),
-            "artifact_type": (
-                list(getattr(report, "rubric_packs_applied", []) or []) or [""]
-            )[0],
-            # v0.5.0: bundle-mode report data so the live dashboard renders
-            # the same artifact sections the local augmented report has.
-            "per_artifact_scores": per_artifact_payload,
-            "bundle_consistency_findings": bundle_findings_payload,
-            "assertion_results": assertion_payload,
-            # v0.5.0 — technical-issues category (per-turn defects, agent
-            # crashes, harness LLM failures). Streamed so the dashboard's
-            # Technical issues section renders live.
-            "technical_issues": technical_issues_payload,
-            "role": str(role or ""),
-            "business_case": str(business_case or ""),
-            "goal": str(goal or ""),
-            "harness_llm": str(harness_llm or ""),
-            "agent_model": str(agent_model or ""),
-            "consensus_strategy": str(consensus_strategy or ""),
-            "metrics_active": list(metrics_active or []),
-            "traps_used": list(traps_used or []),
-            "confidence_per_metric": confidence,
-            "severity_per_metric": severity,
-            "consensus_log": consensus_payload,
-            "warnings": list(getattr(report, "warnings", []) or []),
-            "summary_text": str(getattr(report, "summary", "") or ""),
-            # v0.5.0 — LLM-generated executive synthesis. Banner-quality
-            # brief written for the CRO who has 30 seconds. Plus a
-            # ship/no-ship verdict and a one-sentence "top risk".
-            "executive_summary": str(getattr(report, "executive_summary", "") or ""),
-            "production_ready": str(getattr(report, "production_ready", "") or ""),
-            "top_risk": str(getattr(report, "top_risk", "") or ""),
-            "tokens_used": int(getattr(report, "tokens_used", 0) or 0),
-            "token_breakdown": token_breakdown,
-            "harness_metadata": metadata,
-        },
-    }
-
-
-def _transcript_to_payload(report: Any) -> list[dict[str, Any]]:
-    """Turn list — converted to a JSON safe list of dicts."""
-    out: list[dict[str, Any]] = []
-    for t in getattr(report, "transcript", []) or []:
-        if hasattr(t, "model_dump"):  # pydantic
-            out.append(t.model_dump())
-        elif hasattr(t, "__dict__"):
-            out.append({k: v for k, v in t.__dict__.items() if not k.startswith("_")})
-        elif isinstance(t, dict):
-            out.append(t)
-    return out
-
-
-def _findings_to_payload(report: Any) -> list[dict[str, Any]]:
-    """Quality findings — converted to a JSON safe list of dicts.
-
-    mode="json" coerces the `severity` enum to its plain string value
-    ("critical"/"fail"/"warn"/"info"/"pass") so the dashboard's severity
-    badges match regardless of the downstream JSON serializer.
-    """
-    out: list[dict[str, Any]] = []
-    for f in getattr(report, "findings", []) or []:
-        if hasattr(f, "model_dump"):
-            out.append(f.model_dump(mode="json"))
-        elif isinstance(f, dict):
-            out.append(f)
-    return out

@@ -6,9 +6,7 @@ catalog (OpenAI function-tool schema), and stub tool responses. The factory
 loads a spec and constructs a runtime agent callable dispatched by LLM
 family (OpenAI, Anthropic, Gemini, xAI).
 
-Used by ``examples/09_asymmetric_single_cell.py`` to reproduce the
-asymmetric evaluation cells reported in the paper. Reusable as a starting
-point for your own multi-agent benchmarks.
+Reusable agent specs shared by the examples (e.g. ``08_live_trace.py``).
 """
 
 from .factory import (

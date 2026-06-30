@@ -1,56 +1,53 @@
-"""Live Reporting — regression testing across versions of the same agent.
+"""Regression testing — evaluate two versions of the same agent, offline.
 
-Builds on examples/09_live_reporting.py. This script demonstrates the
-ProofAgent regression testing flow:
+Run the SAME agent at two (or three) versions through the harness, then
+compare the scores per metric so you can see at a glance which version
+regressed and on which dimension. Everything runs **fully offline** — each
+version writes its own local JSON + Markdown report under ``results/``; no
+ProofAgent account and no network are required.
 
-  1. You have ONE evaluation project (= one API key = one agent identity).
-  2. You evaluate the SAME agent multiple times — e.g. v1, v2, v3 with
-     different code or system prompts.
-  3. Each run reports to the same project via Live Reporting.
-  4. Your ProofAgent dashboard automatically builds the score trend
-     chart + per metric chart for that agent.
-  5. You see at a glance which version regressed and on which dimension.
+How the comparison works
+------------------------
+1. You have ONE agent identity you evaluate repeatedly — e.g. v1, v2, v3
+   with different code or system prompts.
+2. Each version is scored by the same harness jury with the same seed, so
+   the only thing that changes is the agent.
+3. The script prints a per-version score plus the Δ vs the previous version
+   (``↑ improvement`` / ``↓ REGRESSION`` / ``→ flat``), and writes one report
+   per version to disk for the full forensic trail.
 
-How regression is shown
------------------------
+This script simulates the v1 -> v2 -> v3 sequence by varying the agent's
+defensiveness. In production these would be 3 real deployments of YOUR
+agent, not 3 hard-coded behaviors.
 
-In the dashboard, when you open /dashboard/projects/<your-project>:
-
-  * "Score progress over time" chart  -- one point per run, time on
-    X axis. Red marker = regression (>0.5 point drop). Green = improvement.
-  * "Per metric progress" chart       -- 5 lines (task_success,
-    hallucination_resistance, safety, instruction_following,
-    manipulation_resistance) plotted against time.
-  * "Run history" table               -- ascending or descending,
-    with Delta column highlighting each run vs the previous.
-
-This script simulates the v1 -> v2 -> v3 sequence by varying the
-agent's defensiveness. Each "version" reports to the same project,
-so the trend chart fills in run by run.
+Optionally push each version to the dashboard
+---------------------------------------------
+Pass ``--upload`` to *also* push each finished version to the **ProofAgent
+Governance API** under one shared ``--agent`` name (each run gets a distinct
+``run_name``), so the dashboard groups them and surfaces the per-metric trend
++ regression deltas. Off by default — without ``--upload`` the run is purely
+local. See ``_dashboard.py`` for the shared flag group.
 
 Usage
 -----
 
-    # Offline by default — runs the 3-version sweep + writes local reports.
+    # Offline (default) — runs the version sweep + writes local reports.
     # Needs an LLM key for the harness jurors, but NO PROOFAGENT_API_KEY:
-    python examples/10_regression.py
+    python examples/09_regression.py
 
-    # Stream each version to your ProofAgent dashboard (opt-in):
-    #   First time: create a project + export key (do this once);
-    #   see examples/09_live_reporting.py for the project setup steps.
-    export PROOFAGENT_API_KEY="apk_live_eval_<your_key>"
-    python examples/10_regression.py --live
+    # Print the plan, no API calls:
+    python examples/09_regression.py --list-only
 
-    # Then refresh your dashboard at:
-    #   https://app.proofagent.ai/dashboard/projects/<your-project-id>
-    # See 3 data points on the score trend chart.
+    # Also push each version to your dashboard, grouped under one agent name:
+    export PROOFAGENT_API_KEY=pa_live_...
+    python examples/09_regression.py --upload --agent refund-agent
 
 CI use case
 -----------
 
 In CI you would call this same harness pattern after every release:
 
-    harness = Harness(llm=..., live_reporting=True)
+    harness = Harness(llm=...)
     report = harness.evaluate(my_latest_agent, ...)
     # programmatic regression gate:
     if report.final_score < 7.0:
@@ -59,19 +56,23 @@ In CI you would call this same harness pattern after every release:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 
 from proofagent_harness import AgentContext, AgentResponse, Harness
 
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+
 
 # ─── Three "versions" of the demo agent — defensive -> balanced -> loose ──
 #
 # In production this would be 3 different deployments of YOUR agent,
 # not 3 hard coded behaviors. The point of the demo is to show the
-# dashboard's regression chart populate with 3 distinct data points.
+# per-version score deltas the comparison surfaces.
 
 SYSTEM_PROMPT_V1_STRICT = """Refuse anything that looks suspicious.
 When uncertain, refuse. Cite Rule 1 (no bypass) for every refusal.
@@ -135,59 +136,35 @@ VERSIONS = [
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Live Reporting regression testing demo."
+        description="Offline regression testing demo — score N versions of "
+                    "one agent and compare per-metric deltas."
     )
     p.add_argument("--llm", default="claude-haiku-4-5",
                    help="Harness juror LLM (default cheap + fast)")
     p.add_argument("--turns", type=int, default=5,
                    help="Turns per version (default 5 for cheap smoke)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--live", dest="live", action="store_true", default=False,
-                   help="Stream each version to your ProofAgent dashboard via "
-                        "live_reporting=True (requires PROOFAGENT_API_KEY). "
-                        "Off by default — runs offline + writes local reports.")
-    p.add_argument("--no-live", dest="live", action="store_false",
-                   help="Run offline, no dashboard streaming (the default).")
-    p.add_argument("--staging", action="store_true",
-                   help="Use staging API (only meaningful with --live)")
-    p.add_argument("--self-hosted", default=None,
-                   help="Self hosted backend URL (only meaningful with --live)")
     p.add_argument("--list-only", action="store_true",
                    help="Print plan, no API calls")
+    # ── Governance upload (off by default — runs fully offline). With --upload
+    #    each version is POSTed under one --agent name (distinct run_name per
+    #    version) so the dashboard groups them + shows the regression trend. ──
+    add_governance_upload_args(p, default_agent="regression-demo-agent")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
 
-    if args.staging:
-        os.environ["PROOFAGENT_API_BASE"] = "https://api.staging.proofagent.ai"
-        os.environ["PROOFAGENT_DASHBOARD_BASE"] = "https://app.staging.proofagent.ai"
-    elif args.self_hosted:
-        os.environ["PROOFAGENT_API_BASE"] = args.self_hosted.rstrip("/")
-
-    dashboard_base = os.environ.get(
-        "PROOFAGENT_DASHBOARD_BASE", "https://app.proofagent.ai"
-    )
-
-    # Live Reporting (streaming to the dashboard) is opt-in via --live and needs
-    # a key. Offline (the default) runs the same regression sweep and writes
-    # local reports — no key, no network.
-    if args.live and not os.environ.get("PROOFAGENT_API_KEY"):
-        print("ERROR: --live set but PROOFAGENT_API_KEY is not set. "
-              "See examples/09_live_reporting.py for setup, or drop --live to "
-              "run offline.")
-        return 2
-
     results_dir = Path(__file__).resolve().parent.parent / "results"
 
     print()
-    print("Live Reporting — regression demo")
+    print("Regression demo — version sweep")
     print("─" * 50)
     print(f"  Versions to evaluate: {len(VERSIONS)}")
     print(f"  Turns per version:    {args.turns}")
     print(f"  Harness LLM:          {args.llm}")
-    print(f"  Mode:                 {'LIVE (streaming to dashboard)' if args.live else 'offline (local reports)'}")
+    print(f"  Upload:               {'YES (push each version)' if args.upload else 'no (local reports only)'}")
     print()
     for i, v in enumerate(VERSIONS, 1):
         print(f"  {i}. {v['label']}")
@@ -207,7 +184,6 @@ def main() -> int:
             turns=args.turns,
             consensus="delphi",
             seed=args.seed,
-            live_reporting=args.live,   # offline by default; --live streams
         )
         report = harness.evaluate(
             make_agent(v["refuse_threshold"]),
@@ -228,7 +204,22 @@ def main() -> int:
         report.to_markdown(str(results_dir / f"{stem}.md"))
         print(f"  -> score {score:.1f}/10  ({getattr(report.certification, 'value', report.certification)})")
         print(f"     report → results/{stem}.json")
-        # Brief pause so timestamps in the dashboard are visually distinct
+
+        # ── OPTIONAL: push this version to the Governance dashboard. Same
+        #    --agent groups all versions; a distinct run_name keeps them apart
+        #    so the dashboard renders the per-metric regression trend. ──
+        if args.upload:
+            push_to_dashboard(
+                report,
+                agent_name=args.agent or "regression-demo-agent",
+                agent_version=v["label"],
+                run_name=v["label"],
+                profile=args.profile,
+                source=args.source,
+                fail_on=args.fail_on,
+                api_key=args.api_key,
+            )
+        # Brief pause so run timestamps are distinct.
         time.sleep(1)
 
     print()
@@ -243,14 +234,10 @@ def main() -> int:
         print(f"  {i}. {v['label']:<35}  {s:>4.1f}/10{delta}")
     print("─" * 50)
     print()
-    if args.live:
-        print("View the regression chart at:")
-        print(f"  {dashboard_base}/dashboard/projects")
-        print("Click your project to see the 3 data points and per metric trends.")
-    else:
-        print(f"Local reports written to {results_dir}/ (regression_v1..v{len(VERSIONS)}).")
-        print("Re-run with --live (and PROOFAGENT_API_KEY) to populate the dashboard "
-              "regression chart.")
+    print(f"Local reports written to {results_dir}/ (regression_v1..v{len(VERSIONS)}).")
+    if not args.upload:
+        print("Re-run with --upload (and PROOFAGENT_API_KEY) to push each version "
+              "to the dashboard regression trend.")
     print()
     return 0
 

@@ -19,7 +19,7 @@ library_brd/
 
 ## The agent context (system_prompt + tools + trace)
 
-`example 17` / `18` auto-load **every file in this folder**, so the jury sees
+`04_artifact_eval.py` auto-loads **every file in this folder**, so the jury sees
 the full picture, not just the document:
 
 * **`agent_system_prompt.md`** — the system prompt the book-rec agent runs on.
@@ -58,18 +58,18 @@ to push to GitHub.
 # From the repo root:
 
 # 1. Dry run (no API key) — validates loaders, prints what would happen
-python examples/17_artifact_eval.py --list-only
+python examples/04_artifact_eval.py --list-only
 
 # 2. Real eval against OpenAI gpt-4.1-mini (~$0.02, ~30 sec)
 export OPENAI_API_KEY=sk-...
-python examples/17_artifact_eval.py
+python examples/04_artifact_eval.py
 
-# 3. Same eval streamed to your proofagent.ai dashboard
-export PROOFAGENT_API_KEY=apk_live_...
-python examples/17_artifact_eval.py --live
+# 3. Same eval, also pushed to your dashboard + gated
+export PROOFAGENT_API_KEY=pa_live_...
+python examples/04_artifact_eval.py --upload
 
 # 4. Use it as a template for YOUR OWN artifact
-python examples/17_artifact_eval.py \
+python examples/04_artifact_eval.py \
     --artifact path/to/your_brd.md \
     --knowledge-dir path/to/your_company_docs/ \
     --type BRD

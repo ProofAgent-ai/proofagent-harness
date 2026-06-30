@@ -20,8 +20,11 @@ and the **run-upload contract** the Governance API exposes at
   * :func:`gate_exit_code` turns ``pass`` / ``review`` / ``block`` into a
     process exit code so a CI step can fail the build on a bad gate.
 
-The *same* harness uploads to ProofAgent Cloud **or** a customer-hosted
-Enterprise endpoint — only ``api_url`` changes. See ``docs/governance-upload.md``.
+The public ``--upload`` CLI is hard-locked to ProofAgent Cloud
+(:data:`DEFAULT_API_BASE_URL`) — there is no flag or env var to repoint it.
+On-prem / Enterprise bundles target their own backend by calling
+:func:`upload_run` with an explicit ``api_url=`` (a programmatic seam, not a
+user-facing CLI option). See ``docs/governance-upload.md``.
 
 Design notes
 ------------
@@ -48,11 +51,12 @@ from proofagent_harness.schemas import METRIC_ALIASES
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from proofagent_harness.schemas import Report
 
-# Default Governance API base URL — ProofAgent Cloud. ``--upload`` and
-# :func:`upload_run` target this unless overridden by ``--api-url`` /
-# ``PROOFAGENT_API_BASE_URL`` (for an Enterprise / on-prem endpoint). This is the
-# only thing that lets a user push with *just* an API key: `proof run --upload
-# --api-key pa_live_…` (or env `PROOFAGENT_API_KEY`) needs no URL for Cloud.
+# Governance API base URL — ProofAgent Cloud. The ``--upload`` CLI is hard-locked
+# to this host: there is deliberately NO ``--api-url`` flag and NO
+# ``PROOFAGENT_API_BASE_URL`` env var, so a user pushes with *just* an API key
+# (`proof run --upload --api-key pa_live_…`, or env `PROOFAGENT_API_KEY`) — the
+# destination can't be repointed from the CLI. On-prem / Enterprise bundles
+# override it by passing ``api_url=`` straight to :func:`upload_run`.
 DEFAULT_API_BASE_URL = "https://app.proofagent.ai"
 
 # ──────────────────────────────────────────────────────────────────────
@@ -442,10 +446,9 @@ def _build_token_usage(report: Report) -> dict[str, Any]:
 
     Extends :func:`_split_token_usage` (which stays the documented minimum) with
     the flat ``primary_*`` / ``fallback_*`` fields, call counts, the fallback
-    rate, and the convenience ``token_split`` ratio. Mirrors the breakdown
-    ``harness._report_to_sync_payload`` streams to Live Reporting so the
-    governance dashboard renders the same "914k prompt + 55k completion · 43
-    calls · 0% fallback" story.
+    rate, and the convenience ``token_split`` ratio. Mirrors the token breakdown
+    the harness already tracks so the governance dashboard renders the same
+    "914k prompt + 55k completion · 43 calls · 0% fallback" story.
     """
     usage = dict(_split_token_usage(report))
     usage.update(

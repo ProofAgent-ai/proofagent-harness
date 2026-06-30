@@ -1,9 +1,9 @@
-"""Local evaluation → ONE standard report on disk (no Live Reporting).
+"""Local evaluation → ONE standard report on disk (fully offline).
 
 No ProofAgent API key — this runs the harness entirely on your machine and
 saves the SINGLE standard report: every field the harness produces, in one
-JSON + one Markdown file. This is the same report Live Reporting streams to
-the dashboard — identical schema, just written locally instead.
+JSON + one Markdown file. This is the same report the dashboard renders when
+you push with ``--upload`` — identical schema, just written locally instead.
 
 What it writes (to ``results/`` by default)
 -------------------------------------------
@@ -31,22 +31,22 @@ Run
     export OPENAI_API_KEY=sk-...        # the ONLY key needed (gpt-4.1-mini)
 
     # multi-turn, gpt-4.1-mini both sides, debate consensus
-    python examples/18_local_report_extend.py --mode multi_turn --turns 8
+    python examples/05_local_report.py --mode multi_turn --turns 8
 
     # artifact mode on the bundled realistic library BRD
-    python examples/18_local_report_extend.py --mode artifact
+    python examples/05_local_report.py --mode artifact
 
     # add a backup model so failed/unparseable juror calls are auto-rescued
-    python examples/18_local_report_extend.py --mode multi_turn --fallback-llm gpt-4.1
+    python examples/05_local_report.py --mode multi_turn --fallback-llm gpt-4.1
 
     # no LLM spend at all — verify wiring + see what would be written
-    python examples/18_local_report_extend.py --list-only
+    python examples/05_local_report.py --list-only
 
     # offline multi-turn (deterministic stub agent, jurors still call the LLM)
-    python examples/18_local_report_extend.py --mode multi_turn --stub-agent
+    python examples/05_local_report.py --mode multi_turn --stub-agent
 
     # ALSO emit a copy with your own extra fields (opt-in)
-    python examples/18_local_report_extend.py --mode multi_turn --add-custom-fields
+    python examples/05_local_report.py --mode multi_turn --add-custom-fields
 
 The standard <stem>.json/.md already contain every field. Only use
 --add-custom-fields (and edit add_custom_fields()) if you want to bolt on
@@ -209,7 +209,7 @@ def main() -> int:
     args = parse_args()
     out_dir = Path(args.out_dir).expanduser().resolve()
 
-    print("\nLocal report (no Live Reporting) — configuration")
+    print("\nLocal report (fully offline) — configuration")
     print("─" * 60)
     print(f"  mode        : {args.mode}")
     print(f"  harness LLM : {args.llm}")
@@ -228,8 +228,8 @@ def main() -> int:
         print("\n[--list-only] No LLM calls. Drop the flag to run + save the report.")
         return 0
 
-    # ── Run the evaluation — live_reporting defaults to False, so nothing
-    #    leaves your machine and no PROOFAGENT_API_KEY is required. ──
+    # ── Run the evaluation — fully offline, so nothing leaves your machine
+    #    and no PROOFAGENT_API_KEY is required. ──
     if args.mode == "multi_turn":
         if args.stub_agent:
             agent = make_stub_agent()
@@ -301,7 +301,7 @@ def main() -> int:
     # ── Save THE standard report: one JSON (every field, verbatim) + the
     #    human-readable Markdown. BOTH already contain EVERYTHING — metrics,
     #    findings, technical_issues, executive summary, artifact checks,
-    #    per-turn audit, warnings — identical to what Live Reporting streams.
+    #    per-turn audit, warnings — identical to what `--upload` pushes.
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"local_report_{args.mode}_{args.llm.replace('/', '_').replace('@', '_')}_seed{args.seed}"
     json_path = out_dir / f"{stem}.json"
@@ -323,7 +323,6 @@ def main() -> int:
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
 
     # ── OPTIONAL: also write a copy with your OWN extra fields bolted on.

@@ -9,7 +9,6 @@ driven findings ride along in the upload.
 
 Usage:
     export OPENAI_API_KEY=sk-...                       # harness + agent + compliance model
-    export PROOFAGENT_API_BASE_URL=http://localhost:8000
     export PROOFAGENT_API_KEY=pa_live_...              # YOUR workspace's API key
     python examples/governance/run_example_agent.py --agent customer_support_agent --turns 8
 
@@ -90,22 +89,24 @@ def main() -> int:
         report.to_markdown(args.markdown)
         print(f"saved Markdown → {args.markdown}")
 
-    base = os.environ.get("PROOFAGENT_API_BASE_URL")
     key = os.environ.get("PROOFAGENT_API_KEY")
-    if not (base and key):
+    if not key:
         if not (args.json or args.markdown):
             out = pathlib.Path(__file__).parent / "_example_report.json"
             report.to_json(str(out))
             print(f"\nSaved {out}.")
-        print("Set PROOFAGENT_API_BASE_URL + PROOFAGENT_API_KEY to also upload to the dashboard.")
+        print("Set PROOFAGENT_API_KEY to upload (runs go to ProofAgent Cloud).")
         return 0
 
     from proofagent_harness.governance import (
+        DEFAULT_API_BASE_URL,
         build_governance_payload,
         gate_exit_code,
         structure_findings_evidence,
         upload_run,
     )
+
+    base = DEFAULT_API_BASE_URL
 
     payload = build_governance_payload(
         report,

@@ -19,36 +19,36 @@ Workflow
 
   1. Author a trap following docs/TRAP_MANIFEST.md.
   2. Validate it locally:        proof traps validate path/to/your_trap.md
-  3. Verify wiring (no API):     python examples/08_custom_trap.py --list-only
-  4. Run a real eval:            python examples/08_custom_trap.py --turns 8
+  3. Verify wiring (no API):     python examples/06_custom_traps.py --list-only
+  4. Run a real eval:            python examples/06_custom_traps.py --turns 8
 
 Usage
 -----
 
   # 0) Wiring sanity check — loads trap index, prints summary, NO API calls.
-  python examples/08_custom_trap.py --list-only
+  python examples/06_custom_traps.py --list-only
 
   # 1) Default: bundled demo trap + Claude agent + Claude harness LLM.
-  python examples/08_custom_trap.py --turns 8
+  python examples/06_custom_traps.py --turns 8
 
   # 2) Pick the agent model and harness LLM (same as 01_quickstart).
-  python examples/08_custom_trap.py --turns 3 --consensus debate \\
+  python examples/06_custom_traps.py --turns 3 --consensus debate \\
       --agent-model gpt-4.1 --llm gpt-4.1
 
   # 3) Cross-family scoring — Claude agent, GPT harness LLM.
-  python examples/08_custom_trap.py --turns 8 \\
+  python examples/06_custom_traps.py --turns 8 \\
       --agent-model claude-opus-4-7 --llm gpt-4.1
 
   # 4) Proxy juror — keep the agent on real OpenAI, route the Harness LLM
   #    to a local mlx / vllm / lm-studio / ngrok endpoint.
-  python examples/08_custom_trap.py --turns 8 \\
+  python examples/06_custom_traps.py --turns 8 \\
       --agent-model gpt-4.1-mini \\
       --proxy-url https://your-proxy/v1 \\
       --llm gemma-4-e4b-it-mlx@8bit \\
       --context-budget 6000
 
   # 5) Your own trap directory.
-  python examples/08_custom_trap.py --turns 8 --trap path/to/your_traps/
+  python examples/06_custom_traps.py --turns 8 --trap path/to/your_traps/
 
 Setup
 -----
@@ -344,7 +344,6 @@ def main() -> int:
                 source=args.source,
                 fail_on=args.fail_on,
                 api_key=args.api_key,
-                api_url=args.api_url,
             )
 
         print(f"\nFull report saved to {out_json.relative_to(Path.cwd())}")

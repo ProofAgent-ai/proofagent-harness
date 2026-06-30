@@ -5,9 +5,11 @@ The harness runs **fully local by default**. When you want a release gate, add
 Governance API**, the API runs its gate engine against your governance profile,
 and the harness exits with a code your pipeline can act on.
 
-The **same harness** uploads to **ProofAgent Cloud** *or* a **customer-hosted
-Enterprise endpoint** — only `--api-url` changes. Nothing else about your run
-differs between the two.
+Every `--upload` run goes to **ProofAgent Cloud** (`https://app.proofagent.ai`).
+The public CLI is Cloud-locked.
+
+> **On-prem / Enterprise?** That's a separate bundle that targets its own
+> backend via the `upload_run(api_url=…)` Python API — not the public CLI.
 
 > Terminology: the model that reviews the agent under test is the **harness
 > LLM**. The Governance API never sees your harness-LLM credentials — only the
@@ -46,10 +48,6 @@ proof run my_agent.py \
   --profile airline_customer_support
 ```
 
-> Self-hosting? Point at your Enterprise endpoint with
-> `export PROOFAGENT_API_BASE_URL="https://proofagent.acme.internal"` (or
-> `--api-url`). Everything else is identical.
-
 ### 3. CI/CD (gate the build)
 
 The same command with `--source ci_cd` (the default). The process exit code is
@@ -61,7 +59,6 @@ the gate decision — let it fail the job. See the GitHub Actions example below.
 
 | Variable                   | CLI flag      | Purpose                                                        |
 | -------------------------- | ------------- | ------------------------------------------------------------- |
-| `PROOFAGENT_API_BASE_URL`  | `--api-url`   | **Optional** — defaults to ProofAgent Cloud (`https://app.proofagent.ai`). Set for an Enterprise / on-prem endpoint. |
 | `PROOFAGENT_API_KEY`       | `--api-key`   | API key for the Governance API. **Required** for `--upload`.  |
 | `PROOFAGENT_EVIDENCE`      | _none_        | `0` disables evidence-driven findings (on by default).        |
 | `PROOFAGENT_EVIDENCE_LLM`  | _none_        | Model used to structure finding evidence (default `gpt-4.1-mini`). |
@@ -119,7 +116,6 @@ payload, so the **governance platform only displays it and never calls a model**
 | Flag                  | Default                         | Meaning                                                           |
 | --------------------- | ------------------------------- | ---------------------------------------------------------------- |
 | `--upload/--no-upload`| `--no-upload`                   | Turn the gate on.                                                |
-| `--api-url`           | Cloud (`app.proofagent.ai`)     | Base URL; env `PROOFAGENT_API_BASE_URL`. Set only for Enterprise / on-prem. |
 | `--api-key`           | `$PROOFAGENT_API_KEY`           | API key. **Required** for `--upload`.                           |
 | `--agent`             | falls back to `--role`          | Logical agent name — groups runs and powers regression checks.  |
 | `--agent-version`     | _none_                          | Version / git ref of the agent under test.                      |
@@ -255,8 +251,6 @@ jobs:
 
       - name: Evaluate + gate on the governance decision
         env:
-          # ProofAgent Cloud — or set this to your Enterprise endpoint.
-          PROOFAGENT_API_BASE_URL: https://app.proofagent.ai
           PROOFAGENT_API_KEY: ${{ secrets.PROOFAGENT_API_KEY }}
           # The harness LLM credentials (kept on the runner, never uploaded).
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -275,15 +269,3 @@ jobs:
 A `block` decision exits `2` and fails the job; `pass` exits `0` and the merge
 proceeds. Switch `--fail-on review` once your team is ready to also gate on
 soft-review decisions.
-
-### Enterprise (customer-hosted) endpoint
-
-Self-hosting the Governance API changes **one line** — the base URL:
-
-```yaml
-        env:
-          PROOFAGENT_API_BASE_URL: https://proofagent.internal.acme.com
-          PROOFAGENT_API_KEY: ${{ secrets.PROOFAGENT_API_KEY }}
-```
-
-Everything else — flags, exit codes, payload — is identical.

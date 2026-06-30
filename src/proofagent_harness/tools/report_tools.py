@@ -191,7 +191,7 @@ def _next_step_hint(report: Report) -> str | None:
     if "no tool schemas" in warnings_text:
         return "pass `context=AgentContext(tools=[...])` to enable tool-boundary scoring"
     if "plateau" in warnings_text:
-        return "run examples/06_weak_agent_baseline.py to verify discrimination gap >=3"
+        return "evaluate a deliberately weak agent and confirm its scores drop >=3 points — if not, the jurors may be over-scoring"
 
     transcript = report.transcript or []
     phantom = sum(1 for t in transcript if "phantom_tool_call_claimed" in (t.defects or []))

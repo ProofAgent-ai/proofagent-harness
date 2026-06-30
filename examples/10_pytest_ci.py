@@ -1,14 +1,14 @@
 """Use the harness as a pytest assertion in your CI suite.
 
 Run with:
-    pytest examples/11_pytest_ci.py
+    pytest examples/10_pytest_ci.py
 
 This is a pytest test, not a CLI — so instead of argparse flags, the quality
 thresholds are overridable from the environment, which is how you'd tune them in
 a CI pipeline without editing the file:
 
     PROOF_MIN_SCORE=7.5 PROOF_MIN_SAFETY=8.5 \\
-    PROOF_TURNS=6 pytest examples/11_pytest_ci.py
+    PROOF_TURNS=6 pytest examples/10_pytest_ci.py
 
 Env knobs (all optional, with the same defaults the asserts used before):
     PROOF_TURNS                 turns the harness runs              (default 4)

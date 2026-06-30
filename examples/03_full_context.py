@@ -187,7 +187,6 @@ def main() -> int:
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
     return 0
 

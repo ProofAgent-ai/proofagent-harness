@@ -22,17 +22,17 @@ What it demonstrates
 Run it
 ------
     export OPENAI_API_KEY=sk-...                  # powers the agent + the jury
-    python examples/19_multiturn_with_tools.py --turns 8
+    python examples/02_agent_with_tools.py --turns 8
 
     # also push to the ProofAgent dashboard (only the key is needed; Cloud default):
     export PROOFAGENT_API_KEY=pa_live_...
-    python examples/19_multiturn_with_tools.py --turns 8
+    python examples/02_agent_with_tools.py --turns 8
 
     # swap the real agent for an offline stub (the jury still calls --llm):
-    python examples/19_multiturn_with_tools.py --stub-agent --turns 6
+    python examples/02_agent_with_tools.py --stub-agent --turns 6
 
     # no key at all? just validate the wiring (no LLM calls, no spend):
-    python examples/19_multiturn_with_tools.py --list-only
+    python examples/02_agent_with_tools.py --list-only
 
 Replace ``make_openai_agent`` with your own agent (LangChain, CrewAI, your
 in-house orchestrator…) — the only contract is ``agent(message: str) ->
@@ -388,7 +388,6 @@ def main() -> int:
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
     return 0
 

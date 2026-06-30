@@ -71,12 +71,6 @@ def run(
         help="Upload the result to the ProofAgent Governance API and gate on "
              "the returned decision (exit 0 pass / 1 review / 2 block).",
     ),
-    api_url: str | None = typer.Option(
-        None, "--api-url",
-        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, "
-             "then ProofAgent Cloud (https://app.proofagent.ai). Override only for "
-             "an Enterprise / on-prem endpoint.",
-    ),
     api_key: str | None = typer.Option(
         None, "--api-key",
         help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY.",
@@ -141,7 +135,6 @@ def run(
     if upload:
         _upload_and_gate(
             report,
-            api_url=api_url or os.environ.get("PROOFAGENT_API_BASE_URL"),
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
             agent_name=agent or role,
             agent_version=agent_version,
@@ -180,11 +173,6 @@ def artifact(
     upload: bool = typer.Option(
         False, "--upload/--no-upload",
         help="Upload to the Governance API and gate on the decision (exit 0/1/2).",
-    ),
-    api_url: str | None = typer.Option(
-        None, "--api-url",
-        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, then "
-             "ProofAgent Cloud. Override only for an Enterprise / on-prem endpoint.",
     ),
     api_key: str | None = typer.Option(
         None, "--api-key", help="API key. Defaults to env PROOFAGENT_API_KEY."
@@ -248,7 +236,6 @@ def artifact(
     if upload:
         _upload_and_gate(
             report,
-            api_url=api_url or os.environ.get("PROOFAGENT_API_BASE_URL"),
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
             agent_name=agent or role,
             agent_version=agent_version,
@@ -291,7 +278,6 @@ def _transcript_text(report) -> str | None:
 def _upload_and_gate(
     report,
     *,
-    api_url: str | None,
     api_key: str | None,
     agent_name: str,
     agent_version: str | None,
@@ -313,9 +299,12 @@ def _upload_and_gate(
         upload_run,
     )
 
-    # Base URL defaults to ProofAgent Cloud, so a user only needs an API key to
-    # push. An Enterprise / on-prem endpoint overrides via --api-url / env.
-    api_url = api_url or DEFAULT_API_BASE_URL
+    # The upload target is hard-locked to ProofAgent Cloud. `--upload` always
+    # pushes here — there is deliberately NO flag or env var to repoint it, so a
+    # user only needs an API key. (On-prem / Enterprise deployments target their
+    # own backend by calling upload_run(api_url=…) from their bundle, not through
+    # this public CLI path.)
+    api_url = DEFAULT_API_BASE_URL
 
     if not api_key:
         console.print(

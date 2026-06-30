@@ -15,7 +15,7 @@ If you want to also run the HARNESS LLM through the proxy, set the env
 vars before running:
     export OPENAI_API_KEY=anything
     export OPENAI_BASE_URL=https://gloating-smugness-premiere.ngrok-free.dev/v1
-    python examples/07_proxy_llm_agent.py --llm gemma-4-e4b-it-mlx@8bit
+    python examples/07_proxy_llm.py --llm gemma-4-e4b-it-mlx@8bit
 
 The proxy is assumed to be OpenAI-compatible — most local servers (mlx-lm,
 vllm OpenAI-compatible mode, lm-studio, ollama via litellm) expose the
@@ -29,8 +29,8 @@ Setup:
     export PROOFAGENT_PROXY_KEY=dummy   # most local proxies don't check, but the SDK requires a value
 
 Run:
-    python examples/07_proxy_llm_agent.py
-    python examples/07_proxy_llm_agent.py --turns 25 --consensus debate --llm gpt-4.1-mini
+    python examples/07_proxy_llm.py
+    python examples/07_proxy_llm.py --turns 25 --consensus debate --llm gpt-4.1-mini
 """
 
 from __future__ import annotations
@@ -437,7 +437,6 @@ if __name__ == "__main__":
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
 
     print(f"\nFull report saved to {out_json.relative_to(Path.cwd())}")

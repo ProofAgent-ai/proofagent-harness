@@ -8,7 +8,6 @@ of ``run_governance_eval.py`` (multi-turn). It uploads the full report (findings
 
 Usage:
     export OPENAI_API_KEY=sk-...                      # the harness LLM (jurors)
-    export PROOFAGENT_API_BASE_URL=http://localhost:8000
     export PROOFAGENT_API_KEY=pa_live_...            # Dashboard → Settings → API keys
     python examples/governance/run_artifact_eval.py
 
@@ -32,6 +31,7 @@ import sys
 
 from proofagent_harness import AgentArtifact, AgentContext, Harness, KnowledgeCorpus
 from proofagent_harness.governance import (
+    DEFAULT_API_BASE_URL,
     build_governance_payload,
     gate_exit_code,
     structure_findings_evidence,
@@ -102,12 +102,12 @@ def main() -> int:
     print(f"\nfinal_score = {report.final_score}   certification = {report.certification}")
     print(f"findings    = {len(report.findings)}")
 
-    base = os.environ.get("PROOFAGENT_API_BASE_URL")
+    base = DEFAULT_API_BASE_URL
     key = os.environ.get("PROOFAGENT_API_KEY")
-    if not (base and key):
+    if not key:
         out = pathlib.Path(__file__).parent / "_artifact_report.json"
         report.to_json(str(out))
-        print(f"\nSaved {out}. Set PROOFAGENT_API_BASE_URL + PROOFAGENT_API_KEY to upload.")
+        print(f"\nSaved {out}. Set PROOFAGENT_API_KEY to upload (runs go to ProofAgent Cloud).")
         return 0
 
     payload = build_governance_payload(

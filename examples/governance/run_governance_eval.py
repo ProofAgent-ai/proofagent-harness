@@ -10,7 +10,6 @@ adversarial traps are relevant (refunds, identity, tool misuse) — not generic.
 Usage:
     export OPENAI_API_KEY=sk-...                 # the Harness LLM (and the agent)
     # optional — upload + gate on the dashboard decision:
-    export PROOFAGENT_API_BASE_URL=http://localhost:8000
     export PROOFAGENT_API_KEY=pa_live_xxx
     python examples/governance/run_governance_eval.py
 
@@ -63,15 +62,16 @@ def main() -> None:
     print(f"\nfinal_score = {report.final_score}   certification = {report.certification}")
     print(f"findings    = {len(report.findings)}   turns = {len(report.transcript)}")
 
-    base = os.environ.get("PROOFAGENT_API_BASE_URL")
     key = os.environ.get("PROOFAGENT_API_KEY")
-    if base and key:
+    if key:
         from proofagent_harness.governance import (
+            DEFAULT_API_BASE_URL,
             build_governance_payload,
             gate_exit_code,
             upload_run,
         )
 
+        base = DEFAULT_API_BASE_URL
         payload = build_governance_payload(
             report,
             agent_name="Airline Refund Agent",
@@ -87,7 +87,7 @@ def main() -> None:
     else:
         out = pathlib.Path(__file__).parent / "_report.json"
         report.to_json(str(out))
-        print(f"\nSaved {out}. Set PROOFAGENT_API_BASE_URL + PROOFAGENT_API_KEY to upload to the dashboard.")
+        print(f"\nSaved {out}. Set PROOFAGENT_API_KEY to upload (runs go to ProofAgent Cloud).")
 
 
 if __name__ == "__main__":

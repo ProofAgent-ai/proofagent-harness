@@ -6,30 +6,27 @@ uses (``build_governance_payload`` → ``upload_run`` → gate decision), wrappe
 one no-op-safe call so an example still runs **fully offline** when no
 credentials are given.
 
-Two ways to supply credentials — the base URL defaults to **ProofAgent Cloud**,
-so you only need an API key (works for BOTH multi-turn and artifact runs):
+Uploads always go to **ProofAgent Cloud** (https://app.proofagent.ai), so you
+only need an API key (works for BOTH multi-turn and artifact runs):
 
-  1. CLI flags (preferred in the examples — explicit, no shell exports needed)::
+  1. CLI flag (preferred in the examples — explicit, no shell exports needed)::
 
          python examples/01_quickstart.py --upload --api-key pa_live_...
-         # on-prem: ... --upload --api-key pa_live_... --api-url https://proofagent.acme.internal
 
-  2. Environment variables (used as the fallback when a flag is omitted)::
+  2. Environment variable (used as the fallback when the flag is omitted)::
 
          export PROOFAGENT_API_KEY="pa_live_..."          # Dashboard → Settings → API Keys
-         export PROOFAGENT_API_BASE_URL="https://proofagent.acme.internal"   # on-prem only
 
 When ``push_to_dashboard`` is called with no key (neither flag nor env), it
 prints a one-line hint and returns ``None`` — the example's local JSON /
 Markdown report is unaffected. With a key, it builds the governance payload,
-POSTs it (to Cloud, or your override), and prints the gate decision + dashboard
-URL.
+POSTs it to Cloud, and prints the gate decision + dashboard URL.
 
 The examples gate the call behind an explicit ``--upload`` flag (default
 ``--no-upload``) so the upload/offline choice is a deliberate two-option UX, not
 "happens to push because an env key is present". Use :func:`add_governance_upload_args`
 to register that flag group, then forward ``args`` straight into
-:func:`push_to_dashboard` (``api_key=args.api_key``, ``api_url=args.api_url``, …).
+:func:`push_to_dashboard` (``api_key=args.api_key``, …).
 
 Inline equivalent (if you'd rather not import this helper) — five lines::
 
@@ -58,8 +55,7 @@ def dashboard_enabled() -> bool:
     """True when an *env-driven* push would be attempted — i.e.
     ``PROOFAGENT_API_KEY`` is set.
 
-    The base URL defaults to ProofAgent Cloud, so the key alone is enough;
-    ``PROOFAGENT_API_BASE_URL`` only overrides it for Enterprise / on-prem.
+    Uploads always go to ProofAgent Cloud, so the key alone is enough.
 
     Note: the examples drive the push from the ``--upload`` flag (see
     :func:`add_governance_upload_args`), not from this env check — so an
@@ -80,7 +76,6 @@ def add_governance_upload_args(
 
         --upload / --no-upload   (default: --no-upload — run fully offline)
         --api-key                (default: env PROOFAGENT_API_KEY)
-        --api-url                (default: env PROOFAGENT_API_BASE_URL, then Cloud)
         --agent                  (logical agent name; default: ``default_agent``)
         --agent-version          (git ref / version of the agent under test)
         --profile                (governance profile slug to gate against)
@@ -99,10 +94,9 @@ def add_governance_upload_args(
                 source=args.source,
                 fail_on=args.fail_on,
                 api_key=args.api_key,
-                api_url=args.api_url,
             )
 
-    Flag values take precedence over the env vars; the env vars remain the
+    The flag value takes precedence over the env var; the env var remains the
     fallback so an exported key still works without re-typing ``--api-key``.
 
     ``include_agent_flag=False`` skips the ``--agent`` flag — pass it when the
@@ -129,11 +123,6 @@ def add_governance_upload_args(
     g.add_argument(
         "--api-key", default=None, metavar="KEY",
         help="Governance API key. Defaults to env PROOFAGENT_API_KEY.",
-    )
-    g.add_argument(
-        "--api-url", default=None, metavar="URL",
-        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, "
-             "then ProofAgent Cloud. Override only for Enterprise / on-prem.",
     )
     if include_agent_flag:
         g.add_argument(
@@ -172,17 +161,15 @@ def push_to_dashboard(
     fail_on: str = "block",
     run_name: str | None = None,
     api_key: str | None = None,
-    api_url: str | None = None,
 ) -> dict[str, Any] | None:
     """Optionally push a finished ``Report`` to the ProofAgent Governance dashboard.
 
     No-op (returns ``None``) unless a key is available — passed via ``api_key``
     or, as a fallback, the ``PROOFAGENT_API_KEY`` env var — so every example
-    runs offline by default. The base URL defaults to ProofAgent Cloud; override
-    it with ``api_url`` or the ``PROOFAGENT_API_BASE_URL`` env var for
-    Enterprise / on-prem. When enabled, it builds the governance payload
-    (identical to ``proof run --upload``), uploads it, prints the gate decision +
-    dashboard URL, and returns the decision dict.
+    runs offline by default. Uploads always go to ProofAgent Cloud. When enabled,
+    it builds the governance payload (identical to ``proof run --upload``),
+    uploads it, prints the gate decision + dashboard URL, and returns the
+    decision dict.
 
     **Never raises.** A transport / credentials error is printed, not
     propagated, so a demo push can't crash the example or mask the local report.
@@ -193,11 +180,11 @@ def push_to_dashboard(
     against), ``source`` (``local`` | ``ci_cd`` | ``manual`` | ``api`` |
     ``scheduled``), and ``run_name`` (human label). ``fail_on`` only affects the
     advisory ``_exit_code`` added to the returned dict — this helper never calls
-    ``sys.exit`` itself (CI examples like ``11_pytest_ci`` decide that).
+    ``sys.exit`` itself (CI examples like ``10_pytest_ci`` decide that).
 
-    ``api_key`` and ``api_url``, when provided (e.g. wired from ``--api-key`` /
-    ``--api-url`` flags), take **precedence** over the matching env vars, so the
-    CLI flags work without the user exporting anything.
+    ``api_key``, when provided (e.g. wired from the ``--api-key`` flag), takes
+    **precedence** over the matching env var, so the CLI flag works without the
+    user exporting anything.
 
     Returns the gate-decision dict (``run_id``, ``gate_status``, ``grade_label``,
     ``final_score``, ``dashboard_url``, ``failed_rules`` …) with an extra
@@ -210,8 +197,7 @@ def push_to_dashboard(
             "[dashboard] no API key — skipping dashboard push "
             "(report saved locally only).\n"
             "[dashboard] pass --api-key (or set PROOFAGENT_API_KEY) to push this "
-            "run (Cloud by default; use --api-url / PROOFAGENT_API_BASE_URL for "
-            "an Enterprise / on-prem endpoint)."
+            "run to ProofAgent Cloud."
         )
         return None
 
@@ -232,9 +218,8 @@ def push_to_dashboard(
         )
         return None
 
-    # Base URL defaults to ProofAgent Cloud — only an API key is required.
-    # Flag value (api_url) wins over env, which wins over the Cloud default.
-    api_url = api_url or os.getenv("PROOFAGENT_API_BASE_URL") or DEFAULT_API_BASE_URL
+    # Upload target is hard-locked to ProofAgent Cloud — only an API key is required.
+    api_url = DEFAULT_API_BASE_URL
 
     payload = build_governance_payload(
         report,

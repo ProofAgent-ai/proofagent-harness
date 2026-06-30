@@ -23,12 +23,14 @@ examples/governance/
 ```bash
 export OPENAI_API_KEY=sk-...                       # Harness LLM + agent (gpt-4.1-mini)
 
-# optional: upload to the dashboard and gate on the decision
-export PROOFAGENT_API_BASE_URL=http://localhost:8000
+# optional: upload to the dashboard (ProofAgent Cloud) and gate on the decision
 export PROOFAGENT_API_KEY=pa_live_xxx              # dashboard → Settings → API keys
 
 python examples/governance/run_governance_eval.py
 ```
+
+> The CLI is Cloud-locked. To test against a local backend, call the
+> `upload_run(api_url="http://localhost:8000")` Python API directly.
 
 What happens: the harness reads the role + business case + the agent's system
 prompt + tools to **infer the domain (LLM-based)** and select **relevant** traps
@@ -64,5 +66,5 @@ Swap the body of `agent()` to call **your** agent/service, update `SYSTEM`,
 domain-relevant trap selection, scoring, grounding, the gate, and the upload —
 works unchanged.
 
-> No LLM key handy? See `../governance_integration.py`, which uploads a saved
+> No LLM key handy? See `../11_governance_gate.py`, which uploads a saved
 > evaluation report to the dashboard without making any model calls.

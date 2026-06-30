@@ -16,11 +16,10 @@ with compliance + evidence baked in — and a genuinely adversarial `debate`.
 ### Added — Governance upload + CI release gate
 - **`proof run --upload` / `proof artifact --upload`** — push the finished
   evaluation to the ProofAgent Governance API and gate CI on the returned
-  decision (exit `0` pass / `1` review / `2` block). **The base URL defaults to
-  ProofAgent Cloud (`https://app.proofagent.ai`), so only an API key is
-  needed**; override with `--api-url` / `PROOFAGENT_API_BASE_URL` for a
-  self-hosted Enterprise endpoint. New flags: `--api-url`, `--api-key`,
-  `--agent`, `--agent-version`, `--profile`, `--fail-on`, `--source`.
+  decision (exit `0` pass / `1` review / `2` block). **Every `--upload` run goes
+  to ProofAgent Cloud (`https://app.proofagent.ai`), so only an API key is
+  needed.** New flags: `--api-key`, `--agent`, `--agent-version`, `--profile`,
+  `--fail-on`, `--source`.
 - New public module **`proofagent_harness.governance`**:
   `build_governance_payload`, `upload_run`, `gate_exit_code`,
   `structure_findings_evidence`, `fetch_premium_traps`, `GovernanceUploadError`,
@@ -53,7 +52,7 @@ with compliance + evidence baked in — and a genuinely adversarial `debate`.
   the plan reports a per-trap `source_map` + premium count.
 
 ### Changed
-- **Examples curated** to a clean `01–12` set (+ a `benchmarks/` folder for the
+- **Examples curated** to a clean `01–11` set (+ a `benchmarks/` folder for the
   paper-cohort repro). Every example exposes harness parameters as CLI flags and
   a uniform `--upload` / `--no-upload` toggle (offline by default); notebooks
   consolidated to 3.
@@ -64,6 +63,11 @@ with compliance + evidence baked in — and a genuinely adversarial `debate`.
   checks vs frontier for production gates), and a governance section with
   dashboard screenshots. `docs/governance-upload.md` now covers the Python API
   and artifact-mode upload.
+
+### Removed
+- **Live Reporting** — the streaming `live_reporting=True` path + the
+  `proofagent_harness.reporting` module — superseded by `--upload` (the single
+  dashboard path).
 
 ## [0.5.1] — 2026-06-15
 

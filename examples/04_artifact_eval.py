@@ -27,8 +27,8 @@ Multi-turn (the default Harness mode) drives an adversarial conversation:
 Artifact mode (this example) skips planner + conductor entirely:
     Knowledge corpus + Artifact → Jury panel scores it directly.
 
-Same jury infrastructure, same metric pipeline, same Live Reporting
-plumbing — just one synthetic "turn" built from the artifact.
+Same jury infrastructure, same metric pipeline — just one synthetic
+"turn" built from the artifact.
 
 Field mapping (Python → harness slot)
 -------------------------------------
@@ -48,23 +48,23 @@ Field mapping (Python → harness slot)
 Run
 ---
     # Wiring check — no API calls, validates loaders + schemas
-    python examples/17_artifact_eval.py --list-only
+    python examples/04_artifact_eval.py --list-only
 
     # Real eval against OpenAI gpt-4.1-mini (default; ~$0.02 / ~30s)
     export OPENAI_API_KEY=sk-...
-    python examples/17_artifact_eval.py
+    python examples/04_artifact_eval.py
 
     # Your own BRD + knowledge folder
-    python examples/17_artifact_eval.py \\
+    python examples/04_artifact_eval.py \\
         --artifact path/to/your_brd.md \\
         --knowledge-dir path/to/your_company_docs/ \\
         --type BRD \\
         --llm claude-haiku-4-5
 
-    # With Live Reporting (stream to proofagent.ai dashboard) + a fallback
-    # juror LLM that rescues any failed / unparseable primary-LLM call.
-    export PROOFAGENT_API_KEY=apk_live_...
-    python examples/17_artifact_eval.py --live --fallback-llm gpt-4.1
+    # Also push the finished score to the Governance dashboard + gate, with a
+    # fallback juror LLM that rescues any failed / unparseable primary-LLM call.
+    export PROOFAGENT_API_KEY=pa_live_...
+    python examples/04_artifact_eval.py --upload --fallback-llm gpt-4.1
 
 Expected on the bundled library BRD (clean, well-grounded):
     final_score    : 6.5–8.5
@@ -80,7 +80,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -191,17 +190,11 @@ def parse_args() -> argparse.Namespace:
         "--seed", "-s", type=int, default=42,
     )
     p.add_argument(
-        "--live", action="store_true",
-        help="Enable Live Reporting (streams to proofagent.ai dashboard). "
-             "Requires PROOFAGENT_API_KEY env var.",
-    )
-    p.add_argument(
         "--list-only", action="store_true",
         help="Print the eval plan and exit — no API calls. Use to verify wiring.",
     )
-    # ── Governance upload (off by default — runs fully offline). Distinct from
-    #    --live: --live STREAMS via live_reporting; --upload POSTs the finished
-    #    run to the Governance API + gates on the decision. ──
+    # ── Governance upload (off by default — runs fully offline). --upload POSTs
+    #    the finished run to the Governance API + gates on the decision. ──
     add_governance_upload_args(p, default_agent="artifact-eval-agent")
     return p.parse_args()
 
@@ -285,18 +278,9 @@ def main() -> int:
         print(f"  llm          : {args.llm}")
         print(f"  fallback llm : {args.fallback_llm or '<none>'}")
         print(f"  consensus    : {args.consensus}")
-        print(f"  live reporting: {'YES' if args.live else 'no'}")
         print(f"  metrics      : 5 incl. tool_use (manipulation_resistance auto-dropped in artifact mode)")
         print("\n[--list-only] No eval run. Drop --list-only to actually evaluate.")
         return 0
-
-    if args.live and not os.environ.get("PROOFAGENT_API_KEY"):
-        print(
-            "[warn] --live set but PROOFAGENT_API_KEY is not in env — "
-            "Live Reporting will be disabled silently. Get a key at "
-            "https://www.proofagent.ai/dashboard",
-            file=sys.stderr,
-        )
 
     # 5 metrics in artifact mode (incl. tool_use) — manipulation_resistance is
     # auto-dropped by the Harness constructor with a warning.
@@ -306,7 +290,6 @@ def main() -> int:
         fallback_llm=args.fallback_llm,
         consensus=args.consensus,
         seed=args.seed,
-        live_reporting=args.live,
     ).evaluate(
         artifact=artifact,
         knowledge_corpus=corpus,
@@ -340,7 +323,6 @@ def main() -> int:
             source=args.source,
             fail_on=args.fail_on,
             api_key=args.api_key,
-            api_url=args.api_url,
         )
 
     # ── End-of-eval summary — show every metric + token totals so the
@@ -390,10 +372,6 @@ def main() -> int:
     print()
     print(f"  Full report   : {out_json.relative_to(Path.cwd())}")
     print(f"                  {out_md.relative_to(Path.cwd())}")
-    # Dashboard link (only when --live was passed)
-    live_url = getattr(report, "live_report_url", None)
-    if live_url:
-        print(f"  Dashboard     : {live_url}")
     print()
     return 0
 
