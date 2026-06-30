@@ -1,6 +1,6 @@
 """Live Reporting — regression testing across versions of the same agent.
 
-Builds on examples/12_live_reporting.py. This script demonstrates the
+Builds on examples/09_live_reporting.py. This script demonstrates the
 ProofAgent regression testing flow:
 
   1. You have ONE evaluation project (= one API key = one agent identity).
@@ -31,15 +31,17 @@ so the trend chart fills in run by run.
 Usage
 -----
 
-    # First time: create a project + export key (do this once)
-    # see examples/12_live_reporting.py for the project setup steps
+    # Offline by default — runs the 3-version sweep + writes local reports.
+    # Needs an LLM key for the harness jurors, but NO PROOFAGENT_API_KEY:
+    python examples/10_regression.py
 
+    # Stream each version to your ProofAgent dashboard (opt-in):
+    #   First time: create a project + export key (do this once);
+    #   see examples/09_live_reporting.py for the project setup steps.
     export PROOFAGENT_API_KEY="apk_live_eval_<your_key>"
+    python examples/10_regression.py --live
 
-    # Run the regression simulation (3 versions, 5 turns each)
-    python examples/13_live_reporting_regression.py
-
-    # Refresh your dashboard at:
+    # Then refresh your dashboard at:
     #   https://app.proofagent.ai/dashboard/projects/<your-project-id>
     # See 3 data points on the score trend chart.
 
@@ -60,6 +62,7 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
 from proofagent_harness import AgentContext, AgentResponse, Harness
 
@@ -139,10 +142,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--turns", type=int, default=5,
                    help="Turns per version (default 5 for cheap smoke)")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--live", dest="live", action="store_true", default=False,
+                   help="Stream each version to your ProofAgent dashboard via "
+                        "live_reporting=True (requires PROOFAGENT_API_KEY). "
+                        "Off by default — runs offline + writes local reports.")
+    p.add_argument("--no-live", dest="live", action="store_false",
+                   help="Run offline, no dashboard streaming (the default).")
     p.add_argument("--staging", action="store_true",
-                   help="Use staging API")
+                   help="Use staging API (only meaningful with --live)")
     p.add_argument("--self-hosted", default=None,
-                   help="Self hosted backend URL")
+                   help="Self hosted backend URL (only meaningful with --live)")
     p.add_argument("--list-only", action="store_true",
                    help="Print plan, no API calls")
     return p.parse_args()
@@ -161,9 +170,16 @@ def main() -> int:
         "PROOFAGENT_DASHBOARD_BASE", "https://app.proofagent.ai"
     )
 
-    if not os.environ.get("PROOFAGENT_API_KEY"):
-        print("ERROR: PROOFAGENT_API_KEY is not set. See examples/12_live_reporting.py for setup.")
+    # Live Reporting (streaming to the dashboard) is opt-in via --live and needs
+    # a key. Offline (the default) runs the same regression sweep and writes
+    # local reports — no key, no network.
+    if args.live and not os.environ.get("PROOFAGENT_API_KEY"):
+        print("ERROR: --live set but PROOFAGENT_API_KEY is not set. "
+              "See examples/09_live_reporting.py for setup, or drop --live to "
+              "run offline.")
         return 2
+
+    results_dir = Path(__file__).resolve().parent.parent / "results"
 
     print()
     print("Live Reporting — regression demo")
@@ -171,6 +187,7 @@ def main() -> int:
     print(f"  Versions to evaluate: {len(VERSIONS)}")
     print(f"  Turns per version:    {args.turns}")
     print(f"  Harness LLM:          {args.llm}")
+    print(f"  Mode:                 {'LIVE (streaming to dashboard)' if args.live else 'offline (local reports)'}")
     print()
     for i, v in enumerate(VERSIONS, 1):
         print(f"  {i}. {v['label']}")
@@ -181,6 +198,7 @@ def main() -> int:
         return 0
 
     print()
+    results_dir.mkdir(exist_ok=True)
     scores: list[float] = []
     for i, v in enumerate(VERSIONS, 1):
         print(f"\n══ Running {v['label']}  ({i}/{len(VERSIONS)}) ══")
@@ -189,7 +207,7 @@ def main() -> int:
             turns=args.turns,
             consensus="delphi",
             seed=args.seed,
-            live_reporting=True,
+            live_reporting=args.live,   # offline by default; --live streams
         )
         report = harness.evaluate(
             make_agent(v["refuse_threshold"]),
@@ -204,7 +222,12 @@ def main() -> int:
         )
         score = report.final_score or 0.0
         scores.append(score)
+        # Always write a local report so the offline path is useful too.
+        stem = f"regression_v{i}_{args.llm.replace('/', '_')}_seed{args.seed}"
+        report.to_json(str(results_dir / f"{stem}.json"))
+        report.to_markdown(str(results_dir / f"{stem}.md"))
         print(f"  -> score {score:.1f}/10  ({getattr(report.certification, 'value', report.certification)})")
+        print(f"     report → results/{stem}.json")
         # Brief pause so timestamps in the dashboard are visually distinct
         time.sleep(1)
 
@@ -220,9 +243,14 @@ def main() -> int:
         print(f"  {i}. {v['label']:<35}  {s:>4.1f}/10{delta}")
     print("─" * 50)
     print()
-    print("View the regression chart at:")
-    print(f"  {dashboard_base}/dashboard/projects")
-    print("Click your project to see the 3 data points and per metric trends.")
+    if args.live:
+        print("View the regression chart at:")
+        print(f"  {dashboard_base}/dashboard/projects")
+        print("Click your project to see the 3 data points and per metric trends.")
+    else:
+        print(f"Local reports written to {results_dir}/ (regression_v1..v{len(VERSIONS)}).")
+        print("Re-run with --live (and PROOFAGENT_API_KEY) to populate the dashboard "
+              "regression chart.")
     print()
     return 0
 

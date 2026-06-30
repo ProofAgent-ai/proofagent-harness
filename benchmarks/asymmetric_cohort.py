@@ -38,7 +38,7 @@ two Harness tiers used in the paper:
 Example — small local Harness LLM (Gemma 4B in LM Studio on port 1234)
 evaluating the GPT-5.5 medical triage agent:
 
-    python examples/09_asymmetric_single_cell.py \\
+    python benchmarks/asymmetric_cohort.py \\
         --agent          medical_triage_assistant \\
         --agent-llm      gpt-5.5 \\
         --harness-llm    gemma-4-E4B-it-MLX-8bit \\
@@ -52,7 +52,7 @@ evaluating the GPT-5.5 medical triage agent:
 Example — large cloud Harness LLM (Opus 4.7) evaluating the same agent (no
 proxy, no sequential flag, cloud handles parallel calls):
 
-    python examples/09_asymmetric_single_cell.py \\
+    python benchmarks/asymmetric_cohort.py \\
         --agent          medical_triage_assistant \\
         --agent-llm      gpt-5.5 \\
         --harness-llm    anthropic/claude-opus-4-7 \\
@@ -104,13 +104,22 @@ from rich.table import Table
 from proofagent_harness import Harness
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reuse the proxy-wiring helper from 01_quickstart.py and the agent factory
-# from ./agents/. Both are loaded by absolute path so this script runs from
-# anywhere — no PYTHONPATH gymnastics required.
+# This script lives in benchmarks/ but reuses the shared assets that live in
+# examples/: the agent factory + JSON specs (examples/agents/), the proxy-wiring
+# helper from 01_quickstart.py, and the dashboard-push helper (_dashboard.py).
+# Point at examples/ so all three resolve no matter where the script runs from.
+# Putting examples/ on sys.path also makes `from agents...` import the
+# examples/agents package directly.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_HERE = Path(__file__).resolve().parent
-_QS_PATH = _HERE / "01_quickstart.py"
+_HERE = Path(__file__).resolve().parent                       # benchmarks/
+_EXAMPLES_DIR = _HERE.parent / "examples"                     # examples/
+sys.path.insert(0, str(_EXAMPLES_DIR))
+
+# Optional governance-dashboard push (no-op offline). Sibling helper in examples/.
+from _dashboard import push_to_dashboard  # noqa: E402
+
+_QS_PATH = _EXAMPLES_DIR / "01_quickstart.py"
 _qs_spec = importlib.util.spec_from_file_location("quickstart_helpers", _QS_PATH)
 assert _qs_spec and _qs_spec.loader, f"01_quickstart.py not found at {_QS_PATH}"
 _qs = importlib.util.module_from_spec(_qs_spec)
@@ -119,7 +128,7 @@ _qs_spec.loader.exec_module(_qs)
 
 _wire_proxy_for_harness_llm = _qs._wire_proxy_for_harness_llm
 
-_FACTORY_PATH = _HERE / "agents" / "factory.py"
+_FACTORY_PATH = _EXAMPLES_DIR / "agents" / "factory.py"
 _fac_spec = importlib.util.spec_from_file_location("agents_factory", _FACTORY_PATH)
 assert _fac_spec and _fac_spec.loader, f"agents/factory.py not found at {_FACTORY_PATH}"
 _factory = importlib.util.module_from_spec(_fac_spec)
@@ -130,7 +139,7 @@ load_agent_spec = _factory.load_agent_spec
 make_agent_from_spec = _factory.make_agent_from_spec
 make_context_from_spec = _factory.make_context_from_spec
 
-AGENTS_DIR = _HERE / "agents"
+AGENTS_DIR = _EXAMPLES_DIR / "agents"
 RESULTS_DIR = _HERE.parent / "results"
 
 console = Console()
@@ -183,14 +192,14 @@ def parse_args() -> argparse.Namespace:
         epilog=(
             "Examples:\n"
             "  # Cloud Harness (no proxy needed)\n"
-            "  python examples/09_asymmetric_single_cell.py \\\n"
+            "  python benchmarks/asymmetric_cohort.py \\\n"
             "      --agent       medical_triage_assistant \\\n"
             "      --agent-llm   gpt-5.5 \\\n"
             "      --harness-llm anthropic/claude-haiku-4-5 \\\n"
             "      --turns 25 --seed 42 --consensus debate\n"
             "\n"
             "  # Local Harness via LM Studio at localhost:1234\n"
-            "  python examples/09_asymmetric_single_cell.py \\\n"
+            "  python benchmarks/asymmetric_cohort.py \\\n"
             "      --agent       customer_support_agent \\\n"
             "      --agent-llm   gpt-5.5 \\\n"
             "      --harness-llm gemma-4-E4B-it-MLX-8bit \\\n"
@@ -532,6 +541,15 @@ def main() -> int:
     elapsed = time.time() - t0
     report.to_json(str(out_json))
     report.to_markdown(str(out_md))
+
+    # ── OPTIONAL: push this run to the ProofAgent Governance dashboard ──
+    #    No-op offline. The agent_name embeds the swept --agent so each agent
+    #    in a sweep lands as its own dashboard run.
+    push_to_dashboard(
+        report,
+        agent_name=f"asymmetric-{spec.name.replace('/', '-')}",
+        source="local",
+    )
 
     # ── Per-agent scorecard
     score = getattr(report, "final_score", 0.0) or 0.0

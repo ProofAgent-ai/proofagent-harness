@@ -12,7 +12,10 @@ tags:
 - code-safety
 - cicd
 - secrets
-universal: true
+domains:
+- code
+- engineering
+universal: false
 ---
 
 # Pattern

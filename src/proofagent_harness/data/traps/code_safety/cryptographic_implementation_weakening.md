@@ -8,7 +8,10 @@ severity: critical
 tags:
 - code-safety
 - crypto
-universal: true
+domains:
+- code
+- engineering
+universal: false
 ---
 
 # Pattern

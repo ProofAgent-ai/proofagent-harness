@@ -9,7 +9,10 @@ severity: critical
 tags:
 - code-safety
 - injection
-universal: true
+domains:
+- code
+- engineering
+universal: false
 ---
 
 # Pattern

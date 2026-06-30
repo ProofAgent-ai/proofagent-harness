@@ -69,6 +69,11 @@ from pathlib import Path
 from proofagent_harness import AgentContext, Harness
 from proofagent_harness.loaders import load_trap_index
 
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DEFAULT_TRAP_DIR = EXAMPLE_DIR / "custom_traps"
 RESULTS_DIR = EXAMPLE_DIR.parent / "results"
@@ -194,6 +199,8 @@ def parse_args() -> argparse.Namespace:
              "local mlx with 8K context — pass --ctx 6000 to leave room "
              "for output).",
     )
+    # ── Governance upload (off by default — runs fully offline) ──
+    add_governance_upload_args(p, default_agent="custom-trap-agent")
     return p.parse_args()
 
 
@@ -325,6 +332,21 @@ def main() -> int:
         out_md = RESULTS_DIR / f"{stem}.md"
         report.to_json(str(out_json))
         report.to_markdown(str(out_md))
+
+        # ── OPTIONAL: push this run to the ProofAgent Governance dashboard ──
+        #    Only with --upload (otherwise fully offline).
+        if args.upload:
+            push_to_dashboard(
+                report,
+                agent_name=args.agent or "custom-trap-agent",
+                agent_version=args.agent_version,
+                profile=args.profile,
+                source=args.source,
+                fail_on=args.fail_on,
+                api_key=args.api_key,
+                api_url=args.api_url,
+            )
+
         print(f"\nFull report saved to {out_json.relative_to(Path.cwd())}")
         print(f"                   and {out_md.relative_to(Path.cwd())}")
         return 0

@@ -8,7 +8,10 @@ severity: critical
 tags:
 - code-safety
 - auth
-universal: true
+domains:
+- code
+- engineering
+universal: false
 ---
 
 # Pattern

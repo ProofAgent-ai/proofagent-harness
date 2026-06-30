@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,23 @@ from typing import Any
 import frontmatter
 
 from proofagent_harness.schemas import Persona, Skill, Trap
+
+
+def _env_dirs(var: str) -> list[str]:
+    """Directories from an os.pathsep-separated env var (e.g. premium trap/persona
+    folders dropped on-prem by a delivery bundle). Blank entries are skipped."""
+    return [d for d in os.environ.get(var, "").split(os.pathsep) if d.strip()]
+
+
+def _default_extra_dir(sub: str) -> list[str]:
+    """The conventional on-prem drop dir: $PROOFAGENT_HOME/<sub> (default
+    ~/.proofagent/<sub>). Premium packs installed here (by a delivery bundle's
+    install-traps.sh) load with ZERO config — no env var, no CLI flag."""
+    home = os.environ.get("PROOFAGENT_HOME") or os.path.join(
+        os.path.expanduser("~"), ".proofagent"
+    )
+    d = os.path.join(home, sub)
+    return [d] if os.path.isdir(d) else []
 
 
 def _builtin_root() -> Path:
@@ -56,20 +74,34 @@ def _parse_skill(path: Path) -> Skill:
     )
 
 def load_personas(names: list[str] | None = None) -> list[Persona]:
-    """Load personas by name or path."""
+    """Load personas by name or path.
+
+    Premium/extra personas placed in any dir listed in PROOFAGENT_EXTRA_PERSONAS_DIR
+    (os.pathsep-separated) are auto-appended — this is how an on-prem delivery
+    bundle ships additional jurors that the harness picks up with no code change.
+    """
     if not names:
         names = ["rigorous", "lenient", "contrarian"]
 
+    names = list(names)
+    for d in _env_dirs("PROOFAGENT_EXTRA_PERSONAS_DIR") + _default_extra_dir("personas"):
+        names.extend(str(p) for p in _walk_md(Path(d)))
+
     out: list[Persona] = []
+    seen: set[str] = set()
     for n in names:
         p = Path(n)
         if p.suffix == ".md" and p.exists():
-            out.append(_parse_persona(p))
+            persona = _parse_persona(p)
         else:
             candidate = _builtin_root() / "personas" / f"{n}.md"
             if not candidate.exists():
                 raise FileNotFoundError(f"Persona not found: {n}")
-            out.append(_parse_persona(candidate))
+            persona = _parse_persona(candidate)
+        if persona.name in seen:  # de-dup (built-in wins over same-named extra)
+            continue
+        seen.add(persona.name)
+        out.append(persona)
     return out
 
 def _parse_persona(path: Path) -> Persona:
@@ -90,11 +122,16 @@ def load_traps(
 
     for path in _walk_md(_builtin_root() / "traps"):
         t = _parse_trap(path)
+        t.source = "builtin"
         traps[t.name] = t
 
-    for d in extra_dirs or []:
+    # Explicit extra dirs + any from PROOFAGENT_EXTRA_TRAPS_DIR (premium packs an
+    # on-prem delivery bundle drops on disk). Last write wins → custom overrides
+    # bundled. Tagged "extra" so the planner PRIORITIZES them (curated content).
+    for d in list(extra_dirs or []) + _env_dirs("PROOFAGENT_EXTRA_TRAPS_DIR") + _default_extra_dir("traps"):
         for path in _walk_md(Path(d)):
             t = _parse_trap(path)
+            t.source = "extra"
             traps[t.name] = t
 
     for pack in trap_packs or []:
@@ -103,6 +140,7 @@ def load_traps(
             with resources.as_file(resources.files(pkg).joinpath("traps")) as p:
                 for path in _walk_md(Path(p)):
                     t = _parse_trap(path)
+                    t.source = "pack"
                     traps[t.name] = t
         except (ModuleNotFoundError, FileNotFoundError):
             pass

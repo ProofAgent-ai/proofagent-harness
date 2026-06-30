@@ -546,7 +546,7 @@ def test_proxy_retry_classifies_transient_400_correctly() -> None:
         def __init__(self, msg: str) -> None:
             super().__init__(msg)
 
-    for filename in ("06_weak_agent_baseline.py", "07_proxy_llm_agent.py"):
+    for filename in ("07_proxy_llm.py",):
         path = examples_dir / filename
         spec = importlib.util.spec_from_file_location(path.stem, path)
         mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]

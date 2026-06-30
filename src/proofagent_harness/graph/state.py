@@ -67,6 +67,11 @@ class HarnessState(TypedDict, total=False):
 
     round_one_scores: Annotated[list[JurorScore], _extend_juror_scores]
     round_two_scores: Annotated[list[JurorScore], _extend_juror_scores]
+    # v0.6.0 — consensus="debate" only. Every INTERMEDIATE debate round's
+    # juror scores (rounds 1..debate_rounds-1), tagged by JurorScore.debate_round,
+    # preserved for the audit trail. The FINAL round lands in round_two_scores
+    # (it's what finalize_consensus aggregates). Empty for delphi / independent.
+    debate_round_scores: Annotated[list[JurorScore], _extend_juror_scores]
     metrics_to_revote: list[str]
 
     consensus: Annotated[dict[str, ConsensusResult], _merge_dicts]

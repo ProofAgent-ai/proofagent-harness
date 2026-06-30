@@ -83,6 +83,9 @@ compliance_audit.*
 # Examples scratch dirs
 examples/my_agent_dir/
 examples/results/
+# Sample payload dumped by examples/governance_integration.py when no upload
+# credentials are set — regenerated on every run, not source.
+examples/_governance_payload.sample.json
 
 # Private testing — adversarial-benchmark sweeps, papers, blog drafts, plots.
 # This folder is intentionally excluded from the public proofagent-harness repo.
@@ -105,3 +108,18 @@ testing/artifact/sample_brd_bundle/
 
 # Notebook execution artifacts (from scripts/test_notebooks.py --keep-output)
 notebooks/_executed_*.ipynb
+
+# ── v0.6.0 release prep — INTERNAL, never ship to the public repo ──
+# Planning/review docs (they critique the code) + the dev smoke script.
+/CORE_EVALUATION_REVIEW.md
+/RELEASE_PLAN_v0.6.0.md
+/LOCAL_TEST_PLAN_v0.6.0.md
+/smoke_v0.6.0.sh
+# Throwaway local test agents + stray run outputs.
+/agent.py
+/my_agent.py
+/artifact_report.json
+/artifact_report.md
+/refund_report.json
+/refund_report.md
+/Article_results/

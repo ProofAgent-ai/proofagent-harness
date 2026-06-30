@@ -222,6 +222,22 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {w}")
         lines.append("")
 
+    # ── Compliance mapping (reporter-generated) ──────────────────────
+    _comp = getattr(report, "compliance", None) or {}
+    _fws = _comp.get("frameworks") if isinstance(_comp, dict) else None
+    if _fws:
+        lines.append("## Compliance\n")
+        for fw in _fws:
+            lines.append(f"### {fw.get('name', '')} — {fw.get('score', '?')}% coverage")
+            if fw.get("summary"):
+                lines.append(f"_{fw['summary']}_\n")
+            lines.append("| Control | Status | Rationale |")
+            lines.append("|---|---|---|")
+            for c in fw.get("controls", []):
+                ref = f"{c.get('ref', '')} {c.get('title', '')}".strip()
+                lines.append(f"| {ref} | {c.get('status', '')} | {c.get('rationale', '')} |")
+            lines.append("")
+
     # ── Per-metric scores ────────────────────────────────────────────
     lines.append("## Per-metric scores\n")
     lines.append("| Metric | Score | Confidence | Severity |")

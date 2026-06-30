@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 from proofagent_harness.agents.planner import (
@@ -9,6 +10,7 @@ from proofagent_harness.agents.planner import (
     MIN_DOMAIN_TRAPS,
     MIN_FACTUALITY_TRAPS,
     _difficulty,
+    _infer_domains,
     _is_composite,
     _is_critical,
     _is_factuality,
@@ -79,11 +81,15 @@ def test_protected_class_bias_picked_for_hr() -> None:
 
 
 def test_code_safety_picked_for_code_agents() -> None:
-    """Code-safety traps should fire for code-domain agents."""
+    """Code-domain traps should fire for code-domain agents (the code_safety family
+    is now domain-tagged, so several compete — assert the intent, not 2 names)."""
     traps = load_traps()
     chosen = _select_traps(traps, ["safety"], domains=["code", "engineering"], n=10)
-    chosen_names = {t.name for t in chosen}
-    assert chosen_names & {"malicious_code_generation", "insecure_code_recommendation"}
+    code_traps = [
+        t for t in chosen
+        if t.family == "code_safety" or ("code" in (t.domains or []))
+    ]
+    assert code_traps, f"expected code-domain traps for a code agent, got {[t.name for t in chosen]}"
 
 
 # ─── 30% prompt-injection / hallucination floor ─────────────────────────
@@ -297,3 +303,67 @@ def test_is_composite_classifier() -> None:
     assert _is_composite(by_name["gradual_escalation"])
     # a plain single-shot trap is not composite
     assert not _is_composite(by_name["pricing_manipulation"])
+
+
+# ─── Floors must not leak OTHER verticals' specific traps ────────────────────
+
+
+def test_floors_do_not_leak_offdomain_specific_traps() -> None:
+    """Regression: the factuality / critical-share / metric-coverage floors must
+    not pull another vertical's domain-specific traps (healthcare dosage, devops
+    k8s, HIPAA) into an unrelated support/retail run. Universal cross-cutting
+    traps (jailbreak, abuse) are still allowed."""
+    traps = load_traps()
+    domains = ["support", "retail", "b2c"]
+    chosen = _select_traps(
+        traps,
+        ["safety", "task_success", "hallucination_resistance"],
+        domains=domains,
+        n=12,
+    )
+    names = {t.name for t in chosen}
+    leaks = {
+        "medical_dosage_unit_conversion_fatal_error",
+        "kubernetes_exec_shell_privilege_chain",
+        "supply_chain_dependency_confusion",
+        "hipaa_phi_exposure",
+    }
+    assert not (names & leaks), f"off-domain vertical traps leaked via floors: {names & leaks}"
+
+    # No ineligible (off-domain, non-universal) trap should be selected when
+    # eligible alternatives exist (they do, for a rich support/retail library).
+    dset = set(domains)
+    ineligible = [
+        t.name for t in chosen
+        if t.domains and not t.universal and not (set(t.domains) & dset)
+    ]
+    assert not ineligible, f"ineligible off-domain traps selected: {ineligible}"
+
+    # …and the coverage floors are still satisfied.
+    assert sum(1 for t in chosen if _is_critical(t)) >= math.ceil(12 * 0.30)
+    assert sum(1 for t in chosen if _is_factuality(t)) >= MIN_FACTUALITY_TRAPS
+
+
+# ─── Domain inference is LLM-first; method is auditable ──────────────────────
+
+
+def test_infer_domains_keyword_fallback_reports_method() -> None:
+    """With no LLM available, inference falls back to keywords and reports it."""
+    state = {
+        "role": "Airline refund and booking support agent",
+        "business_case": "",
+        "goal": "",
+        "llm": None,
+        "context": None,
+    }
+    domains, method = asyncio.run(_infer_domains(state))
+    assert method == "keywords"
+    assert {"support", "retail", "b2c"} & set(domains)
+
+
+def test_infer_domains_none_when_no_signal() -> None:
+    """No role/business-case/goal and no LLM → no domains, method 'none'."""
+    state = {"role": "", "business_case": "", "goal": "", "llm": None, "context": None}
+    domains, method = asyncio.run(_infer_domains(state))
+    assert domains == []
+    assert method == "none"

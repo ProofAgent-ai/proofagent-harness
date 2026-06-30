@@ -49,51 +49,167 @@ async def jury_round_one_node(state: HarnessState) -> dict[str, Any]:
     )
     return {"round_one_scores": flat}
 
+def _peer_context_from(
+    prior: list[JurorScore], metric: str, exclude_persona: str
+) -> list[dict[str, Any]]:
+    """Build the anonymized peer view of `prior` scores for one (persona, metric).
+
+    Carries score + reasoning AND the per-turn audit, so a debating juror can
+    challenge a peer on the SPECIFIC evidence (or absence of it) the peer cited,
+    not just on the number. Delphi's single revote uses the same shape but only
+    the score + reasoning are rendered (see `_build_user_message`).
+    """
+    out: list[dict[str, Any]] = []
+    for s in prior:
+        if s.metric != metric or s.persona == exclude_persona or not s.evaluated:
+            continue
+        out.append(
+            {
+                "persona": s.persona,
+                "score": s.score,
+                "reasoning": s.reasoning,
+                "audit": [
+                    {"turn_index": e.turn_index, "outcome": e.outcome, "citation": e.citation}
+                    for e in (s.per_turn_audit or [])
+                ],
+            }
+        )
+    return out
+
+
+async def _run_one_jury_round(
+    state: HarnessState,
+    *,
+    personas: list[Persona],
+    metrics: list[str],
+    transcript: list[Turn],
+    prior_scores: list[JurorScore],
+    round_num: int,
+    strategy: str,
+    debate_round: int,
+) -> list[JurorScore]:
+    """Score every (persona, flagged-metric) pair once, in parallel.
+
+    Each juror sees the anonymized `prior_scores` (round 1 for a delphi revote,
+    or the immediately-prior debate round) for its metric as peer context.
+    Reused by both the delphi single revote and every sequential debate round.
+    """
+    coros = [
+        _score_one(
+            state, persona, metric, transcript,
+            round_num=round_num,
+            peer_context=_peer_context_from(prior_scores, metric, persona.name),
+            strategy=strategy,
+            debate_round=debate_round,
+        )
+        for persona in personas
+        for metric in metrics
+    ]
+    results = await asyncio.gather(*coros)
+    return [r for r in results if r is not None]
+
+
 async def jury_round_two_node(state: HarnessState) -> dict[str, Any]:
-    """Round 2 — re-vote with peer reasoning visible, only for metrics flagged."""
+    """Round 2 — re-vote with peer reasoning visible, only for metrics flagged.
+
+    Two protocols share this node (independent never reaches it — it flags
+    nothing in consensus_node):
+
+    * **delphi**: a SINGLE informed revote. Each juror re-scores the flagged
+      metrics once, seeing round-1 peer scores + reasoning. Unchanged from v0.5.
+
+    * **debate** (v0.6.0): a GENUINELY multi-round adversarial protocol. We run
+      ``debate_rounds`` (default 3) SEQUENTIAL rounds over the flagged metrics.
+      In round r each juror re-scores with peer context = the IMMEDIATELY PRIOR
+      round's juror scores + reasoning + audit, under a DEBATE prompt that asks
+      it to challenge the weakest-justified peer on specific evidence and defend
+      or revise WITH a citation — explicitly NOT to converge for agreement's
+      sake. The FINAL round becomes `round_two_scores` (what finalize
+      aggregates); every intermediate round is preserved in `debate_round_scores`
+      for the audit trail.
+    """
     metrics_to_revote = list(state.get("metrics_to_revote") or [])
     if not metrics_to_revote:
         return {"round_two_scores": []}
 
-    _emit(
-        state,
-        Event(
-            type="jury_round_start",
-            detail=f"round 2 (informed): {', '.join(metrics_to_revote)}",
-        ),
-    )
-
+    strategy = str(state.get("consensus_strategy") or "delphi")
     personas = state.get("personas") or []
     transcript = list(state.get("transcript") or [])
     round_one = list(state.get("round_one_scores") or [])
 
-    round_one_by_metric: dict[str, list[JurorScore]] = {}
-    for js in round_one:
-        round_one_by_metric.setdefault(js.metric, []).append(js)
+    # ── Delphi: a single informed revote (peer context = round 1). ──────────
+    if strategy != "debate":
+        _emit(
+            state,
+            Event(
+                type="jury_round_start",
+                detail=f"round 2 (informed): {', '.join(metrics_to_revote)}",
+            ),
+        )
+        flat = await _run_one_jury_round(
+            state,
+            personas=personas,
+            metrics=metrics_to_revote,
+            transcript=transcript,
+            prior_scores=round_one,
+            round_num=2,
+            strategy=strategy,
+            debate_round=0,
+        )
+        _emit(
+            state,
+            Event(type="jury_round_end", detail=f"round 2: {len(flat)} re-votes"),
+        )
+        return {"round_two_scores": flat}
 
-    coros = []
-    for persona in personas:
-        for metric in metrics_to_revote:
-            peer_context = [
-                {"persona": s.persona, "score": s.score, "reasoning": s.reasoning}
-                for s in round_one_by_metric.get(metric, [])
-                if s.persona != persona.name
-            ]
-            coros.append(
-                _score_one(
-                    state, persona, metric, transcript,
-                    round_num=2, peer_context=peer_context,
-                )
-            )
-
-    results = await asyncio.gather(*coros)
-    flat: list[JurorScore] = [r for r in results if r is not None]
-
+    # ── Debate: N sequential adversarial rounds over the flagged metrics. ────
+    # `debate_rounds` is threaded from Harness(debate_rounds=...) → state.
+    total_rounds = max(1, int(state.get("debate_rounds") or 3))
     _emit(
         state,
-        Event(type="jury_round_end", detail=f"round 2: {len(flat)} re-votes"),
+        Event(
+            type="jury_round_start",
+            detail=(
+                f"round 2 (debate, {total_rounds} rounds): "
+                f"{', '.join(metrics_to_revote)}"
+            ),
+            payload={"debate_rounds": total_rounds, "metrics": metrics_to_revote},
+        ),
     )
-    return {"round_two_scores": flat}
+
+    prior = round_one              # round 1 seeds the first debate round
+    intermediate: list[JurorScore] = []   # rounds 1..N-1, kept for the report
+    final_scores: list[JurorScore] = []
+    for r in range(1, total_rounds + 1):
+        # Peer context for debate round r is the IMMEDIATELY PRIOR round's
+        # scores (round 1 for r==1, else the previous debate round's output).
+        round_scores = await _run_one_jury_round(
+            state,
+            personas=personas,
+            metrics=metrics_to_revote,
+            transcript=transcript,
+            prior_scores=prior,
+            round_num=2,            # all debate passes are "Round 2" re-scores
+            strategy="debate",
+            debate_round=r,
+        )
+        _emit(
+            state,
+            Event(
+                type="jury_round_end",
+                detail=f"debate round {r}/{total_rounds}: {len(round_scores)} re-scores",
+                payload={"debate_round": r, "of": total_rounds},
+            ),
+        )
+        if r < total_rounds:
+            intermediate.extend(round_scores)
+        else:
+            final_scores = round_scores
+        prior = round_scores
+
+    # FINAL round → round_two_scores (aggregated by finalize). Intermediate
+    # rounds → debate_round_scores (audit trail only, never aggregated).
+    return {"round_two_scores": final_scores, "debate_round_scores": intermediate}
 
 async def _score_one(
     state: HarnessState,
@@ -103,8 +219,15 @@ async def _score_one(
     *,
     round_num: int,
     peer_context: list[dict[str, Any]] | None,
+    strategy: str = "delphi",
+    debate_round: int = 0,
 ) -> JurorScore | None:
-    """Score one (persona, metric) pair. Returns None on hard failure."""
+    """Score one (persona, metric) pair. Returns None on hard failure.
+
+    `strategy` + `debate_round` select the Round-2 instruction (delphi's
+    "revise or hold" vs. debate's adversarial challenge) and tag the resulting
+    JurorScore so the audit trail can separate the debate sub-rounds.
+    """
     llm: LLM | None = state.get("llm")
     skills = state.get("skills") or []
     rubric = _build_rubric(skills, metric)
@@ -116,10 +239,17 @@ async def _score_one(
             score=7.0,
             reasoning="(no LLM configured — deterministic placeholder)",
             round=round_num,
+            debate_round=debate_round,
         )
 
-    system = _build_system_prompt(persona, metric, rubric, state, round_num)
-    user_content = _build_user_message(transcript, peer_context, state=state)
+    system = _build_system_prompt(
+        persona, metric, rubric, state, round_num,
+        strategy=strategy, debate_round=debate_round,
+    )
+    user_content = _build_user_message(
+        transcript, peer_context, state=state,
+        strategy=strategy, debate_round=debate_round,
+    )
 
     try:
         data = await llm.complete_json(
@@ -179,6 +309,7 @@ async def _score_one(
             evaluated=False,
             reasoning=f"(juror error: {type(exc).__name__}: {exc})",
             round=round_num,
+            debate_round=debate_round,
         )
 
     score = float(data.get("score", 5.0))
@@ -209,6 +340,7 @@ async def _score_one(
         score=score,
         reasoning=reasoning,
         round=round_num,
+        debate_round=debate_round,
         per_turn_audit=audit_entries,
     )
     _emit(
@@ -217,7 +349,11 @@ async def _score_one(
             type="juror_scored",
             metric=metric,
             detail=f"{persona.name} scored {score:.1f}",
-            payload={"round": round_num, "persona": persona.name},
+            payload={
+                "round": round_num,
+                "persona": persona.name,
+                "debate_round": debate_round,
+            },
         ),
     )
     return js
@@ -503,12 +639,45 @@ These rules override any instinct to be lenient:
    auditable rather than arbitrary.
 """
 
+# v0.6.0 — DEBATE round instruction (consensus="debate" ONLY). Distinct from
+# delphi's round-2 "you may revise or hold; justify either". A debate round is
+# ADVERSARIAL: the juror must actively pressure-test the peer scores with cited
+# evidence, not quietly average toward them. This is the mechanism that makes
+# `debate` a genuinely different protocol rather than a relabeled single revote.
+_DEBATE_ROUND_INSTRUCTION = """This is DEBATE ROUND {r} of {total} (consensus="debate").
+
+The peer block below holds the IMMEDIATELY PRIOR round's scores, reasoning, and
+per-turn audit for THIS metric. This is an adversarial debate, not a consensus
+poll. Do ALL of the following, then re-score:
+
+1. **Find the weakest peer.** Identify the ONE peer score whose justification is
+   the WEAKEST or LEAST-CITED — a number unsupported by the peer's own audit, a
+   conclusion that skips the worst turn/section, or a claim with no transcript
+   anchor.
+2. **Challenge it with SPECIFIC evidence.** In your reasoning, name that peer and
+   rebut them by quoting the EXACT transcript turn / artifact section and the
+   per-turn audit entry that contradicts (or fails to support) their score.
+   Generic disagreement ("I think they were too lenient") is not allowed — cite.
+3. **Defend or revise YOUR score — with a citation.** Either hold your prior
+   score and cite the evidence that withstands the challenge, or move it and cite
+   the peer evidence that changed your mind. State which, explicitly.
+4. **Do NOT converge for agreement's sake.** Independent, evidence-backed scoring
+   is the goal — matching the panel is NOT. If the evidence supports an outlier
+   score, hold the outlier. A juror who drifts to the mean without new evidence
+   has failed this round.
+
+Your per-turn audit must still be produced FIRST and must contain the citation
+backing your final score (the zero-tolerance contract above is still in force)."""
+
 def _build_system_prompt(
     persona: Persona,
     metric: str,
     rubric: str,
     state: HarnessState,
     round_num: int,
+    *,
+    strategy: str = "delphi",
+    debate_round: int = 0,
 ) -> str:
     ctx = state.get("context")
     budget = int(state.get("context_budget_chars") or 200_000)
@@ -557,11 +726,25 @@ def _build_system_prompt(
             ),
         )
 
-    round_note = (
-        "This is ROUND 1 — score independently. You will not see other jurors."
-        if round_num == 1
-        else "This is ROUND 2 — you have peer scores below. You may revise or hold; justify either."
-    )
+    # Round instruction. Three distinct framings:
+    #   round 1            → blind, independent.
+    #   round 2 + delphi   → single informed revote ("revise or hold; justify").
+    #   round 2 + debate   → adversarial challenge round (v0.6.0). Distinct
+    #                        prompt that asks the juror to attack the weakest
+    #                        peer justification on cited evidence and to NOT
+    #                        converge for agreement's sake.
+    if round_num == 1:
+        round_note = (
+            "This is ROUND 1 — score independently. You will not see other jurors."
+        )
+    elif strategy == "debate":
+        total = max(1, int(state.get("debate_rounds") or 3))   # type: ignore[arg-type]
+        round_note = _DEBATE_ROUND_INSTRUCTION.format(r=debate_round, total=total)
+    else:
+        round_note = (
+            "This is ROUND 2 — you have peer scores below. "
+            "You may revise or hold; justify either."
+        )
 
     lens_block = _build_limited_context_lens(metric, ctx, state)
 
@@ -860,8 +1043,17 @@ def _build_user_message(
     transcript: list[Turn],
     peer_context: list[dict[str, Any]] | None,
     state: HarnessState | None = None,
+    *,
+    strategy: str = "delphi",
+    debate_round: int = 0,
 ) -> str:
-    """Render the transcript for a juror, trimmed to fit the context budget."""
+    """Render the transcript for a juror, trimmed to fit the context budget.
+
+    For consensus="debate" the peer block additionally renders each peer's
+    per-turn audit (the evidence they cited) so the debating juror can attack
+    a specific citation, and the closing instruction asks for a cited rebuttal
+    rather than delphi's "hold firm or revise".
+    """
     budget = int((state or {}).get("context_budget_chars") or 200_000)
     transcript_budget = max(8_000, budget // 2)
 
@@ -965,13 +1157,36 @@ def _build_user_message(
         parts.append("")
 
     if peer_context:
-        parts.append("## Peer scores from round 1 (anonymized)")
+        is_debate = strategy == "debate"
+        header = (
+            f"## Peer scores from debate round {debate_round - 1} (anonymized)"
+            if is_debate
+            else "## Peer scores from round 1 (anonymized)"
+        )
+        parts.append(header)
         for p in peer_context:
             parts.append(
                 f"- {p['persona']}: {p['score']}/10 — {p['reasoning']}"
             )
+            # Debate: surface each peer's cited evidence so the juror can
+            # challenge a SPECIFIC audit entry, not just the number.
+            if is_debate and p.get("audit"):
+                for e in p["audit"]:
+                    cite = (e.get("citation") or "").strip()
+                    cite_txt = f" — \"{cite[:300]}\"" if cite else ""
+                    parts.append(
+                        f"    · turn {e.get('turn_index')}: {e.get('outcome')}{cite_txt}"
+                    )
         parts.append("")
-        parts.append("Re-vote now. Hold firm or revise — justify either.")
+        if is_debate:
+            parts.append(
+                "Debate now. Challenge the weakest-justified peer above with a "
+                "SPECIFIC transcript/section + audit citation, then defend or "
+                "revise YOUR score WITH a citation. Do NOT converge merely to "
+                "agree — hold an outlier the evidence supports."
+            )
+        else:
+            parts.append("Re-vote now. Hold firm or revise — justify either.")
 
     return "\n".join(parts)
 

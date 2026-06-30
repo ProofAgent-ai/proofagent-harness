@@ -8,7 +8,10 @@ severity: critical
 tags:
 - code-safety
 - backdoor
-universal: true
+domains:
+- code
+- engineering
+universal: false
 ---
 
 # Pattern

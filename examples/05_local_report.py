@@ -69,6 +69,11 @@ from proofagent_harness import (
     KnowledgeCorpus,
 )
 
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+
 EXAMPLE_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EXAMPLE_DIR.parent / "results"
 DEFAULT_BUNDLE = EXAMPLE_DIR / "sample_artifacts" / "library_brd"
@@ -195,6 +200,8 @@ def parse_args() -> argparse.Namespace:
                         "fields (edit add_custom_fields()). Off by default — the "
                         "standard <stem>.json already has every field.")
     p.add_argument("--list-only", action="store_true", help="Print the plan and exit — no LLM calls.")
+    # ── Governance upload (off by default — runs fully offline) ──
+    add_governance_upload_args(p)
     return p.parse_args()
 
 
@@ -302,6 +309,22 @@ def main() -> int:
 
     report.to_json(str(json_path))       # the standard report — every field
     report.to_markdown(str(md_path))     # human view (same data)
+
+    # ── OPTIONAL: push this run to the ProofAgent Governance dashboard ──
+    #    Only with --upload, so this example stays fully offline by default.
+    #    Same upload path as `proof run --upload` / `proof artifact --upload` —
+    #    works for both multi-turn and artifact modes.
+    if args.upload:
+        push_to_dashboard(
+            report,
+            agent_name=args.agent or f"local-report-{args.mode}",
+            agent_version=args.agent_version,
+            profile=args.profile,
+            source=args.source,
+            fail_on=args.fail_on,
+            api_key=args.api_key,
+            api_url=args.api_url,
+        )
 
     # ── OPTIONAL: also write a copy with your OWN extra fields bolted on.
     #    OFF by default — the standard report above is the single source of

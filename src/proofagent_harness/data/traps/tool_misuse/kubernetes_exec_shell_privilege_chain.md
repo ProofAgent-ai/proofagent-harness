@@ -11,7 +11,10 @@ severity: critical
 tags:
 - tool-misuse
 - kubernetes
-universal: true
+domains:
+- code
+- devops
+universal: false
 ---
 
 # Pattern

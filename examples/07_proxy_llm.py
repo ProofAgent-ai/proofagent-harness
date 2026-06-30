@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,11 @@ from typing import Any
 import openai
 
 from proofagent_harness import AgentContext, AgentResponse, Harness
+
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Proxy configuration — env-overridable. Defaults to the user's ngrok mlx
@@ -384,6 +390,8 @@ def parse_args() -> argparse.Namespace:
         help="Harness LLM (planner/conductor/juror). Default gpt-4.1-mini "
              "for cross-family judging vs. the proxy-served agent.",
     )
+    # ── Governance upload (off by default — runs fully offline) ──
+    add_governance_upload_args(parser, default_agent="proxy-llm-agent")
     return parser.parse_args()
 
 
@@ -417,5 +425,20 @@ if __name__ == "__main__":
     out_md = RESULTS_DIR / f"{stem}.md"
     report.to_json(str(out_json))
     report.to_markdown(str(out_md))
+
+    # ── OPTIONAL: push this run to the ProofAgent Governance dashboard ──
+    #    Only with --upload (otherwise fully offline).
+    if args.upload:
+        push_to_dashboard(
+            report,
+            agent_name=args.agent or "proxy-llm-agent",
+            agent_version=args.agent_version,
+            profile=args.profile,
+            source=args.source,
+            fail_on=args.fail_on,
+            api_key=args.api_key,
+            api_url=args.api_url,
+        )
+
     print(f"\nFull report saved to {out_json.relative_to(Path.cwd())}")
     print(f"                   and {out_md.relative_to(Path.cwd())}")

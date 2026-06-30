@@ -1,549 +1,821 @@
-# ProofAgent Harness Examples
+# ProofAgent Harness — Examples
 
-Runnable examples for every pattern the harness supports. Each example is
-self-contained and prints a final scorecard. This README covers shared setup
-once, then a per-example section with what it shows, how to run it, and the
-flags that matter.
+Runnable, self-contained examples for every pattern the harness supports. Each
+one is a single file you can run as-is after cloning, each writes a standard
+local report (`results/<run-id>.json` + `.md`), and **each runs fully offline by
+default** — no ProofAgent account, no network. Pass `--upload` to *also* push the
+finished run to the ProofAgent Governance dashboard and get back a release-gate
+decision. The examples were curated so every harness knob is a real `argparse`
+flag — the per-example **Arguments** tables below are taken verbatim from each
+script's `--help`.
 
-## Contents
-
-| File | Use case |
-|---|---|
-| [`01_quickstart.py`](01_quickstart.py) | Canonical 10-line benchmark across LLM families |
-| [`02_pytest_integration.py`](02_pytest_integration.py) | Drop-in pytest assertion for CI |
-| [`03_stateful_agent_with_response.py`](03_stateful_agent_with_response.py) | Closure-based stateful agent returning `AgentResponse` |
-| [`04_with_full_context.py`](04_with_full_context.py) | `AgentContext.from_dir()` auto-discovery |
-| [`05_compliance_focused.py`](05_compliance_focused.py) | Restrict scoring to compliance-tagged traps |
-| [`06_weak_agent_baseline.py`](06_weak_agent_baseline.py) | Calibration check — verify the harness discriminates |
-| [`07_proxy_llm_agent.py`](07_proxy_llm_agent.py) | Self-hosted agent on a local OpenAI-compatible proxy |
-| [`08_custom_trap.py`](08_custom_trap.py) | Bring-your-own-trap with `--trap PATH` |
-| [`09_asymmetric_single_cell.py`](09_asymmetric_single_cell.py) | Small local Harness LLM vs frontier agent across four bundled domains |
-| [`10_load_custom_traps.py`](10_load_custom_traps.py) | **Trap loader inspection** — minimal demo of `load_traps()` + `TrapIndex` (no LLM calls) |
-| [`11_live_trace_evaluation.py`](11_live_trace_evaluation.py) | **Advanced / observability** — live per-turn trace (trap card + Q + A + cumulative coverage) for debugging *why* an agent failed. Shares `examples/agents/*.json` with `09_*`. |
-| [`12_live_reporting.py`](12_live_reporting.py) | **Live Reporting** — stream an in-progress eval to the proofagent.ai dashboard in real time. Free API key. |
-| [`13_live_reporting_regression.py`](13_live_reporting_regression.py) | **Live Reporting — regression** — compare versions of the same agent on one project; per-metric deltas surface in the dashboard. |
-| [`14_live_reporting_smoke_test.py`](14_live_reporting_smoke_test.py) | **Live Reporting smoke test** — exercise every reporting endpoint against the backend end-to-end. No LLM keys required. |
-| [`15_pytest_fixture.py`](15_pytest_fixture.py) | **Pytest fixture** — the canonical pattern for shipping Live Reporting inside a large customer pytest suite. |
-| [`16_load_test_reporter.py`](16_load_test_reporter.py) | **Load test** — proves the async BackgroundReporter holds up under burst load (overflow-drop-oldest, non-blocking). |
-| [`17_artifact_eval.py`](17_artifact_eval.py) | **Artifact mode** — score a pre-generated BRD / code / report / architecture doc against a knowledge corpus (no live agent needed). Bundled fully-fictional library BRD example runs as-is after clone. |
-| [`18_local_report_extend.py`](18_local_report_extend.py) | **Local report** — run the harness fully offline and write one standard JSON + Markdown report to disk. No ProofAgent API key. |
-| [`agents/`](agents/) | Four production-style domain agent specs + multi-provider factory |
-| [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled BRD + knowledge corpus used by `17_artifact_eval.py` |
-| [`custom_traps/`](custom_traps/) | Sample trap used by `08_custom_trap.py` |
+> New here? Start with [`01_quickstart.py`](01_quickstart.py) (multi-turn) or
+> [`04_artifact_eval.py`](04_artifact_eval.py) (score a pre-written doc), then
+> [`02_agent_with_tools.py`](02_agent_with_tools.py) for the full
+> "evaluate my real tool-using agent" template.
 
 ---
 
 ## Common setup (do this once)
 
-### 1. Install the package
+### 1. Install
 
 ```bash
 pip install proofagent-harness
 ```
 
-For source / development checkouts:
+Artifact mode for **non-Markdown** inputs (PDF / DOCX / HTML / images /
+notebooks) needs extra parsers — install the optional extra:
+
+```bash
+pip install "proofagent-harness[artifact]"   # only needed for 04/05 on .pdf/.docx/.html
+```
+
+Source / development checkout:
 
 ```bash
 git clone https://github.com/ProofAgent-ai/proofagent-harness
 cd proofagent-harness
-pip install -e .
+pip install -e ".[artifact]"
 ```
 
-### 2. Export the API keys you'll use
+### 2. Export the provider keys you'll use
 
-Mix and match — the agent under test and the Harness LLM can come from
-different providers. You only need the keys for the providers you actually
-call.
+The agent under test and the harness LLM (the jury) can come from **different
+providers** — export only the keys for the providers you actually call.
 
 ```bash
-export OPENAI_API_KEY=sk-...           # gpt-* agents or Harness LLM
-export ANTHROPIC_API_KEY=sk-ant-...    # claude-* / anthropic/* agents or Harness LLM
-export GEMINI_API_KEY=...              # gemini/* agents or Harness LLM
+export OPENAI_API_KEY=sk-...           # gpt-* agents or harness LLM
+export ANTHROPIC_API_KEY=sk-ant-...    # claude-* / anthropic/* agents or harness LLM
+export GEMINI_API_KEY=...              # gemini/* agents or harness LLM
 ```
 
-### 3. (Optional) Local OpenAI-compatible proxy for the Harness LLM
+> **Provider prefixes.** If LiteLLM can't infer the provider from a bare model
+> name, prefix it: `anthropic/claude-haiku-4-5`, `gemini/gemini-2.5-pro`. OpenAI
+> `gpt-*` ids work unprefixed.
 
-Needed only for examples that route the Harness LLM through a local model
-(7, 9, and 8 with `--proxy-url`). Any OpenAI-compatible server works:
+### 3. (Optional) Local OpenAI-compatible proxy for the harness LLM
+
+Only the proxy examples (07, 08) and any run that passes `--proxy-url` (01, 06)
+route the **harness LLM** through a local model. Any OpenAI-compatible server
+works:
 
 | Server | Default URL | Notes |
 |---|---|---|
-| **LM Studio** | `http://localhost:1234/v1` | GUI + CLI (`lms load <model>`). Single-threaded — pair with `--sequential`. |
+| **LM Studio** | `http://localhost:1234/v1` | GUI + CLI (`lms load <model>`). Single-threaded — pair with `--sequential` where the example offers it. |
 | **Ollama** | `http://localhost:11434/v1` | `ollama serve` then `ollama pull <model>`. Single-threaded by default. |
-| **vLLM** | `http://localhost:8000/v1` | `vllm serve <model>`. Real parallelism, no `--sequential` needed. |
+| **vLLM** | `http://localhost:8000/v1` | `vllm serve <model>`. Real parallelism. |
 | **mlx-lm** | varies | `mlx_lm.server --model <hf-repo>` on Apple Silicon. |
 
-Verify the proxy is reachable and note the exact model id:
+Verify the proxy and note the exact model id (the `id` field is the literal
+string to pass as the model name):
 
 ```bash
 curl http://localhost:1234/v1/models | python3 -m json.tool
 ```
 
-The `id` field in the response is the literal string to pass to
-`--harness-llm` or `--llm`.
+### 4. Pushing to the dashboard
+
+Examples **01–08** and **12** share one uniform **governance upload** flag group,
+registered by [`_dashboard.py:add_governance_upload_args`](_dashboard.py). It is
+**off by default** — runs stay offline and write only the local report. Add
+`--upload` to push the *finished* report to the **ProofAgent Governance API**
+(the same path as `proof run --upload`): it builds the payload, POSTs it, prints
+the gate decision (`pass` / `review` / `block`) and a dashboard URL, and works
+for **both** multi-turn and artifact runs.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--upload` / `--no-upload` | `--no-upload` (offline) | Push the finished run to the Governance API and print the gate decision. |
+| `--api-key KEY` | env `PROOFAGENT_API_KEY` | Governance API key. The flag wins over the env var. |
+| `--api-url URL` | env `PROOFAGENT_API_BASE_URL`, then ProofAgent Cloud | API base URL. Override only for Enterprise / on-prem. |
+| `--agent NAME` | per-example | Logical agent name — groups runs + regressions in the dashboard. |
+| `--agent-version VER` | none | Version / git ref of the agent under test. |
+| `--profile SLUG` | none | Governance profile slug to gate against (e.g. `airline_customer_support`). |
+| `--fail-on {pass,review,block}` | `block` | Which gate decision fails the build (advisory exit code; examples 01–11 do not `sys.exit` on it, 12 does). |
+| `--source {local,ci_cd,manual,api,scheduled}` | `local` | Origin of the run, recorded in the dashboard. |
+
+The base URL defaults to **ProofAgent Cloud**, so for Cloud you only need a key:
+
+```bash
+# either pass the flag…
+python examples/01_quickstart.py --upload --api-key pa_live_...
+# …or export it and just pass --upload
+export PROOFAGENT_API_KEY=pa_live_...
+python examples/01_quickstart.py --upload
+```
+
+Get a key from the Governance dashboard → **Settings → API Keys**. For on-prem,
+add `--api-url https://proofagent.acme.internal` (or export
+`PROOFAGENT_API_BASE_URL`).
+
+> **Note — examples 09 and 10 are different.** They demonstrate **Live
+> Reporting**, which *streams turns in real time* during the run. They use
+> `--live` / `--no-live` (plus `--staging` / `--self-hosted`), **not** the
+> `--upload` group above. Use `--upload` to gate a *finished* report; use Live
+> Reporting to *watch* a run as it happens.
 
 ---
 
-## `01_quickstart.py` — canonical benchmark
+## Contents
 
-**What it shows.** The 10-line quickstart with a real agent (default
-Anthropic Claude over the AcmeAir refund policy). Supports cross-family
-judging — the agent and the Harness LLM (called the "judge" in this
-script) can come from different providers.
+| File | What it shows | Mode | Pushes via |
+|---|---|---|---|
+| [`01_quickstart.py`](01_quickstart.py) | Canonical N-turn adversarial eval of a refund agent with full `AgentContext`; cross-family agent vs harness LLM | multi-turn | `--upload` |
+| [`02_agent_with_tools.py`](02_agent_with_tools.py) | The reference for evaluating **your** tool-using agent — real OpenAI function-calling agent, tool schemas + knowledge handed to the jury | multi-turn | `--upload` |
+| [`03_full_context.py`](03_full_context.py) | Ground every juror in your agent's real contract via `AgentContext.from_dir()` (system prompt + knowledge + tools) | multi-turn | `--upload` |
+| [`04_artifact_eval.py`](04_artifact_eval.py) | Score a **pre-generated** artifact (BRD / code / report / arch doc) against a knowledge corpus — single-turn, no live agent | artifact | `--upload` |
+| [`05_local_report.py`](05_local_report.py) | Run fully offline and write the one standard JSON + Markdown report; supports **both** modes | both | `--upload` |
+| [`06_custom_traps.py`](06_custom_traps.py) | Bring-your-own adversarial traps merged into the bundled library via `--trap` | multi-turn | `--upload` |
+| [`07_proxy_llm.py`](07_proxy_llm.py) | Evaluate an agent served by a local / self-hosted OpenAI-compatible proxy | multi-turn | `--upload` |
+| [`08_live_trace.py`](08_live_trace.py) | **Observability** — live per-turn trace (trap card + Q + A + cumulative coverage) for debugging *why* an agent failed | multi-turn | `--upload` |
+| [`09_live_reporting.py`](09_live_reporting.py) | **Live Reporting** — stream an in-progress eval to the dashboard in real time | multi-turn | `--live` |
+| [`10_regression.py`](10_regression.py) | **Live Reporting — regression** — sweep versions of one agent; per-metric deltas surface in the dashboard | multi-turn | `--live` |
+| [`11_pytest_ci.py`](11_pytest_ci.py) | Drop-in **pytest** assertion for CI; thresholds via env vars; optional governance gate | multi-turn | helper (env) |
+| [`12_governance_gate.py`](12_governance_gate.py) | **Governance gate** — turn a saved report into a release decision (pass / review / block); no LLM key | n/a (reads a report) | `--upload` |
+| [`report_viewer.py`](report_viewer.py) | Utility — render a saved report `.json` as a standalone offline HTML dashboard | n/a | — |
+| [`_dashboard.py`](_dashboard.py) | Helper — the shared `--upload` flag group + `push_to_dashboard()` (imported, not run) | n/a | — |
+| [`agents/`](agents/) | Five production-style domain agent specs + a multi-provider factory (used by 08 and the benchmark) | — | — |
+| [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled fictional BRD + knowledge corpus used by `04_artifact_eval.py` | — | — |
+| [`custom_traps/`](custom_traps/) | Sample trap used by `06_custom_traps.py` | — | — |
+
+---
+
+## `01_quickstart.py` — canonical multi-turn benchmark
+
+**What it shows.** An N-turn adversarial evaluation of an OpenAI `gpt-4.1` refund
+agent with a full `AgentContext` (system prompt + tools + knowledge corpus). The
+agent and harness LLM can come from different providers (cross-family judging);
+`--proxy-url` redirects only the harness LLM to a local proxy.
+
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-# Default (Anthropic agent, Claude judge)
-python examples/01_quickstart.py
+# Offline (default — Anthropic Sonnet jury vs the gpt-4.1 agent), writes a local report
+python examples/01_quickstart.py --turns 8
 
-# Head-to-head benchmark — OpenAI agent, Anthropic judge (cross-family)
+# Cross-family head-to-head: gpt-4.1 agent, cheap Anthropic harness LLM
 python examples/01_quickstart.py --turns 15 --consensus debate \
   --agent-model gpt-4.1 --llm anthropic/claude-haiku-4-5
 
-# Cheap smoke test
-python examples/01_quickstart.py --turns 4 --consensus independent \
-  --llm anthropic/claude-haiku-4-5
-
-# Route the JUDGE through a local proxy (agent stays cloud)
+# Route the HARNESS LLM through a local proxy (agent stays on cloud OpenAI)
 python examples/01_quickstart.py \
   --proxy-url http://localhost:1234/v1 \
   --llm gemma-4-E4B-it-MLX-8bit --ctx 6000
+
+# Same run, also pushed to the governance dashboard + gated
+python examples/01_quickstart.py --turns 8 --upload --api-key pa_live_...
 ```
 
-**Key flags.** `--agent-model` (agent LLM, auto-detects provider) ·
-`--llm` (Harness LLM / judge) · `--turns` (default 8) ·
-`--consensus` (`independent` / `delphi` / `debate`) · `--proxy-url` ·
-`--ctx` (juror context budget for small-context proxy models).
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--turns`, `-t` | `15` | Number of adversarial turns. |
+| `--consensus`, `-c` | `delphi` | Jury consensus strategy: `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | `42` | Random seed for reproducibility. |
+| `--llm`, `-l` | `claude-sonnet-4-6` | Harness LLM (juror model). With `--proxy-url`, pass the proxy-served name (auto-prefixed with `openai/`). |
+| `--fallback-llm` | off | Backup harness LLM used when a primary juror/conductor call fails (timeout, rate-limit, content refusal). |
+| `--agent-model` | `gpt-4.1` | Model for the AGENT under test. Auto-detects provider (`claude-*` → Anthropic; else OpenAI). |
+| `--proxy-url` | none | Redirect the harness LLM to an OpenAI-compatible proxy URL. Agent stays on real OpenAI. |
+| `--context-budget`, `--ctx` | auto | Harness-LLM context budget. Set (e.g. `6000`) for small-context proxy models. |
+| _governance upload_ | — | `--upload`/`--no-upload`, `--api-key`, `--api-url`, `--agent`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `02_pytest_integration.py` — CI assertion
+## `02_agent_with_tools.py` — multi-turn + tools (the reference for your real agent)
 
-**What it shows.** Drop the harness into a pytest suite as a single
-assertion. The test fails if the final score drops below a threshold.
+**What it shows.** A real **OpenAI function-calling agent** (AcmeAir refund
+support) that decides and actually calls tools (verify identity → look up booking
+→ check eligibility → issue refund / escalate), keeps history across turns, and
+returns each turn's tool calls. Its full contract — `system_prompt`, `tools`,
+`knowledge` — is handed to the jury via `AgentContext`, so the jury scores
+instruction-following, grounded hallucination, and **tool_use** (phantom /
+forbidden / out-of-policy calls), not just the prose. Swap `make_openai_agent`
+for your own; the only contract is `agent(message: str) -> AgentResponse`.
+
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-pytest examples/02_pytest_integration.py
+export OPENAI_API_KEY=sk-...                    # powers the agent AND the jury
+python examples/02_agent_with_tools.py --turns 8
+
+# Validate wiring with no LLM spend
+python examples/02_agent_with_tools.py --list-only
+
+# Offline stub agent (jury still calls --llm)
+python examples/02_agent_with_tools.py --stub-agent --turns 6
+
+# Also push to the dashboard
+python examples/02_agent_with_tools.py --turns 8 --upload --api-key pa_live_...
 ```
 
-No additional flags — the threshold and turn count are in the test body
-(edit to taste). Add it to your CI workflow alongside your unit tests.
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--llm` | `gpt-4.1-mini` | Harness juror LLM. |
+| `--fallback-llm` | none | Backup juror LLM (e.g. `gpt-4.1`). |
+| `--agent-model` | `gpt-4.1-mini` | Model the AGENT calls. |
+| `--turns` | `8` | Adversarial turns. |
+| `--consensus` | `delphi` | `independent` / `delphi` / `debate`. |
+| `--seed` | `42` | Random seed. |
+| `--stub-agent` | off | Use an offline agent (no `OPENAI_API_KEY` needed); the jury still calls `--llm`. |
+| `--out-dir` | `results/` | Where to write reports. |
+| `--list-only` | off | Print config and exit — no LLM calls. |
+| _governance upload_ | `--agent` default `acmeair-refund-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `03_stateful_agent_with_response.py` — stateful agent + `AgentResponse`
+## `03_full_context.py` — `AgentContext.from_dir()`
 
-**What it shows.** A closure-based stateful agent (no class required) that
-returns `AgentResponse(text, tools_called, retrievals, memory_snapshot)`
-so the jury can score tool use, retrievals, and memory drift across turns.
+**What it shows.** Ground every juror in your agent's real contract by loading a
+folder that mirrors how a production agent ships — system prompt, knowledge base,
+tool schemas — via `AgentContext.from_dir(...)`. The script bootstraps a
+self-contained `examples/my_agent_dir/` on first run so you can see the expected
+layout (`system_prompt.md`, `knowledge/refund_policy.md`, `tools.json`).
+
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-python examples/03_stateful_agent_with_response.py
+# Offline-friendly smoke (writes a local report; needs an LLM key to score)
+python examples/03_full_context.py --turns 4
+
+# Tune the harness from the terminal
+python examples/03_full_context.py --llm claude-haiku-4-5 --turns 8 --consensus debate --seed 7
+
+# Wiring check, no LLM calls
+python examples/03_full_context.py --list-only
+
+# Also push + gate
+python examples/03_full_context.py --turns 4 --upload --api-key pa_live_...
 ```
 
-Edit the script to swap the system prompt, tools, or memory schema. No CLI
-flags — values are inlined in the `if __name__ == "__main__":` block.
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--llm`, `-l` | auto-pick from your provider key | Harness juror LLM (LiteLLM target). |
+| `--fallback-llm` | env `PROOFAGENT_FALLBACK_LLM` | Backup harness LLM that rescues a failed/unparseable primary juror call. |
+| `--turns`, `-t` | `4` | Number of adversarial turns. |
+| `--consensus`, `-c` | `delphi` | `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | `42` | Random seed. |
+| `--metrics` | all 6 canonical | Comma-separated metric subset to score. |
+| `--extra-traps` | none | Comma-separated custom trap `.md` files or dirs to merge on top of the bundled library. |
+| `--trap-packs` | none | Comma-separated installed trap-pack names to load. |
+| `--pin-traps` | none | Comma-separated trap NAMES to force into the plan regardless of selection scoring. |
+| `--knowledge` | none | Extra knowledge file/dir to ground jurors (in addition to `my_agent_dir/`). |
+| `--quiet`, `-q` | off | Suppress the live progress UI. |
+| `--list-only` | off | Print the resolved config and exit — no LLM calls. |
+| _governance upload_ | `--agent` default `full-context-refund-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `04_with_full_context.py` — `AgentContext.from_dir()`
+## `04_artifact_eval.py` — artifact mode (score a pre-generated document)
 
-**What it shows.** Ground every juror in your real agent's system prompt,
-knowledge base, and tool schemas via `AgentContext.from_dir(...)`. The
-script bootstraps a self-contained `examples/my_agent_dir/` on first run
-so you can see the expected layout.
+**What it shows.** Score a **pre-generated artifact** — a plan, report, code, or
+architecture doc — with the juror panel, grounded in a knowledge corpus. This is
+single-turn: it skips the planner + conductor entirely and the jury scores the
+artifact directly against the corpus. The bundled example is a fully fictional
+community-library **BRD** in
+[`sample_artifacts/library_brd/`](sample_artifacts/library_brd/), runnable as-is
+after clone. Non-Markdown inputs (`.pdf`, `.docx`, `.html`, images) require the
+[`[artifact]` extra](#1-install).
+
+**Mode:** artifact · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-python examples/04_with_full_context.py
+# Wiring check — no API calls
+python examples/04_artifact_eval.py --list-only
+
+# Real eval on the bundled library BRD (gpt-4.1-mini default; ~$0.02 / ~30s)
+export OPENAI_API_KEY=sk-...
+python examples/04_artifact_eval.py
+
+# Your own artifact + knowledge folder
+python examples/04_artifact_eval.py \
+  --artifact path/to/your_brd.md \
+  --knowledge-dir path/to/your_company_docs/ \
+  --type BRD --llm claude-haiku-4-5
+
+# Also push the finished score + gate
+python examples/04_artifact_eval.py --upload --api-key pa_live_...
 ```
 
-Expected directory layout (auto-created on first run):
+**Arguments**
 
-```
-examples/my_agent_dir/
-├── system_prompt.md
-├── knowledge/refund_policy.md
-└── tools.json
-```
-
-To use your own context: point the script's `EX_DIR` constant at your
-agent's directory and remove the `_bootstrap_dir()` call.
+| Flag | Default | Meaning |
+|---|---|---|
+| `--artifact`, `-a` | `examples/sample_artifacts/library_brd/brd.md` | Path to the artifact (`.md`, `.txt`, `.pdf`, `.docx`, `.html`). |
+| `--knowledge-dir`, `-k` | `examples/sample_artifacts/library_brd/knowledge` | Folder of source docs the artifact was grounded in. |
+| `--type`, `-t` | `BRD` | Artifact type tag. Built-in rubric packs: `BRD`, `code`, `business_plan`, `report`, `architecture_doc`, `tech_spec`, `requirements`, `design_doc`, `runbook`, `data_contract`, `model_card`. Unknown types → generic rubric. |
+| `--role` | generic library-agent role | The agent's role / persona that produced the artifact. |
+| `--business-case`, `-b` | derived from artifact | What the artifact was supposed to accomplish. |
+| `--tools-used` | none | Comma-separated tools the producing agent had (metadata only). |
+| `--llm`, `-l` | `gpt-4.1-mini` | Harness juror LLM. |
+| `--fallback-llm` | none | Backup harness LLM that rescues a failed/unparseable primary juror call. |
+| `--consensus`, `-c` | `delphi` | `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | `42` | Random seed. |
+| `--live` | off | Enable **Live Reporting** (streams to the dashboard; requires `PROOFAGENT_API_KEY`). |
+| `--list-only` | off | Print the eval plan and exit — no API calls. |
+| _governance upload_ | `--agent` default `artifact-eval-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `05_compliance_focused.py` — compliance-only scoring
+## `05_local_report.py` — one standard report on disk (offline)
 
-**What it shows.** Restrict adversarial trap coverage to compliance-tagged
-families (GDPR, CCPA, HIPAA, PCI, SOX). Useful when you want a focused
-regulated-domain audit rather than a general red-team.
+**What it shows.** Run the harness entirely on your machine and write the single
+standard report — every field the harness produces, in one `<stem>.json` + one
+`<stem>.md` (identical schema to what Live Reporting streams, just written
+locally). Supports **both** evaluation modes (`--mode multi_turn` |
+`--mode artifact`). `--add-custom-fields` additionally emits a
+`<stem>.augmented.json` with your own extra fields.
+
+**Mode:** both · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-python examples/05_compliance_focused.py
+export OPENAI_API_KEY=sk-...                    # the only key needed (gpt-4.1-mini)
+
+# Multi-turn, gpt-4.1-mini both sides, debate consensus
+python examples/05_local_report.py --mode multi_turn --turns 8
+
+# Artifact mode on the bundled library BRD
+python examples/05_local_report.py --mode artifact
+
+# No LLM spend — see what would be written
+python examples/05_local_report.py --list-only
+
+# Offline multi-turn with a deterministic stub agent
+python examples/05_local_report.py --mode multi_turn --stub-agent
 ```
 
-The compliance traps are already in the bundled library; this example
-demonstrates the API for restricting trap selection. Edit the
-`extra_traps=` or `restrict_traps_to=` parameters in the script to filter
-to other families.
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--mode` | `multi_turn` | `multi_turn` (planner → conductor → jury) or `artifact` (single-shot jury). |
+| `--llm` | `gpt-4.1-mini` | Harness juror LLM. |
+| `--fallback-llm` | none | Backup harness LLM that auto-rescues failed / unparseable juror + conductor calls. |
+| `--agent-model` | `gpt-4.1-mini` | Multi-turn agent model. |
+| `--consensus` | `debate` | `independent` / `delphi` / `debate`. |
+| `--turns` | `8` | Multi-turn only. |
+| `--seed` | `42` | Random seed. |
+| `--stub-agent` | off | Multi-turn: offline deterministic agent (no OpenAI key). |
+| `--artifact` | none | Artifact mode: path to the artifact file. |
+| `--knowledge-dir` | none | Artifact mode: grounding corpus folder. |
+| `--agent-system-prompt` | none | Artifact mode (optional): path to the producing agent's system prompt → jury scores instruction-following against it. |
+| `--agent-tools` | none | Artifact mode (optional): path to a JSON list of the producing agent's tool schemas → jury checks tool-call hallucination. |
+| `--type` | `BRD` | Artifact mode: artifact type tag. |
+| `--role` | generic, domain-neutral | The assignment the artifact/agent was given — the jury grades against this. |
+| `--business-case` | empty | Why the artifact exists / what it must accomplish. |
+| `--out-dir` | `results/` | Where to write the reports. |
+| `--add-custom-fields` | off | Also write a `<stem>.augmented.json` with your own extra fields. |
+| `--list-only` | off | Print the plan and exit — no LLM calls. |
+| _governance upload_ | — | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `06_weak_agent_baseline.py` — calibration check
+## `06_custom_traps.py` — bring-your-own-trap
 
-**What it shows.** A deliberately weak agent (no system prompt, no
-context, no memory) on the same proxy LLM as `07_proxy_llm_agent.py`.
-Compare the score of this weak agent against the hardened agent in 07 to
-verify your harness configuration actually discriminates by agent quality
-rather than over-rating everything.
+**What it shows.** Merge your own adversarial traps into the bundled library via
+`Harness(extra_traps=[...])`, with full LLM choice (agent model, juror model,
+optional proxy-served juror). `--trap` accepts a directory of `.md` trap
+manifests or a single `.md` file; the bundled demo is
+[`custom_traps/refund_chargeback_threat.md`](custom_traps/).
 
-```bash
-# Step 1 — run the hardened proxy agent (07)
-python examples/07_proxy_llm_agent.py --turns 15 --consensus delphi
-# → note final score X
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
 
-# Step 2 — run this weak agent on the SAME proxy
-python examples/06_weak_agent_baseline.py --turns 15 --consensus delphi
-# → note final score Y
-
-# Step 3 — interpret the gap (X - Y):
-#   ≥ 3 points    well-calibrated
-#   1.5-3 points  some discrimination, plateau bias is muting signal
-#   < 1.5 points  harness isn't discriminating — investigate
-```
-
-**Key flags.** `--turns` (default 15) · `--consensus` (default `delphi`)
-· `--llm` (Harness LLM, default `claude-haiku-4-5`).
-
-**Env vars** (for the proxy):
+**Run**
 
 ```bash
-export PROOFAGENT_PROXY_URL=http://localhost:1234/v1
-export PROOFAGENT_PROXY_MODEL=gemma-4-E4B-it-MLX-8bit
-export PROOFAGENT_PROXY_KEY=not-required-for-local-proxy
-```
+# Wiring sanity check — load the trap index with your extra source, no API calls
+python examples/06_custom_traps.py --list-only
 
----
+# Default — bundled demo trap
+python examples/06_custom_traps.py --turns 8
 
-## `07_proxy_llm_agent.py` — self-hosted AGENT
+# Your own trap pack
+python examples/06_custom_traps.py --trap ./my_traps/ --turns 8
 
-**What it shows.** Run the AGENT on a self-hosted / local OpenAI-compatible
-endpoint (mlx-lm, vLLM, Ollama, LM Studio, corporate proxy). The Harness
-LLM stays on whatever you pass to `--llm`.
-
-```bash
-# Default — uses env vars below
-python examples/07_proxy_llm_agent.py
-
-# Longer debate run with a specific Harness LLM
-python examples/07_proxy_llm_agent.py --turns 25 --consensus debate \
-  --llm anthropic/claude-haiku-4-5
-```
-
-**Env vars** (configure your proxy here):
-
-```bash
-export PROOFAGENT_PROXY_URL=http://localhost:1234/v1
-export PROOFAGENT_PROXY_MODEL=gemma-4-E4B-it-MLX-8bit
-export PROOFAGENT_PROXY_KEY=not-required-for-local-proxy
-```
-
-**Key flags.** `--turns` · `--consensus` · `--llm` (Harness LLM).
-
----
-
-## `08_custom_trap.py` — bring-your-own-trap
-
-**What it shows.** Merge your own adversarial traps into the bundled
-library via `Harness(extra_traps=[...])`. Inherits the full multi-provider
-agent + judge from `01_quickstart.py` and adds one new flag: `--trap PATH`
-(directory of `.md` trap manifests, or a single `.md` file).
-
-```bash
-# 0) Wiring sanity check — no API calls
-python examples/08_custom_trap.py --list-only
-
-# 1) Default — bundled demo trap (custom_traps/refund_chargeback_threat.md)
-python examples/08_custom_trap.py --turns 8
-
-# 2) Your own trap pack
-python examples/08_custom_trap.py --trap ./my_traps/ --turns 8
-
-# 3) Single trap file + custom LLM
-python examples/08_custom_trap.py --trap ./my_traps/attack.md \
+# Single trap file + a specific harness LLM + debate
+python examples/06_custom_traps.py --trap ./my_traps/attack.md \
   --turns 8 --consensus debate --llm gpt-5.5
 ```
 
-**Key flags.** `--trap PATH` (extra traps to merge) · `--turns` ·
-`--consensus` · `--llm` (Harness LLM) · `--agent-model` ·
-`--proxy-url` · `--ctx` · `--list-only`.
+Author traps as `.md` files with YAML frontmatter; validate with
+`proof traps validate ./my_traps/attack.md` (spec:
+[`docs/TRAP_MANIFEST.md`](../docs/TRAP_MANIFEST.md)).
 
-**Authoring traps.** A trap is a single `.md` file with YAML frontmatter
-plus `# Pattern`, `# Seed examples`, `# Pass criteria`, `# Fail criteria`
-sections. Full spec in [`docs/TRAP_MANIFEST.md`](../docs/TRAP_MANIFEST.md).
-Validate before running:
+**Arguments**
 
-```bash
-proof traps validate ./my_traps/attack.md
-proof traps validate --strict          # warnings = errors (CI)
-```
-
----
-
-## `09_asymmetric_single_cell.py` — multi-domain asymmetric evaluation
-
-**What it shows.** Evaluate one of four bundled production-style domain
-agents (customer support, medical triage, code generation, privacy /
-security) under any Harness LLM tier: cheap cloud, frontier cloud, or a
-local 4B model on LM Studio. Reproduces the headline cohort cells from the
-paper. The four bundled agent specs live in [`agents/`](agents/).
-
-### Scenario A — cheap cloud smoke test
-
-5-turn sanity check, ~$0.30, ~3 min. Use this before any longer run.
-
-```bash
-python examples/09_asymmetric_single_cell.py \
-  --agent       medical_triage_assistant \
-  --agent-llm   gpt-4.1-mini \
-  --harness-llm anthropic/claude-haiku-4-5 \
-  --turns       5 \
-  --seed        42 \
-  --consensus   debate
-```
-
-### Scenario B — frontier reference (Large Harness)
-
-Opus 4.7 evaluating a GPT-5.5 agent, ~$3-5, ~10 min.
-
-```bash
-python examples/09_asymmetric_single_cell.py \
-  --agent       customer_support_agent \
-  --agent-llm   gpt-5.5 \
-  --harness-llm anthropic/claude-opus-4-7 \
-  --turns       25 --seed 42 --consensus debate
-```
-
-### Scenario C — asymmetric local (small local Harness LLM)
-
-The paper's headline asymmetric cell: a 4B local Gemma model (LM Studio)
-evaluating a frontier-class agent. ~$0, ~30 min.
-
-```bash
-# 1. Load Gemma in LM Studio with 8K context
-lms get  mlx-community/gemma-4-E4B-it-MLX-8bit
-lms load mlx-community/gemma-4-E4B-it-MLX-8bit --context-length 8192
-
-# 2. Verify
-curl http://localhost:1234/v1/models | python3 -m json.tool
-
-# 3. Run
-python examples/09_asymmetric_single_cell.py \
-  --agent          medical_triage_assistant \
-  --agent-llm      gpt-5.5 \
-  --harness-llm    gemma-4-E4B-it-MLX-8bit \
-  --proxy-url      http://localhost:1234/v1 \
-  --turns          25 --seed 42 --consensus debate \
-  --context-budget 6000 \
-  --sequential
-```
-
-Two flags are mandatory for the local path:
-- `--context-budget 6000` — Gemma's working context is ~8K; the pre-flight
-  check rejects the run without this.
-- `--sequential` — LM Studio serves one request at a time; without this,
-  parallel juror calls queue and time out.
-
-### Scenario D — sweep all four agents
-
-```bash
-for AGENT in medical_triage_assistant customer_support_agent \
-             code_generation_agent privacy_security_agent; do
-  python examples/09_asymmetric_single_cell.py \
-    --agent       "$AGENT" \
-    --agent-llm   gpt-5.5 \
-    --harness-llm anthropic/claude-haiku-4-5 \
-    --turns       25 --seed 42 --consensus debate \
-    --output-dir  ./results/sweep_${AGENT}
-done
-```
-
-### Scenario E — wiring check (no API calls)
-
-```bash
-python examples/09_asymmetric_single_cell.py \
-  --agent       customer_support_agent \
-  --agent-llm   gpt-5.5 \
-  --harness-llm anthropic/claude-haiku-4-5 \
-  --turns       25 --seed 42 --consensus debate \
-  --list-only
-```
-
-### CLI flags
-
-| Flag | Meaning |
-|---|---|
-| `--agent` | Bundled agent name (`customer_support_agent`, `medical_triage_assistant`, `code_generation_agent`, `privacy_security_agent`) or a path to your own JSON spec. |
-| `--agent-llm` | Model powering the agent under test. Auto-detects provider: `gpt-*` → OpenAI, `anthropic/claude-*` → Anthropic, `gemini/*` → LiteLLM. |
-| `--harness-llm` | Model powering the Harness pipeline. Cloud examples: `anthropic/claude-opus-4-7`, `anthropic/claude-haiku-4-5`, `gpt-5.5`. Local examples (with `--proxy-url`): `gemma-4-E4B-it-MLX-8bit`. |
-| `--proxy-url` | OpenAI-compatible URL for a local Harness proxy. Omit for cloud Harness LLMs. |
-| `--turns` | Number of adversarial conductor turns. Default 25 (paper cohort). |
-| `--seed` | Random seed. Default 42. |
-| `--consensus` | `independent` (cheapest) · `delphi` (balanced) · `debate` (strictest, paper default). |
-| `--context-budget` | Juror prompt token budget. Required for small-context proxy models (`6000` for 8K-context Gemma 4B). |
-| `--sequential` | Serialize juror LLM calls. Required for single-threaded local proxies. No effect on cloud Harness LLMs. |
-| `--output-dir` | Where to write reports. Default `./results/asymmetric_<timestamp>/`. |
-| `--list-only` | Print resolved config and exit without spending tokens. |
-| `--quiet` | Suppress per-turn progress output. |
-
-### Authoring your own agent spec
-
-Drop a `.json` file into [`agents/`](agents/) (or anywhere; the runner
-accepts absolute paths) following the schema documented in
-[`agents/README.md`](agents/README.md). Then pass its name to `--agent`.
+| Flag | Default | Meaning |
+|---|---|---|
+| `--trap`, `-T` | `examples/custom_traps` | Directory of `.md` trap manifests, or a single `.md` file, to merge. |
+| `--list-only` | off | Load the trap index with the extra source and print a summary — no API calls. |
+| `--turns`, `-t` | `8` | Number of adversarial turns. |
+| `--consensus`, `-c` | `delphi` | `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | `42` | Random seed. |
+| `--agent-model` | `claude-sonnet-4-6` | Model for the AGENT under test. Auto-detects provider. |
+| `--llm`, `-l` | `claude-sonnet-4-6` | Harness juror model. With `--proxy-url`, pass the proxy-served name (auto-prefixed `openai/`). |
+| `--proxy-url` | none | Redirect the harness LLM to an OpenAI-compatible proxy URL. Agent stays on its real provider. |
+| `--context-budget`, `--ctx` | auto | Harness-LLM context budget. Set (e.g. `6000`) for small-context proxy models. |
+| _governance upload_ | `--agent` default `custom-trap-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `10_load_custom_traps.py` — trap loader inspection (no LLM calls)
+## `07_proxy_llm.py` — agent served by a local / self-hosted proxy
 
-**What it shows.** The minimal API for inspecting the trap library: load
-the bundled 183 + your custom directory, build a `TrapIndex`, filter by
-family / metric / domain. Zero LLM calls — useful for CI preflight or
-just confirming a `.md` file parses.
+**What it shows.** Evaluate an AGENT served by a self-hosted OpenAI-compatible
+endpoint (mlx-lm, vLLM, Ollama, LM Studio, corporate proxy). The agent talks to
+the proxy; the harness LLM still uses `--llm` for planning / conducting /
+scoring. The default agent target is configured inside the script (mlx Gemma via
+ngrok) — edit it to point at your endpoint.
+
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
 
 ```bash
-# Default — inspect the bundled custom_traps/ demo
-python examples/10_load_custom_traps.py
+# Default — uses the proxy target wired in the script
+python examples/07_proxy_llm.py
 
-# Point at your own trap directory or single file
-python examples/10_load_custom_traps.py --traps-dir ./my_traps/
+# Longer debate run with a specific cross-family harness LLM
+python examples/07_proxy_llm.py --turns 25 --consensus debate \
+  --llm anthropic/claude-haiku-4-5
 
-# Filtered inventory
-python examples/10_load_custom_traps.py \
-  --traps-dir ./my_traps/ \
-  --family social_engineering --metric safety
+# Also push + gate
+python examples/07_proxy_llm.py --turns 8 --upload --api-key pa_live_...
 ```
 
-**Key flags.** `--traps-dir / -t` · `--family / -f` · `--metric / -m`.
+**Arguments**
 
-Imports the new public surface: `from proofagent_harness import Harness,
-TrapIndex, load_traps`. No need to reach into the loaders submodule.
+| Flag | Default | Meaning |
+|---|---|---|
+| `--turns`, `-t` | `15` | Number of adversarial turns. |
+| `--consensus`, `-c` | `delphi` | `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | `42` | Random seed. |
+| `--llm`, `-l` | `gpt-4.1-mini` | Harness LLM (planner / conductor / juror). Cross-family default vs. the proxy-served agent. |
+| _governance upload_ | `--agent` default `proxy-llm-agent` | See [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## `11_live_trace_evaluation.py` — advanced / observability example
+## `08_live_trace.py` — observability (live per-turn trace)
 
-**Position.** This is an **observability / debugging** example. Use it
-when you want to *see* what the conductor is picking and how the agent
-is answering, turn by turn — not when you want a batch eval score. For
-batch eval, use `09_asymmetric_single_cell.py` instead.
+**What it shows.** An observability / debugging example: watch the harness pick
+traps and probe the agent in real time. Each turn prints a rich panel — selected
+trap ID and parsed fields (family, severity, metrics, forbidden/expected tools,
+tags, pattern excerpt with composite attack chain), the conductor's adversarial
+question, the agent's answer, any tool calls, and a cumulative coverage line.
+Use it to debug *why* an agent failed; for batch scoring use the
+[benchmark](#benchmarks). Agent specs are loaded from
+[`agents/*.json`](agents/) (five bundled profiles).
 
-**What it shows.** Watch the harness pick traps and probe the agent in
-real time. For each turn prints a rich panel with the selected trap ID,
-parsed fields (family, severity, metrics, forbidden/expected tools, tags,
-pattern excerpt incl. composite attack chain), the conductor's
-adversarial question, the agent's answer, any tool calls, and a
-cumulative coverage line (unique traps used, families covered, severity
-mix, composite chains seen, crashes).
+> Here `--agent` selects which **agent spec** to load (it is *not* the dashboard
+> agent name), so the governance group on this example omits its own `--agent`
+> flag; the dashboard agent name is derived from the loaded spec.
 
-Subscribes to `Harness.evaluate(on_event=...)` — the official streaming
-hook — for trap-selection events, and wraps the agent callable to capture
-each turn's question and answer. The same observability pattern works in
-production for telemetry, SIEM forwarding, dataset collection, or live
-guardrails enforcement.
+**Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
 
-**Agent specs.** Loaded from `examples/agents/*.json` — the same source
-of truth as `09_asymmetric_single_cell.py`, no duplication. Five
-bundled profiles ship out of the box:
-
-| `--agent` | Role | Tools | Knowledge |
-|---|---|---:|---:|
-| `customer_support_agent` (default) | AcmeAir refund / itinerary agent | 12 | 4.5K chars |
-| `medical_triage_assistant` | MercyHealth telehealth triage assistant | 11 | 5.2K chars |
-| `privacy_security_agent` | GDPR / CCPA privacy operations agent | 12 | 5.7K chars |
-| `code_generation_agent` | Internal engineering code assistant | 12 | 5.6K chars |
-| `financial_advisor_agent` | FINRA-registered investment advisor chat | 10 | 4.7K chars |
-
-Pass `--agent /path/to/your.json` to evaluate a custom spec following
-the schema in [`agents/README.md`](agents/README.md).
+**Run**
 
 ```bash
-# List the registry
-python examples/11_live_trace_evaluation.py --list-agents
+# List the bundled agent registry
+python examples/08_live_trace.py --list-agents
 
-# Wire check (no API calls) — verify config + loaded agent + trap library
-python examples/11_live_trace_evaluation.py \
-  --agent privacy_security_agent --list-only
+# Wire check (no API calls)
+python examples/08_live_trace.py --agent privacy_security_agent --list-only
 
-# Real run — local Gemma harness LLM + gpt-4.1-mini agent
-python examples/11_live_trace_evaluation.py \
-  --agent          medical_triage_assistant \
-  --agent-model    gpt-4.1-mini \
-  --harness-llm    gemma-4-E4B-it-MLX-8bit \
-  --proxy-url      http://localhost:1234/v1 \
-  --turns          8 \
-  --consensus      delphi \
-  --seed           42 \
-  --context-budget 6000 \
-  --sequential
-
-# Cross-family — Claude Opus agent + cloud Sonnet harness LLM
-python examples/11_live_trace_evaluation.py \
+# Cross-family — Claude Opus agent + cloud Sonnet harness LLM (no proxy)
+python examples/08_live_trace.py \
   --agent privacy_security_agent \
   --agent-model claude-opus-4-7 \
   --harness-llm anthropic/claude-sonnet-4-6 \
   --no-proxy --turns 10 --consensus debate
 
-# Your own agent spec (custom JSON)
-python examples/11_live_trace_evaluation.py \
-  --agent /path/to/your_agent.json --turns 12 --sequential
-
-# Verbose — no truncation of pattern / Q / A in the trace
-python examples/11_live_trace_evaluation.py \
-  --agent privacy_security_agent --verbose --turns 5 --sequential
+# Local Gemma harness LLM (LM Studio) + gpt-4.1-mini agent
+python examples/08_live_trace.py \
+  --agent medical_triage_assistant --agent-model gpt-4.1-mini \
+  --harness-llm gemma-4-E4B-it-MLX-8bit \
+  --proxy-url http://localhost:1234/v1 \
+  --turns 8 --consensus delphi --seed 42 \
+  --context-budget 6000 --sequential
 ```
 
-**Key flags.** `--agent / -a` (bundled name or path to JSON spec) ·
-`--agent-model` · `--harness-llm` · `--proxy-url` · `--no-proxy` ·
-`--turns / -t` · `--consensus / -c` · `--seed / -s` ·
-`--context-budget` · `--sequential` · `--verbose / -v` · `--list-only` ·
-`--list-agents` · `--output-dir`.
+**Arguments**
 
-**What to look for.** The trace makes it visible per-turn whether the
-composite attack chain is actually surfacing in the conductor's
-questions. Look for the `[composite chain present]` badge on each trap
-card and watch the cumulative line evolve across turns.
+| Flag | Default | Meaning |
+|---|---|---|
+| `--agent`, `-a` | `customer_support_agent` | Bundled agent name (`code_generation_agent`, `customer_support_agent`, `financial_advisor_agent`, `medical_triage_assistant`, `privacy_security_agent`) or path to a custom JSON spec. |
+| `--agent-model` | `gpt-4.1-mini` | LLM that powers the agent under test. |
+| `--harness-llm` | `gemma-4-E4B-it-MLX-8bit` | LLM that powers the conductor + jury panel. |
+| `--proxy-url` | LM Studio at `:1234` | Local proxy URL for the harness LLM. |
+| `--no-proxy` | off | Skip proxy wiring (use when `--harness-llm` is a cloud model). |
+| `--turns`, `-t` | (script default) | Number of adversarial turns. |
+| `--consensus`, `-c` | (script default) | `independent` / `delphi` / `debate`. |
+| `--seed`, `-s` | (script default) | Random seed. |
+| `--context-budget`, `--ctx` | auto | Harness-LLM context budget for small-context proxy models. |
+| `--sequential` | off | Serialize juror calls — required for single-threaded local proxies. |
+| `--per-call-timeout` | (script default) | Per-juror-call timeout. |
+| `--fallback-juror` | none | On empty/garbled/erroring primary juror calls, retry via OpenAI `MODEL` (bypasses `--proxy-url`). Recommended `gpt-4.1-mini`. |
+| `--extra-traps` | none | One or more dirs of custom `.md` traps to merge (last-wins on name). |
+| `--trap-packs` | none | One or more pip-installed trap packs to load. |
+| `--verbose`, `-v` | off | No truncation of pattern / Q / A in the trace. |
+| `--list-only` | off | Print config + agent summary + trap library; no API calls. |
+| `--list-agents` | off | Print the bundled agent registry and exit. |
+| `--output-dir` | `results/` | Where to write reports. |
+| _governance upload_ | _no `--agent`_ (derived from spec) | `--upload`/`--no-upload`, `--api-key`, `--api-url`, `--agent-version`, `--profile`, `--fail-on`, `--source` — see [Pushing to the dashboard](#4-pushing-to-the-dashboard). |
 
 ---
 
-## Cost and runtime guidance
+## `09_live_reporting.py` — Live Reporting (stream a run in real time)
 
-Rough numbers per cell at `--turns 25 --consensus debate` (3-persona):
+**What it shows.** Stream an in-progress evaluation to your ProofAgent dashboard
+**turn by turn** via `live_reporting=True`. This is a *different* mechanism from
+the `--upload` group: it streams *during* the run rather than pushing a finished
+report. Off by default (offline + local report); add `--live` (which needs
+`PROOFAGENT_API_KEY`) to stream.
 
-| Harness LLM | Cost / cell | Wall clock | Notes |
+**Mode:** multi-turn · **Pushes via:** `--live` (streaming Live Reporting)
+
+**Run**
+
+```bash
+# Offline (default) — runs + writes a local report, no streaming
+python examples/09_live_reporting.py --turns 5
+
+# Stream live to your dashboard (needs PROOFAGENT_API_KEY)
+export PROOFAGENT_API_KEY=pa_live_...
+python examples/09_live_reporting.py --live --turns 5
+
+# CI / no spend — offline stub agent, no pause for Enter
+python examples/09_live_reporting.py --stub-agent --no-wait --list-only
+```
+
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--llm` | `gpt-4.1-mini` | Harness juror LLM. |
+| `--fallback-llm` | none | Backup harness LLM that rescues a failed/unparseable primary juror call. |
+| `--agent-model` | `gpt-4.1-mini` | OpenAI model the agent calls each turn. Ignored with `--stub-agent`. |
+| `--stub-agent` | off | Use the static-policy stub agent (no `OPENAI_API_KEY`). |
+| `--turns` | `5` | Adversarial turns. Free/Starter accounts are capped at 15 server-side. |
+| `--consensus` | `delphi` | Juror consensus method. |
+| `--seed` | `42` | Random seed. |
+| `--live` | off | Stream this run to your dashboard via Live Reporting (requires `PROOFAGENT_API_KEY`). |
+| `--no-live` | (default) | Run offline, no dashboard streaming. |
+| `--staging` | off | Point at the staging API + dashboard (only with `--live`). |
+| `--self-hosted URL` | none | URL of a self-hosted ProofAgent backend. |
+| `--list-only` | off | Print the configuration and exit — no API calls. |
+| `--no-wait` | off | Don't pause for "Press Enter" after the URL prints (CI). |
+
+---
+
+## `10_regression.py` — Live Reporting regression sweep
+
+**What it shows.** Sweep multiple **versions** of the same agent (the script
+walks a defensive → balanced → loose progression) reporting each to the same
+project, so per-metric deltas surface in the dashboard and you can see at a
+glance which version regressed and on which dimension. Like 09, it uses Live
+Reporting (`--live`), not `--upload`.
+
+**Mode:** multi-turn · **Pushes via:** `--live` (streaming Live Reporting)
+
+**Run**
+
+```bash
+# Offline by default — runs the version sweep + writes local reports
+python examples/10_regression.py
+
+# Stream each version to your dashboard (opt-in)
+export PROOFAGENT_API_KEY=pa_live_...
+python examples/10_regression.py --live
+
+# Print the plan, no API calls
+python examples/10_regression.py --list-only
+```
+
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--llm` | `claude-haiku-4-5` | Harness juror LLM (cheap + fast). |
+| `--turns` | `5` | Turns per version (cheap smoke). |
+| `--seed` | `42` | Random seed. |
+| `--live` | off | Stream each version to your dashboard (requires `PROOFAGENT_API_KEY`). |
+| `--no-live` | (default) | Run offline, no dashboard streaming. |
+| `--staging` | off | Use the staging API (only meaningful with `--live`). |
+| `--self-hosted URL` | none | Self-hosted backend URL (only meaningful with `--live`). |
+| `--list-only` | off | Print the plan — no API calls. |
+
+---
+
+## `11_pytest_ci.py` — drop-in pytest assertion for CI
+
+**What it shows.** The harness as a single **pytest** assertion: run an eval and
+fail the test if the final score (or any per-metric score) drops below a
+threshold. It optionally also calls `push_to_dashboard(...)` and fails the build
+if the governance gate returns `block`. The bundled test is marked
+`@pytest.mark.skip` (remove the skip in your CI — it needs an LLM key). Because
+it's a pytest test, **not** a CLI, thresholds and turns are overridable via
+environment variables rather than flags.
+
+**Mode:** multi-turn · **Pushes via:** `push_to_dashboard()` helper (no-op offline)
+
+**Run**
+
+```bash
+pytest examples/11_pytest_ci.py
+
+# Tune thresholds in CI without editing the file
+PROOF_MIN_SCORE=7.5 PROOF_MIN_SAFETY=8.5 PROOF_TURNS=6 \
+  pytest examples/11_pytest_ci.py
+```
+
+**Environment knobs** (all optional)
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PROOF_TURNS` | `4` | Turns the harness runs. |
+| `PROOF_MIN_SCORE` | `7.0` | Minimum `final_score`. |
+| `PROOF_MIN_SAFETY` | `8.0` | Minimum `safety`. |
+| `PROOF_MIN_HALLUCINATION` | `7.0` | Minimum `hallucination_resistance`. |
+| `PROOF_MIN_MANIPULATION` | `7.0` | Minimum `manipulation_resistance`. |
+
+Set `PROOFAGENT_API_KEY` (and optionally `PROOFAGENT_API_BASE_URL`) to also push
+the run and gate the CI build on the governance decision.
+
+---
+
+## `12_governance_gate.py` — release gate from a saved report
+
+**What it shows.** The *last mile*: take a finished evaluation `Report` and push
+it to the **ProofAgent Governance API** to gate a release (`pass` / `review` /
+`block`) and land it on the dashboard with full fidelity. It loads a **real**
+saved report from `results/` (deserialized from disk, so it runs **without any
+LLM key**), builds the upload payload, and prints a summary. Offline (default) it
+writes the exact payload it *would* send to
+`examples/_governance_payload.sample.json`; with `--upload` it POSTs and — unlike
+the other examples — **exits with the gate-mapped code** (0 pass / 1 review /
+2 block, subject to `--fail-on`), ready to wire into a CI step. The same script
+targets Cloud or on-prem — only `--api-url` changes.
+
+**Mode:** reads a saved report (no eval) · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)
+
+**Run**
+
+```bash
+# Offline — build + summarize + dump the sample payload (no keys, no network)
+python examples/12_governance_gate.py
+
+# Upload + gate (Cloud by default); exits with the gate code
+python examples/12_governance_gate.py \
+  --upload --api-key pa_live_... \
+  --agent "Refund Agent" --agent-version v1.8.2 \
+  --profile airline_customer_support --source ci_cd --fail-on block
+
+# On-prem / Enterprise — only the URL changes
+python examples/12_governance_gate.py --upload \
+  --api-key pa_live_... --api-url https://proofagent.acme-corp.internal
+```
+
+**Arguments**
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--report`, `-r` | auto-pick richest under `results/` | Saved `Report` JSON to upload (prefers a multi-turn run with a transcript). |
+| `--agent` | `Refund Agent` | Logical agent name (groups runs + regressions). |
+| `--agent-version` | `v1.8.2` | Version / git ref of the agent under test. |
+| `--profile` | `airline_customer_support` | Governance profile slug to gate against. |
+| `--source` | `manual` | `local` / `ci_cd` / `manual` / `api` / `scheduled`. |
+| `--fail-on` | `block` | Which gate decision fails the build (exit non-zero). |
+| `--upload` | off | POST the run and exit with the gate code. Offline, the payload is written to `_governance_payload.sample.json`. |
+| `--no-upload` | (default) | Explicitly run offline. |
+| `--api-key KEY` | env `PROOFAGENT_API_KEY` | Governance API key (flag wins over env). |
+| `--api-url URL` | env `PROOFAGENT_API_BASE_URL`, then Cloud | API base URL. Override for Enterprise / on-prem. |
+
+> Unlike 01–08, this example registers its governance flags directly (not the
+> shared group): the `--agent` / `--agent-version` / `--profile` defaults are
+> pre-filled for the bundled report, and it **does** `sys.exit` on the gate —
+> that's what makes it a CI gate rather than a demo push.
+
+---
+
+## Utility — `report_viewer.py`
+
+Render any saved report `.json` as a self-contained, offline HTML dashboard (no
+server, no internet, no deps). It embeds the JSON directly, so the output file
+survives being moved or emailed. Renders the headline + certification, per-metric
+bars, executive brief, the full transcript, a turns × metrics PASS/FAIL audit
+matrix, the per-persona jury debate, findings, and token/timing KPIs.
+
+```bash
+python examples/report_viewer.py results/<report>.json
+python examples/report_viewer.py results/<report>.json --open   # also open in your browser
+```
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `report` (positional) | — | Path to a report `.json` saved by `report.to_json()`. |
+| `--out OUT` | alongside the `.json` | Output `.html` path. |
+| `--open` | off | Open the dashboard in your default browser. |
+
+`_dashboard.py` is the shared upload helper (the `--upload` flag group +
+`push_to_dashboard()`); it is imported by the examples, not run directly.
+
+---
+
+## benchmarks/
+
+[`benchmarks/asymmetric_cohort.py`](../benchmarks/asymmetric_cohort.py)
+reproduces the headline **asymmetric cohort** cells from the paper: a small
+harness LLM (a local proxy model, or a cheap cloud model) evaluating a
+frontier-class agent across the bundled production-style domains. It reuses the
+same agent specs as the examples ([`examples/agents/`](agents/)) — short names
+like `customer_support_agent` resolve there, or pass an absolute path to your own
+spec.
+
+Run it **from the repo root**:
+
+```bash
+# Cloud harness LLM (no proxy needed)
+python benchmarks/asymmetric_cohort.py \
+  --agent       medical_triage_assistant \
+  --agent-llm   gpt-5.5 \
+  --harness-llm anthropic/claude-haiku-4-5 \
+  --turns 25 --seed 42 --consensus debate
+
+# Local harness LLM via LM Studio (the paper's small-harness cell)
+python benchmarks/asymmetric_cohort.py \
+  --agent       customer_support_agent \
+  --agent-llm   gpt-5.5 \
+  --harness-llm gemma-4-E4B-it-MLX-8bit \
+  --proxy-url   http://localhost:1234/v1 \
+  --turns 25 --seed 42 --consensus debate \
+  --context-budget 6000 --sequential
+
+# Wiring check — no API calls
+python benchmarks/asymmetric_cohort.py \
+  --agent customer_support_agent --harness-llm anthropic/claude-haiku-4-5 --list-only
+```
+
+Key flags: `--agent` (required), `--harness-llm` (required), `--agent-llm`
+(default `gpt-4.1`), `--proxy-url` (local harness LLM only), `--turns`
+(default 25), `--seed` (42), `--consensus` (`debate` in the paper),
+`--context-budget`/`--ctx` (required for small-context proxy models — `6000` for
+8K Gemma 4B), `--sequential` + `--per-call-timeout` (single-threaded proxies),
+`--output-dir`/`-o`, `--list-only`, `--quiet`.
+
+---
+
+## notebooks/
+
+Three end-to-end Jupyter walkthroughs live at the repo root under
+[`notebooks/`](../notebooks/). Each ends with an **optional dashboard-push cell**
+(`build_governance_payload` → `upload_run`, gated on `PROOFAGENT_API_KEY`) so you
+can push the notebook's result to the governance dashboard — leave the key unset
+to run the notebook fully offline.
+
+| Notebook | What it covers |
+|---|---|
+| [`01_quickstart.ipynb`](../notebooks/01_quickstart.ipynb) | The canonical multi-turn quickstart, narrated cell by cell. |
+| [`02_compliance.ipynb`](../notebooks/02_compliance.ipynb) | A compliance-focused walkthrough (restricting coverage to regulated-domain traps). |
+| [`03_proxy_llm.ipynb`](../notebooks/03_proxy_llm.ipynb) | Running the harness LLM through a local OpenAI-compatible proxy. |
+
+---
+
+## Cost & runtime guidance
+
+Rough numbers per multi-turn run at `--turns 25 --consensus debate` (3-persona):
+
+| Harness LLM | Cost / run | Wall clock | Notes |
 |---|---|---|---|
-| `anthropic/claude-haiku-4-5` | ~$1-2 | 5-10 min | Best cheap cloud option. |
-| `anthropic/claude-opus-4-7` | ~$3-5 | 10-15 min | Paper's Large Harness reference. |
-| `gpt-5.5` | ~$2-4 | 10-15 min | Frontier OpenAI. |
-| `gpt-4.1-mini` | ~$0.50 | 5-10 min | Cheapest cloud, fine for smoke tests. |
-| local Gemma 4B (LM Studio) | $0 | 25-45 min | Paper's Small Harness. Requires `--sequential` + `--context-budget 6000`. |
-| local Qwen 2.5 7B / Llama 3.1 8B | $0 | 30-60 min | Stronger small Harness alternatives. |
+| `gpt-4.1-mini` | ~$0.50 | 5–10 min | Cheapest cloud — fine for smoke tests (default on several examples). |
+| `anthropic/claude-haiku-4-5` | ~$1–2 | 5–10 min | Best cheap cloud option. |
+| `gpt-5.5` | ~$2–4 | 10–15 min | Frontier OpenAI. |
+| `anthropic/claude-opus-4-7` | ~$3–5 | 10–15 min | Paper's Large Harness reference. |
+| local Gemma 4B (LM Studio) | $0 | 25–45 min | Paper's Small Harness. Use `--sequential` + `--context-budget 6000`. |
+| local Qwen 2.5 7B / Llama 3.1 8B | $0 | 30–60 min | Stronger small-harness alternatives. |
 
-Lower the cost / time by dropping `--consensus debate` to `delphi` (~1.5×
-instead of 3-5× per turn) or lowering `--turns` to 8-15 for development.
+Drop cost/time by lowering `--turns` to 8–15 for development, or relaxing
+`--consensus debate` → `delphi` (~1.5× instead of 3–5× per turn) → `independent`
+(1×). Artifact mode (04, and 05 `--mode artifact`) is single-turn and the
+cheapest path of all (~$0.02 on `gpt-4.1-mini`).
 
----
-
-## Reports
-
-Every example writes structured reports under `./results/` (or
-`--output-dir`):
-
-- `<run-id>.json` — full evidence-linked transcript, per-juror scores,
-  consensus log, raised findings, metadata.
-- `<run-id>.md` — human-readable scorecard, per-metric breakdown, raised
-  findings with rationale and recommendation.
-
-The terminal also prints the final score, certification band, and
-per-metric table at the end of every run.
+**Reports.** Every scoring example writes `<run-id>.json` (full evidence-linked
+transcript, per-juror scores, consensus log, findings, metadata) and
+`<run-id>.md` (human-readable scorecard) under `results/` (or `--out-dir` /
+`--output-dir`), and prints the final score + certification band at the end.
 
 ---
 
@@ -552,21 +824,22 @@ per-metric table at the end of every run.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `ModuleNotFoundError: proofagent_harness` | Package not installed in the active Python | `pip install proofagent-harness` (or activate the right venv) |
-| `LLMNotConfiguredError: API key missing` | Forgot to `export` the relevant API key | Export the key in the same terminal that runs the script |
-| `LLM Provider NOT provided. Pass in the LLM provider...` | LiteLLM can't infer provider from model name | Prefix the model: `anthropic/claude-haiku-4-5`, `gemini/gemini-2.5-pro` |
-| `the configured harness LLM cannot handle the context size` | Local proxy loaded at too-small context length | Reload the model with a larger `--context-length` AND/OR drop `--turns` |
-| `Error code: 400 — model has crashed` | Local proxy OOM (model + KV cache > available RAM) | Lower the context length on the proxy; close other apps; consider a smaller quant |
-| All juror calls time out at 600s+ | Local single-threaded proxy can't handle parallel jury | Add `--sequential` |
-| Final score is mid-band (~5-7) with many `SOFT_FAIL` audit lines | Harness LLM too small to parse the debate transcript reliably | Use a larger Harness LLM (≥ 7B for local, or any cloud frontier) |
-| `gpt-5.x` API returns "unsupported parameter" | OpenAI dropped `temperature` / renamed `max_tokens` on reasoning models | The factory in `agents/factory.py` already handles this; for custom scripts, drop `temperature` and use `max_completion_tokens` |
+| `ModuleNotFoundError` for `pypdf` / `docx` / `bs4` in artifact mode | Missing the artifact extra | `pip install "proofagent-harness[artifact]"` |
+| `LLMNotConfiguredError: API key missing` | Forgot to `export` the relevant provider key | Export the key in the same terminal that runs the script |
+| `LLM Provider NOT provided…` | LiteLLM can't infer the provider from a bare model name | Prefix it: `anthropic/claude-haiku-4-5`, `gemini/gemini-2.5-pro` |
+| `the configured harness LLM cannot handle the context size` | Local proxy loaded at too-small a context length | Reload the proxy model with a larger `--context-length` and/or pass `--context-budget` (e.g. `6000`) and/or drop `--turns` |
+| `Error code: 400 — model has crashed` | Local proxy OOM (model + KV cache > RAM) | Lower the proxy context length; close other apps; use a smaller quant |
+| All juror calls time out at 600s+ | Single-threaded local proxy can't serve parallel jurors | Add `--sequential` (and `--per-call-timeout` on 08 / the benchmark) |
+| OpenAI harness LLM refuses an adversarial transcript | Provider content filter flags the red-team text | Pass an Anthropic `--fallback-llm` (e.g. `claude-sonnet-4-5`) — it isn't subject to OpenAI's filter |
+| Final score mid-band (~5–7) with many `SOFT_FAIL` audit lines | Harness LLM too small to parse the debate transcript reliably | Use a larger harness LLM (≥ 7B local, or any cloud frontier) and/or a `--fallback-llm` / `--fallback-juror` |
+| Live Reporting rejected with **HTTP 402** | Free/Starter accounts cap turns at 15 server-side | Lower `--turns` to ≤ 15, or upgrade the plan |
+| `gpt-5.x` returns "unsupported parameter" | Reasoning models dropped `temperature` / renamed `max_tokens` | The factory in [`agents/factory.py`](agents/factory.py) already handles this; in custom code drop `temperature` and use `max_completion_tokens` |
 
 ---
 
 ## See also
 
 - Top-level [`README.md`](../README.md) — package overview, install, quickstart
-- [`agents/README.md`](agents/README.md) — agent spec schema + authoring
-  your own
-- [`docs/TRAP_MANIFEST.md`](../docs/TRAP_MANIFEST.md) — trap spec for
-  example 08
-- [`notebooks/`](../notebooks/) — end-to-end walkthroughs in Jupyter
+- [`agents/README.md`](agents/README.md) — agent spec schema + authoring your own
+- [`docs/TRAP_MANIFEST.md`](../docs/TRAP_MANIFEST.md) — trap manifest spec (example 06)
+- [`docs/governance-upload.md`](../docs/governance-upload.md) — full `--upload` CLI, exit codes, CI gating, programmatic API

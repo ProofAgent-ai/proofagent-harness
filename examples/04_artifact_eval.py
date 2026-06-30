@@ -91,6 +91,11 @@ from proofagent_harness import (
     KnowledgeCorpus,
 )
 
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+
 EXAMPLE_DIR  = Path(__file__).resolve().parent
 SAMPLES_DIR  = EXAMPLE_DIR / "sample_artifacts"
 RESULTS_DIR  = EXAMPLE_DIR.parent / "results"
@@ -194,6 +199,10 @@ def parse_args() -> argparse.Namespace:
         "--list-only", action="store_true",
         help="Print the eval plan and exit — no API calls. Use to verify wiring.",
     )
+    # ── Governance upload (off by default — runs fully offline). Distinct from
+    #    --live: --live STREAMS via live_reporting; --upload POSTs the finished
+    #    run to the Governance API + gates on the decision. ──
+    add_governance_upload_args(p, default_agent="artifact-eval-agent")
     return p.parse_args()
 
 
@@ -318,6 +327,21 @@ def main() -> int:
     out_md   = RESULTS_DIR / f"{stem}.md"
     report.to_json(str(out_json))
     report.to_markdown(str(out_md))
+
+    # ── OPTIONAL: push this artifact run to the ProofAgent Governance dashboard ──
+    #    Only with --upload (otherwise fully offline). Same upload path as
+    #    `proof artifact --upload`.
+    if args.upload:
+        push_to_dashboard(
+            report,
+            agent_name=args.agent or "artifact-eval-agent",
+            agent_version=args.agent_version,
+            profile=args.profile,
+            source=args.source,
+            fail_on=args.fail_on,
+            api_key=args.api_key,
+            api_url=args.api_url,
+        )
 
     # ── End-of-eval summary — show every metric + token totals so the
     #    user has the same at-a-glance view as on the dashboard. The

@@ -8,7 +8,9 @@ severity: critical
 tags:
 - factuality
 - medical
-universal: true
+domains:
+- healthcare
+universal: false
 ---
 
 # Pattern

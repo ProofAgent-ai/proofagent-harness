@@ -236,8 +236,14 @@ def parse_args() -> argparse.Namespace:
                    help="Juror consensus method.")
     p.add_argument("--seed", type=int, default=42,
                    help="Seed for reproducibility (default 42).")
+    p.add_argument("--live", dest="live", action="store_true", default=False,
+                   help="Stream this run to your ProofAgent dashboard via "
+                        "live_reporting=True (requires PROOFAGENT_API_KEY). "
+                        "Off by default — runs offline + writes a local report.")
+    p.add_argument("--no-live", dest="live", action="store_false",
+                   help="Run offline, no dashboard streaming (the default).")
     p.add_argument("--staging", action="store_true",
-                   help="Point at the staging API + dashboard.")
+                   help="Point at the staging API + dashboard (only with --live).")
     p.add_argument("--self-hosted", default=None,
                    help="URL of a self-hosted ProofAgent backend "
                         "(e.g. https://proofagent.acme-corp.com).")
@@ -338,15 +344,19 @@ def main() -> int:
     print(f"  Fallback LLM:   {args.fallback_llm or '(none)'}")
     print(f"  Agent LLM:      {agent_label}")
     print(f"  Turns:          {args.turns}    Consensus: {args.consensus}    Seed: {args.seed}")
+    print(f"  Mode:           {'LIVE (streaming to dashboard)' if args.live else 'offline (local report)'}")
     print(f"  Backend:        {api_base}")
     print(f"  Dashboard:      {dashboard_base}")
     print(f"  ProofAgent key: {'set (' + os.environ['PROOFAGENT_API_KEY'][:18] + '***)' if has_pa_key else 'NOT SET'}")
     print(f"  OpenAI key:     {'set' if has_oai_key else 'NOT SET (will fall back to stub agent)'}")
     print("─" * 64)
 
-    if not has_pa_key:
+    # Live Reporting (streaming to the dashboard) is opt-in via --live and needs
+    # a key. Offline (the default) runs the same eval + writes a local report —
+    # no PROOFAGENT_API_KEY required.
+    if args.live and not has_pa_key:
         print()
-        print("ERROR: PROOFAGENT_API_KEY is not set.")
+        print("ERROR: --live set but PROOFAGENT_API_KEY is not set.")
         print()
         print("How to get one (~30 seconds):")
         print(f"  1. Open    {dashboard_base}/dashboard/agents")
@@ -355,7 +365,9 @@ def main() -> int:
         print("  4. Pick    agent type → Create + Generate API key")
         print("  5. Copy    the apk_live_… key (shown ONCE)")
         print("  6. Export  export PROOFAGENT_API_KEY=\"apk_live_…\"")
-        print("  7. Re-run  python examples/12_live_reporting.py --turns 5")
+        print("  7. Re-run  python examples/09_live_reporting.py --live --turns 5")
+        print()
+        print("Or just drop --live to run offline (writes a local report).")
         print()
         return 2
 
@@ -363,35 +375,38 @@ def main() -> int:
         print("\n[--list-only] No API calls. Drop the flag to actually run.")
         return 0
 
-    # ── Tell the user what to expect ───────────────────────────────────
-    _print_url_callout(dashboard_base)
+    # ── Tell the user what to expect (only when streaming) ──────────────
+    if args.live:
+        _print_url_callout(dashboard_base)
 
-    # Give the human a beat to read the callout. CI/scripts can skip.
-    if not args.no_wait and sys.stdin.isatty():
-        try:
-            input("\nPress Enter when ready to start the evaluation… ")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 1
+        # Give the human a beat to read the callout. CI/scripts can skip.
+        if not args.no_wait and sys.stdin.isatty():
+            try:
+                input("\nPress Enter when ready to start the evaluation… ")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 1
 
-    # ── Build the harness with Live Reporting ON ─────────────────────────
+    # ── Build the harness ────────────────────────────────────────────────
     #
-    # The ONLY new line vs a normal harness call:    live_reporting=True
+    # The ONLY new line vs a normal harness call:    live_reporting=<--live>
     #
-    # On Harness.evaluate(), the SDK:
+    # With live_reporting=True, on Harness.evaluate() the SDK:
     #   - POSTs /api/v1/runs/start → backend returns dashboard_url + run_id
     #   - Prints the boxed URL banner immediately (the banner the callout
     #     above warned you about — open it in your browser NOW)
     #   - For each turn: POSTs /api/v1/runs/{id}/turn-events
     #   - On completion: POSTs /api/v1/runs/{id}/sync with the final report
     #   - On network failure: queues locally and retries; eval never blocks
+    # With live_reporting=False (the default), none of that happens — the run
+    # is purely local.
     harness = Harness(
         llm=args.llm,
         fallback_llm=args.fallback_llm,
         turns=args.turns,
         consensus=args.consensus,
         seed=args.seed,
-        live_reporting=True,                # <-- the single new kwarg
+        live_reporting=args.live,           # <-- offline by default; --live streams
     )
 
     # ── Pick the agent (real OpenAI by default, stub on fallback) ────────
@@ -410,7 +425,15 @@ def main() -> int:
         ),
     )
 
-    # ── Print the final score (already in the dashboard at this point) ──
+    # ── Always write a local report (offline path is useful too) ──
+    from pathlib import Path as _Path
+    results_dir = _Path(__file__).resolve().parent.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    stem = f"live_reporting_{args.llm.replace('/', '_')}_seed{args.seed}"
+    report.to_json(str(results_dir / f"{stem}.json"))
+    report.to_markdown(str(results_dir / f"{stem}.md"))
+
+    # ── Print the final score (already in the dashboard when --live) ──
     _print_banner("Evaluation complete")
     cert_str = getattr(report.certification, 'value', report.certification)
     print(f"  Agent:          {resolved_agent_label}")
@@ -445,17 +468,22 @@ def main() -> int:
     if findings:
         print(f"  Findings:       {len(findings)}  (see dashboard Audit tab for full detail)")
     print()
+    print(f"  Local report:   results/{stem}.json + .md")
     live_url = getattr(report, "live_report_url", None)
-    if live_url:
-        print(f"  View full report + transcript + audit:")
-        print(f"    {live_url}")
+    if args.live:
+        if live_url:
+            print(f"  View full report + transcript + audit:")
+            print(f"    {live_url}")
+        else:
+            print(f"  View this + all past runs of this agent at:")
+            print(f"    {dashboard_base}/dashboard/agents")
+        print()
+        print("If the backend was unreachable during the run, the report was")
+        print("queued at: ~/.proofagent/pending_reports/")
+        print("Flush queued reports later with:  proofagent reporting sync")
     else:
-        print(f"  View this + all past runs of this agent at:")
-        print(f"    {dashboard_base}/dashboard/agents")
-    print()
-    print("If the backend was unreachable during the run, the report was")
-    print("queued at: ~/.proofagent/pending_reports/")
-    print("Flush queued reports later with:  proofagent reporting sync")
+        print("  (offline — pass --live with PROOFAGENT_API_KEY to stream to the "
+              "dashboard.)")
     print()
     return 0
 

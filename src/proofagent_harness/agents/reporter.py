@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from typing import Any
 
 from proofagent_harness.graph.state import HarnessState
@@ -209,6 +210,33 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
         ),
     )
 
+    # Compliance assessment (reporter duty) — LLM-maps this run to the control
+    # frameworks SELECTED by the governance policy (policy-as-code). The selection
+    # is supplied via PROOFAGENT_COMPLIANCE_FRAMEWORKS (comma-separated ids; CI can
+    # populate it from GET /compliance/selection) or state["compliance_frameworks"];
+    # empty → the default core set. Travels in the report so the governance platform
+    # SCREENS it without calling a model. Off via PROOFAGENT_COMPLIANCE=0; no-op-safe.
+    compliance: dict[str, Any] = {}
+    if os.environ.get("PROOFAGENT_COMPLIANCE", "1") != "0":
+        try:
+            from proofagent_harness.compliance import assess_compliance
+            selected = state.get("compliance_frameworks") or None
+            env_sel = os.environ.get("PROOFAGENT_COMPLIANCE_FRAMEWORKS", "").strip()
+            if not selected and env_sel:
+                selected = [s.strip() for s in env_sel.split(",") if s.strip()]
+            compliance = assess_compliance(
+                final_score=final_score,
+                certification=certification,
+                per_metric=per_metric,
+                findings=findings,
+                mode=str(state.get("mode") or "multi_turn"),
+                model=getattr(state.get("llm"), "model", None) or "gpt-4.1-mini",
+                frameworks=selected,
+            )
+        except Exception:
+            # Best-effort: never let compliance break the report.
+            compliance = {}
+
     return {
         "per_metric": per_metric,
         "confidence": confidence,
@@ -222,6 +250,7 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
         "executive_summary": exec_summary,
         "production_ready": prod_ready,
         "top_risk": top_risk,
+        "compliance": compliance,
     }
 
 # Error-message markers that identify a PROVIDER CONTENT REFUSAL (a content /

@@ -8,6 +8,63 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.6.0] — 2026-06-XX
+
+The **release-gate** release: turn an evaluation into a CI ship/no-ship decision,
+with compliance + evidence baked in — and a genuinely adversarial `debate`.
+
+### Added — Governance upload + CI release gate
+- **`proof run --upload` / `proof artifact --upload`** — push the finished
+  evaluation to the ProofAgent Governance API and gate CI on the returned
+  decision (exit `0` pass / `1` review / `2` block). **The base URL defaults to
+  ProofAgent Cloud (`https://app.proofagent.ai`), so only an API key is
+  needed**; override with `--api-url` / `PROOFAGENT_API_BASE_URL` for a
+  self-hosted Enterprise endpoint. New flags: `--api-url`, `--api-key`,
+  `--agent`, `--agent-version`, `--profile`, `--fail-on`, `--source`.
+- New public module **`proofagent_harness.governance`**:
+  `build_governance_payload`, `upload_run`, `gate_exit_code`,
+  `structure_findings_evidence`, `fetch_premium_traps`, `GovernanceUploadError`,
+  `DEFAULT_API_BASE_URL`.
+- **Compliance assessment** — the reporter maps each run to per-control statuses
+  (`met` / `partial` / `attention` / `not_evaluated`) across a **25-framework
+  catalog** (default core: EU AI Act, NIST AI RMF, ISO/IEC 42001, SOC 2),
+  attached to `report.compliance` and the upload payload. On by default;
+  `PROOFAGENT_COMPLIANCE=0` to disable, `PROOFAGENT_COMPLIANCE_FRAMEWORKS` to
+  pick frameworks.
+- **Evidence-driven findings** — on upload each finding is structured into
+  `claim → artifact/transcript line ref → contradicting source → fix` (one cheap
+  LLM call per finding, cap 8, best-effort + no-op-safe). `PROOFAGENT_EVIDENCE=0`
+  to disable; model via `PROOFAGENT_EVIDENCE_LLM`.
+
+### Added — evaluation engine
+- **Real multi-round `debate` consensus** — `--consensus debate` is now a
+  genuinely distinct adversarial protocol (previously it reused the Delphi
+  single re-vote). It runs `debate_rounds` (default 3) sequential rounds where
+  jurors see and rebut the prior round's *cited* audits — challenge the
+  weakest-justified peer, defend or revise with evidence, no convergence merely
+  for agreement — and engages on numeric disagreement **or** per-turn violation
+  (FAIL) disagreement. `delphi` / `independent` are unchanged. New
+  `JurorScore.debate_round` and `ConsensusResult.debated` carry the audit trail.
+- **`tool_use` is now a default critical floor (`5.0`)** — a
+  zero-tolerance-capped tool-integrity breach (3.0) forces `NOT_READY`; it can no
+  longer be averaged into a passing certification.
+- **Operator-supplied trap prioritization** — `--extra-traps` / `--pin-traps`
+  and installed packs get a selection boost + off-domain-penalty exemption, and
+  the plan reports a per-trap `source_map` + premium count.
+
+### Changed
+- **Examples curated** to a clean `01–12` set (+ a `benchmarks/` folder for the
+  paper-cohort repro). Every example exposes harness parameters as CLI flags and
+  a uniform `--upload` / `--no-upload` toggle (offline by default); notebooks
+  consolidated to 3.
+
+### Docs
+- README rewritten to a standard open-source layout: features, full CLI **and**
+  Python parameter tables, a harness-LLM recommendation (local proxy for quick
+  checks vs frontier for production gates), and a governance section with
+  dashboard screenshots. `docs/governance-upload.md` now covers the Python API
+  and artifact-mode upload.
+
 ## [0.5.1] — 2026-06-15
 
 Docs & packaging polish — **no functional changes** (the evaluation engine,

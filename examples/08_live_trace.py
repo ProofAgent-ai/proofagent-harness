@@ -135,6 +135,11 @@ from proofagent_harness import (
     load_traps,
 )
 
+# Optional governance-dashboard push (no-op offline) + the shared --upload flag
+# group. Sibling helper; make it importable regardless of the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+
 console = Console()
 
 
@@ -604,6 +609,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--list-agents", action="store_true",
                    help="Print the bundled agent registry and exit.")
     p.add_argument("--output-dir", default=None)
+    # ── Governance upload (off by default — runs fully offline). This example
+    #    already owns --agent (agent-spec selector), so skip the upload group's
+    #    --agent; the dashboard name is derived from the selected spec below. ──
+    add_governance_upload_args(p, include_agent_flag=False)
     return p.parse_args()
 
 
@@ -847,6 +856,22 @@ def main() -> int:
     console.print(f"\n[bold]Report saved:[/bold]")
     console.print(f"  {out_dir / f'{stem}.json'}")
     console.print(f"  {out_dir / f'{stem}.md'}")
+
+    # ── OPTIONAL: push this run to the ProofAgent Governance dashboard ──
+    #    Only with --upload (otherwise fully offline). The dashboard agent_name
+    #    is derived from the selected spec (this example's --agent picks the
+    #    spec, so it is not reused as the dashboard name).
+    if args.upload:
+        push_to_dashboard(
+            report,
+            agent_name=f"live-trace-{spec.name.replace('/', '-')}",
+            agent_version=args.agent_version,
+            profile=args.profile,
+            source=args.source,
+            fail_on=args.fail_on,
+            api_key=args.api_key,
+            api_url=args.api_url,
+        )
 
     return 0
 

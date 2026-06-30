@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -52,9 +54,51 @@ def run(
              "otherwise lose to domain-matched traps)."),
     knowledge: Path | None = typer.Option(None, "--knowledge", exists=True),
     llm: str | None = typer.Option(None, "--llm", help="Model id (LiteLLM target)."),
+    fallback_llm: str | None = typer.Option(
+        None, "--fallback-llm",
+        help="Optional secondary Harness LLM that rescues failed primary calls "
+             "(rate-limit / quota / empty / bad JSON). Cross-family is best, e.g. "
+             "--llm gpt-4.1-mini --fallback-llm anthropic/claude-haiku-4-5. "
+             "Defaults to env PROOFAGENT_FALLBACK_LLM.",
+    ),
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
+    # ── Governance upload (gate CI/CD on the release decision) ──
+    # OFF by default — a vanilla `proof run` stays fully local, no network.
+    upload: bool = typer.Option(
+        False, "--upload/--no-upload",
+        help="Upload the result to the ProofAgent Governance API and gate on "
+             "the returned decision (exit 0 pass / 1 review / 2 block).",
+    ),
+    api_url: str | None = typer.Option(
+        None, "--api-url",
+        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, "
+             "then ProofAgent Cloud (https://app.proofagent.ai). Override only for "
+             "an Enterprise / on-prem endpoint.",
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key",
+        help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY.",
+    ),
+    agent: str | None = typer.Option(
+        None, "--agent",
+        help="Logical name of the agent under test (groups runs + regressions "
+             "in the dashboard). Defaults to --role.",
+    ),
+    agent_version: str | None = typer.Option(
+        None, "--agent-version", help="Version / git ref of the agent under test."),
+    profile: str | None = typer.Option(
+        None, "--profile",
+        help="Governance profile slug to evaluate against (e.g. "
+             "airline_customer_support)."),
+    fail_on: str = typer.Option(
+        "block", "--fail-on",
+        help="Which gate decision fails the build: pass | review | block. "
+             "Default 'block' (review is informational)."),
+    source: str = typer.Option(
+        "ci_cd", "--source",
+        help="Origin of this run: local | ci_cd | manual | api | scheduled."),
 ) -> None:
     """Run the harness against an agent defined in a Python file."""
     callable_obj = _load_callable(agent_file, entry)
@@ -69,6 +113,7 @@ def run(
 
     harness = Harness(
         llm=llm,
+        fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
         metrics=metric_list,
         turns=turns,
         consensus=consensus,
@@ -93,7 +138,247 @@ def run(
         report.to_markdown(str(md_out))
         console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
 
+    if upload:
+        _upload_and_gate(
+            report,
+            api_url=api_url or os.environ.get("PROOFAGENT_API_BASE_URL"),
+            api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+            agent_name=agent or role,
+            agent_version=agent_version,
+            profile=profile,
+            fail_on=fail_on,
+            source=source,
+            transcript=_transcript_text(report),
+        )
+        # _upload_and_gate always raises typer.Exit with the gate code.
+
     raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
+
+
+@app.command("artifact")
+def artifact(
+    artifact_path: Path = typer.Argument(
+        ..., exists=True, help="Deliverable to score (.md/.txt/.pdf/.docx/.html/.png)."
+    ),
+    knowledge_dir: Path | None = typer.Option(
+        None, "--knowledge-dir", "-k", help="Folder of ground-truth docs to grade against."
+    ),
+    artifact_type: str = typer.Option(
+        "BRD", "--type", "-t", help="Artifact type: BRD | report | code | business_plan | ..."
+    ),
+    role: str = typer.Option("an AI agent producing a deliverable", "--role"),
+    business_case: str = typer.Option("", "--business-case"),
+    llm: str | None = typer.Option(None, "--llm", help="Harness LLM (LiteLLM target)."),
+    fallback_llm: str | None = typer.Option(
+        None, "--fallback-llm", help="Cross-family fallback LLM. Defaults to env PROOFAGENT_FALLBACK_LLM."
+    ),
+    consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
+    seed: int = typer.Option(42, "--seed"),
+    json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
+    md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
+    quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
+    upload: bool = typer.Option(
+        False, "--upload/--no-upload",
+        help="Upload to the Governance API and gate on the decision (exit 0/1/2).",
+    ),
+    api_url: str | None = typer.Option(
+        None, "--api-url",
+        help="Governance API base URL. Defaults to env PROOFAGENT_API_BASE_URL, then "
+             "ProofAgent Cloud. Override only for an Enterprise / on-prem endpoint.",
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="API key. Defaults to env PROOFAGENT_API_KEY."
+    ),
+    agent: str | None = typer.Option(
+        None, "--agent", help="Logical agent name (groups runs). Defaults to --role."
+    ),
+    agent_version: str | None = typer.Option(None, "--agent-version"),
+    profile: str | None = typer.Option(
+        None, "--profile", help="Governance profile slug (e.g. artifact_governance_default)."
+    ),
+    fail_on: str = typer.Option("block", "--fail-on", help="pass | review | block."),
+    source: str = typer.Option("ci_cd", "--source"),
+) -> None:
+    """Run an ARTIFACT-mode evaluation: score a finished deliverable (no conversation)."""
+    import json as _json
+
+    from proofagent_harness import AgentArtifact, AgentContext, KnowledgeCorpus
+
+    art = AgentArtifact.from_path(artifact_path, type=artifact_type)
+    corpus = (
+        KnowledgeCorpus(sources=[str(knowledge_dir)], extensions=[".md", ".txt"], max_chars=200_000)
+        if knowledge_dir and Path(knowledge_dir).exists()
+        else None
+    )
+    # Auto-bundle the producing agent's contract when sibling files exist.
+    bundle = artifact_path.parent
+    sp, tp, tr = bundle / "agent_system_prompt.md", bundle / "agent_tools.json", bundle / "agent_trace.md"
+    system_prompt = sp.read_text() if sp.exists() else None
+    tools = _json.loads(tp.read_text()) if tp.exists() else None
+    agent_trace = tr.read_text() if tr.exists() else None
+    context = (
+        AgentContext(system_prompt=system_prompt, tools=tools or [])
+        if (system_prompt or tools)
+        else None
+    )
+
+    report = Harness(
+        mode="artifact",
+        llm=llm,
+        fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
+        consensus=consensus,
+        seed=seed,
+        verbose=not quiet,
+    ).evaluate(
+        artifact=art,
+        knowledge_corpus=corpus,
+        role=role,
+        business_case=business_case,
+        context=context,
+        agent_trace=agent_trace,
+    )
+
+    if json_out:
+        report.to_json(str(json_out))
+        console.print(f"[dim]Report JSON written to {json_out}[/dim]")
+    if md_out:
+        report.to_markdown(str(md_out))
+        console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
+
+    if upload:
+        _upload_and_gate(
+            report,
+            api_url=api_url or os.environ.get("PROOFAGENT_API_BASE_URL"),
+            api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+            agent_name=agent or role,
+            agent_version=agent_version,
+            profile=profile,
+            fail_on=fail_on,
+            source=source,
+            artifact_text=getattr(art, "generated_artifact", None),
+            knowledge_text=(
+                "\n\n".join(
+                    p.read_text(errors="ignore")
+                    for p in sorted(Path(knowledge_dir).rglob("*.md"))
+                )[:24000]
+                if knowledge_dir and Path(knowledge_dir).exists()
+                else None
+            ),
+        )
+
+    raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
+
+
+def _transcript_text(report) -> str | None:
+    """Best-effort flatten of a multi-turn transcript for evidence grounding."""
+    turns = getattr(report, "transcript", None)
+    if not turns:
+        return None
+    out = []
+    for i, t in enumerate(turns):
+        if isinstance(t, dict):
+            idx = t.get("turn_index", i)
+            u = t.get("question") or t.get("user") or t.get("probe") or t.get("prompt") or ""
+            a = t.get("answer") or t.get("agent") or t.get("response") or t.get("output") or ""
+        else:
+            idx = getattr(t, "turn_index", i)
+            u = getattr(t, "question", "") or getattr(t, "user", "") or ""
+            a = getattr(t, "answer", "") or getattr(t, "agent", "") or getattr(t, "response", "") or ""
+        out.append(f"[turn {idx}] USER: {u}\n[turn {idx}] AGENT: {a}")
+    return ("\n".join(out)[:24000]) or None
+
+
+def _upload_and_gate(
+    report,
+    *,
+    api_url: str | None,
+    api_key: str | None,
+    agent_name: str,
+    agent_version: str | None,
+    profile: str | None,
+    fail_on: str,
+    source: str,
+    artifact_text: str | None = None,
+    knowledge_text: str | None = None,
+    transcript: str | None = None,
+) -> None:
+    """Build the governance payload, upload it, print the gate decision, and
+    exit with the gate-mapped code. Always raises ``typer.Exit``."""
+    from proofagent_harness.governance import (
+        DEFAULT_API_BASE_URL,
+        GovernanceUploadError,
+        build_governance_payload,
+        gate_exit_code,
+        structure_findings_evidence,
+        upload_run,
+    )
+
+    # Base URL defaults to ProofAgent Cloud, so a user only needs an API key to
+    # push. An Enterprise / on-prem endpoint overrides via --api-url / env.
+    api_url = api_url or DEFAULT_API_BASE_URL
+
+    if not api_key:
+        console.print(
+            "[red]--upload was set but no API key was provided. Pass --api-key "
+            "or set PROOFAGENT_API_KEY (get one at "
+            f"{api_url} → Settings → API Keys).[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    if fail_on not in ("pass", "review", "block"):
+        console.print(
+            f"[red]--fail-on must be one of pass | review | block (got {fail_on!r}).[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    payload = build_governance_payload(
+        report,
+        agent_name=agent_name,
+        agent_version=agent_version,
+        profile=profile,
+        source=source,
+    )
+
+    # Evidence-driven findings: structure each finding into claim → ref →
+    # contradiction → fix. Best-effort + no-op-safe; disable with PROOFAGENT_EVIDENCE=0.
+    if os.environ.get("PROOFAGENT_EVIDENCE", "1") != "0":
+        with contextlib.suppress(Exception):
+            structure_findings_evidence(
+                payload,
+                artifact_text=artifact_text,
+                knowledge_text=knowledge_text,
+                transcript=transcript,
+                model=os.environ.get("PROOFAGENT_EVIDENCE_LLM", "gpt-4.1-mini"),
+            )
+
+    console.print(f"[dim]Uploading run to {api_url} …[/dim]")
+    try:
+        result = upload_run(payload, api_url=api_url, api_key=api_key)
+    except GovernanceUploadError as exc:
+        console.print(f"[red]Governance upload failed:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    gate_status = str(result.get("gate_status", "")).lower()
+    code = gate_exit_code(gate_status, fail_on=fail_on)
+
+    color = {"pass": "green", "review": "yellow", "block": "red"}.get(gate_status, "white")
+    console.print(
+        f"\n[bold]Governance gate:[/bold] [{color}]{gate_status.upper() or 'UNKNOWN'}[/{color}]"
+    )
+    if result.get("final_score") is not None:
+        grade = result.get("grade_label", "")
+        grade_suffix = f" ({grade})" if grade else ""
+        console.print(f"  Final score : {result.get('final_score')}{grade_suffix}")
+    failed_rules = result.get("failed_rules") or []
+    if failed_rules:
+        console.print("  Failed rules:")
+        for rule in failed_rules:
+            console.print(f"    [red]- {rule}[/red]")
+    if result.get("dashboard_url"):
+        console.print(f"  Dashboard   : {result.get('dashboard_url')}")
+    console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
+
+    raise typer.Exit(code=code)
 
 @traps_app.command("list")
 def traps_list(
