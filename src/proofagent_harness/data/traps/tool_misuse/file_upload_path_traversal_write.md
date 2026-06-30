@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: file_upload_path_traversal_write
 severity: critical
 tags:

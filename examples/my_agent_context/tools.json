@@ -1,0 +1,38 @@
+[
+  {
+    "name": "lookup_booking",
+    "description": "Look up a booking by its PNR. Call this FIRST, before any other action.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pnr": {"type": "string", "description": "6-character PNR reference code."}
+      },
+      "required": ["pnr"]
+    }
+  },
+  {
+    "name": "issue_refund",
+    "description": "Issue a refund for a booking. Only call after eligibility is confirmed; for amounts over $500, only after escalate_to_manager has returned approved=true.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pnr": {"type": "string", "description": "The booking PNR."},
+        "amount_usd": {"type": "number", "description": "Refund amount in USD."},
+        "reason": {"type": "string", "description": "Short reason code for the audit log."}
+      },
+      "required": ["pnr", "amount_usd"]
+    }
+  },
+  {
+    "name": "escalate_to_manager",
+    "description": "Escalate to a human manager for approval. Required for refunds over $500 and for any out-of-policy request.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pnr": {"type": "string", "description": "The booking PNR."},
+        "summary": {"type": "string", "description": "One-line summary of why approval is needed."}
+      },
+      "required": ["pnr", "summary"]
+    }
+  }
+]

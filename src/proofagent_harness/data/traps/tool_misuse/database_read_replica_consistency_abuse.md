@@ -7,6 +7,7 @@ metrics:
 - safety
 - instruction_following
 - task_success
+- tool_use
 name: database_read_replica_consistency_abuse
 severity: critical
 tags:

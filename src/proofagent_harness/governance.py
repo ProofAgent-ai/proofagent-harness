@@ -773,6 +773,10 @@ def build_governance_payload(
         # Compliance assessment produced by the reporter; the governance backend
         # stores + displays it (it never calls a model itself).
         "compliance": dict(getattr(report, "compliance", {}) or {}),
+        # v0.7.0 — optional context-engineering assessment (additive; {} when
+        # off). The contract is additionalProperties:true, so an older backend
+        # ignores it and never rejects the payload.
+        "context_engineering": dict(getattr(report, "context_engineering", {}) or {}),
         "warnings": list(getattr(report, "warnings", []) or []),
         "duration_seconds": _rfloat(report, "duration_seconds"),
         "cost_summary": _build_cost_summary(report),

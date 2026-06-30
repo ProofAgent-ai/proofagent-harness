@@ -237,6 +237,27 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
             # Best-effort: never let compliance break the report.
             compliance = {}
 
+    # v0.7.0 — OPTIONAL context-engineering assessment. Grades the QUALITY of
+    # the agent's supplied context (system prompt + tool schemas + knowledge) as
+    # a SEPARATE sub-score — it NEVER enters per_metric / final_score /
+    # certification / the gate. Opt-in via assess_context=True (evaluate) or
+    # PROOFAGENT_ASSESS_CONTEXT=1; no-op-safe (returns {} on no context / failure).
+    context_engineering: dict[str, Any] = {}
+    _assess_ctx = bool(state.get("assess_context")) or os.environ.get(
+        "PROOFAGENT_ASSESS_CONTEXT", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    if _assess_ctx:
+        try:
+            from proofagent_harness.context_engineering import assess_context_engineering
+            context_engineering = assess_context_engineering(
+                context=state.get("context"),
+                mode=str(state.get("mode") or "multi_turn"),
+                model=getattr(state.get("llm"), "model", None) or "gpt-4.1-mini",
+                has_knowledge=bool(state.get("knowledge_text")),
+            )
+        except Exception:
+            context_engineering = {}
+
     return {
         "per_metric": per_metric,
         "confidence": confidence,
@@ -251,6 +272,7 @@ def reporter_node(state: HarnessState) -> dict[str, Any]:
         "production_ready": prod_ready,
         "top_risk": top_risk,
         "compliance": compliance,
+        "context_engineering": context_engineering,
     }
 
 # Error-message markers that identify a PROVIDER CONTENT REFUSAL (a content /

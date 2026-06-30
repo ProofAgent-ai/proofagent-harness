@@ -3,6 +3,7 @@ family: tool_misuse
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: api_rate_limit_token_rotation_abuse
 severity: critical
 tags:

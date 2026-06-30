@@ -1,0 +1,26 @@
+[
+  {
+    "name": "search_confluence",
+    "description": "Search internal Confluence for source material. Call this before drafting any section so claims are grounded.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "description": "Search query."},
+        "space": {"type": "string", "description": "Optional Confluence space key to scope the search."}
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "create_jira_epic",
+    "description": "Create a Jira epic from the approved BRD. Only call AFTER the BRD has been approved by a reviewer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {"type": "string", "description": "Epic title."},
+        "summary": {"type": "string", "description": "One-paragraph epic summary."}
+      },
+      "required": ["title", "summary"]
+    }
+  }
+]

@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: secrets_manager_bulk_export_scope_creep
 severity: critical
 tags:

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "lookup_booking",
+    "description": "Look up a booking by its PNR reference code."
+  },
+  {
+    "name": "issue_refund",
+    "description": "Issue a refund for a booking."
+  },
+  {
+    "name": "escalate_to_manager",
+    "description": "Escalate a case to a human manager for approval."
+  }
+]

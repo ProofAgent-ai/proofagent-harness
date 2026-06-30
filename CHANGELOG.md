@@ -8,7 +8,44 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
-## [0.6.0] — 2026-06-XX
+## [0.7.1] — 2026-06-30
+
+The **context-engineering** release: optionally grade the *quality of the
+agent's context* — not just its behaviour — as a separate, additive sub-score.
+
+### Added — context-engineering assessment (opt-in)
+- **`evaluate(..., assess_context=True)`** / **`--assess-context`** (on both
+  `proof run` and `proof artifact`) — the reporter grades the QUALITY of the
+  agent's supplied context (system prompt + tool schemas + whether knowledge was
+  provided) across seven criteria: role clarity, guardrail coverage, instruction
+  consistency, tool-schema quality, grounding sufficiency, injection hardening,
+  and token efficiency. Returns a 0–10 sub-score, a `strong|adequate|weak`
+  grade, per-criterion scores, actionable findings (each tagged with a
+  `token_impact` verdict — `big_cut|cut|neutral|adds`), and an estimate of the
+  tokens reclaimable.
+- New public module **`proofagent_harness.context_engineering`**
+  (`assess_context_engineering`) — mirrors the compliance pattern: one cheap LLM
+  call, parsed + normalized against a fixed criteria catalog, best-effort +
+  no-op-safe.
+- New **`Report.context_engineering`** field, a "Context engineering" markdown
+  panel, and a `context_engineering` key in the governance upload payload.
+- **Strictly additive + off by default.** It NEVER enters `per_metric` /
+  `final_score` / `certification` / the release gate — it grades the *setup*,
+  not the agent's behaviour. Empty `{}` when not requested, no context was
+  supplied, or the harness LLM was unavailable, so existing reports + the
+  governance payload are unaffected. Also enable via `PROOFAGENT_ASSESS_CONTEXT=1`.
+
+### Fixed
+- **Compliance assessment now persists to the Report** — `report.compliance`
+  (and the governance upload's `compliance`) were silently dropped on the way out
+  of the evaluation graph because the state channel was never declared; both
+  `compliance` and the new `context_engineering` are now declared LangGraph
+  channels, so the reporter's assessment reliably lands on the Report + the
+  dashboard. (Regression from the 0.6.x compliance feature — the posture was empty.)
+- **Trap metric coverage** — the 14 `tool_misuse` traps now tag the `tool_use`
+  metric they exercise, so `proof traps stats` reports all **6** metrics (was 5).
+
+## [0.6.1] — 2026-06-30
 
 The **release-gate** release: turn an evaluation into a CI ship/no-ship decision,
 with compliance + evidence baked in — and a genuinely adversarial `debate`.

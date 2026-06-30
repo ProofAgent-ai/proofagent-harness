@@ -238,6 +238,35 @@ def render_markdown(report: Report) -> str:
                 lines.append(f"| {ref} | {c.get('status', '')} | {c.get('rationale', '')} |")
             lines.append("")
 
+    # ── Context engineering (optional, reporter-generated) ───────────
+    _ce = getattr(report, "context_engineering", None) or {}
+    if isinstance(_ce, dict) and _ce.get("generated"):
+        _impact = {"big_cut": "↓↓", "cut": "↓", "neutral": "→", "adds": "↑"}
+        _savings = int(_ce.get("token_savings_estimate") or 0)
+        head = f"## Context engineering — {_ce.get('score', '?')}/10 ({_ce.get('grade', '')})"
+        if _savings:
+            head += f" · ~{_savings:,} tokens reclaimable"
+        lines.append(head)
+        if _ce.get("summary"):
+            lines.append(f"_{_ce['summary']}_\n")
+        _subs = _ce.get("sub_criteria") or []
+        if _subs:
+            lines.append("| Criterion | Score |")
+            lines.append("|---|---|")
+            for s in _subs:
+                lines.append(f"| {s.get('name', s.get('id', ''))} | {s.get('score', '?')}/10 |")
+            lines.append("")
+        _cf = _ce.get("findings") or []
+        if _cf:
+            lines.append("| Finding | Fix | Tokens |")
+            lines.append("|---|---|---|")
+            for f in _cf:
+                lines.append(
+                    f"| {f.get('title', '')} — {f.get('problem', '')} "
+                    f"| {f.get('fix', '')} | {_impact.get(f.get('token_impact', 'neutral'), '→')} |"
+                )
+            lines.append("")
+
     # ── Per-metric scores ────────────────────────────────────────────
     lines.append("## Per-metric scores\n")
     lines.append("| Metric | Score | Confidence | Severity |")

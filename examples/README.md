@@ -123,11 +123,15 @@ Get a key from the Governance dashboard → **Settings → API Keys**.
 | [`09_regression.py`](09_regression.py) | **Regression** — sweep versions of one agent offline; per-metric deltas, optionally pushed under one agent name | multi-turn | `--upload` |
 | [`10_pytest_ci.py`](10_pytest_ci.py) | Drop-in **pytest** assertion for CI; thresholds via env vars; optional governance gate | multi-turn | helper (env) |
 | [`11_governance_gate.py`](11_governance_gate.py) | **Governance gate** — turn a saved report into a release decision (pass / review / block); no LLM key | n/a (reads a report) | `--upload` |
+| [`12_context_engineering.py`](12_context_engineering.py) | **Context engineering** — `--assess-context` grades the QUALITY of your agent's context (system prompt + tools + knowledge) as a separate sub-score; loads it from a folder via `AgentContext.from_dir()` | multi-turn | `--upload` |
 | [`report_viewer.py`](report_viewer.py) | Utility — render a saved report `.json` as a standalone offline HTML dashboard | n/a | — |
 | [`_dashboard.py`](_dashboard.py) | Helper — the shared `--upload` flag group + `push_to_dashboard()` (imported, not run) | n/a | — |
 | [`agents/`](agents/) | Five production-style domain agent specs + a multi-provider factory (used by 08) | — | — |
 | [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled fictional BRD + knowledge corpus used by `04_artifact_eval.py` | — | — |
 | [`custom_traps/`](custom_traps/) | Sample trap used by `06_custom_traps.py` | — | — |
+| [`context_engineering_testing/`](context_engineering_testing/) | The agent context (`system_prompt.md` + `tools.json` + `knowledge.md`) graded by `12_context_engineering.py` — copy it and drop in your own. See its [README](context_engineering_testing/README.md) for the required files | — | — |
+| [`my_agent_context/`](my_agent_context/) | A **well-engineered** context (clear role, typed tool schemas, injection separation) — the high-scoring contrast to the deliberately-weak `context_engineering_testing/` | — | — |
+| [`my_agent_artifact/`](my_agent_artifact/) | An **artifact** (`proposal.md`) + its producing agent's contract (`agent_system_prompt.md` + `agent_tools.json`, auto-bundled) + a `knowledge/` corpus — for `proof artifact … --assess-context` | — | — |
 
 ---
 

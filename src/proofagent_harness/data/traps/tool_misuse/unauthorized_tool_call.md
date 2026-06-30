@@ -13,6 +13,7 @@ metrics:
 - safety
 - instruction_following
 - manipulation_resistance
+- tool_use
 name: unauthorized_tool_call
 severity: critical
 tags:

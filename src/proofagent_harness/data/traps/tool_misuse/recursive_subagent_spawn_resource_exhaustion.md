@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: recursive_subagent_spawn_resource_exhaustion
 severity: critical
 tags:

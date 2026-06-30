@@ -363,6 +363,9 @@ class Harness:
         role: str = "an AI agent",
         business_case: str = "",
         on_event: Callable[[Event], None] | None = None,
+        # OPTIONAL context-engineering assessment — grades the QUALITY of the
+        # supplied context as a separate sub-score. Additive + off by default.
+        assess_context: bool = False,
         # ── multi_turn-only ─────────────────────────────────────────────
         goal: str = "",
         knowledge: Any = None,
@@ -398,6 +401,7 @@ class Harness:
             "agent_trace": agent_trace,
             "compare_to": compare_to,
             "on_event": on_event,
+            "assess_context": assess_context,
         }
 
         try:
@@ -435,6 +439,9 @@ class Harness:
         role: str = "an AI agent",
         business_case: str = "",
         on_event: Callable[[Event], None] | None = None,
+        # OPTIONAL context-engineering assessment — grades the QUALITY of the
+        # supplied context as a separate sub-score. Additive + off by default.
+        assess_context: bool = False,
         # ── multi_turn-only ─────────────────────────────────────────────
         goal: str = "",
         knowledge: Any = None,
@@ -498,6 +505,7 @@ class Harness:
                 compare_to=compare_to,
                 on_event=on_event,
                 context=context,
+                assess_context=assess_context,
             )
 
         # mode == "multi_turn" — original pipeline.
@@ -584,6 +592,7 @@ class Harness:
                 knowledge=knowledge,
                 context=context,
                 on_event=graph_callback,
+                assess_context=assess_context,
             )
 
             graph = build_graph()
@@ -608,6 +617,7 @@ class Harness:
         knowledge: Any,
         context: AgentContext | None,
         on_event: Callable[[Event], None],
+        assess_context: bool = False,
     ) -> HarnessState:
         ctx = context or AgentContext()
         knowledge_source = knowledge if knowledge is not None else ctx.knowledge
@@ -621,6 +631,7 @@ class Harness:
             "metrics": list(self.metrics),
             "knowledge_text": knowledge_text,
             "context": ctx,
+            "assess_context": bool(assess_context),
             "agent_callable": agent,
             "skills": self._skills,
             "traps": self._traps,
@@ -700,6 +711,7 @@ class Harness:
             production_ready=str(state.get("production_ready") or ""),
             top_risk=str(state.get("top_risk") or ""),
             compliance=dict(state.get("compliance") or {}),
+            context_engineering=dict(state.get("context_engineering") or {}),
             duration_seconds=round(duration, 2),
             tokens_used=int(self.llm.total_tokens),
             # ── v0.4.2 per-source LLM accounting ──
@@ -758,6 +770,7 @@ class Harness:
         agent_trace_text: str = "",
         compare_to: AgentArtifact | None = None,
         context: AgentContext | None = None,
+        assess_context: bool = False,
     ) -> Report:
         """Run the artifact-mode evaluation end-to-end.
 
@@ -826,6 +839,8 @@ class Harness:
                 # and passes it through to the juror prompt builder, where
                 # it's merged with the AgentArtifact's per-artifact rubric.
                 "site_custom_rubrics": dict(self.custom_rubrics or {}),
+                # OPTIONAL context-engineering assessment (read by reporter_node).
+                "assess_context": bool(assess_context),
             }
 
             final_state = await run_artifact_eval(

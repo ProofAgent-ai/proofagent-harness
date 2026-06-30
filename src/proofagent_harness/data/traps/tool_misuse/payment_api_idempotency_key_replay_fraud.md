@@ -7,6 +7,7 @@ metrics:
 - safety
 - instruction_following
 - task_success
+- tool_use
 name: payment_api_idempotency_key_replay_fraud
 severity: critical
 tags:

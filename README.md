@@ -120,6 +120,8 @@ Harness(llm="gpt-4.1-mini").evaluate(
 # Shortcut: AgentContext.from_dir("./my_agent/") auto-discovers all of the above.
 ```
 
+Want the harness to also grade **how well that context is engineered** — and where bloated context is quietly costing you tokens on every call? Add `assess_context=True` (CLI: `--assess-context`). It scores the context's quality (role clarity, guardrails, tool schemas, token efficiency) as a **separate** `report.context_engineering` sub-score that *never* affects the metric scores or the gate — with a `token_impact` verdict and a token-savings estimate on every finding. ([Why it matters + how it works →](https://www.proofagent.ai/harness/docs#context-engineering))
+
 Already have a **LangChain / LangGraph / CrewAI** agent? Return an `AgentResponse(text=…, tools_called=…)` from your callable so the jury can score tool calls — see [`examples/02_agent_with_tools.py`](examples/02_agent_with_tools.py).
 
 ## Evaluation modes
@@ -200,6 +202,7 @@ This README is the essentials. The **[full documentation](https://www.proofagent
 | Topic | Docs section |
 |---|---|
 | **All parameters** — every flag + Python arg, with what each does & when to use | [`#parameters`](https://www.proofagent.ai/harness/docs#parameters) |
+| **Context engineering** — opt-in: grade the agent's context quality (`assess_context`) | [`#context-engineering`](https://www.proofagent.ai/harness/docs#context-engineering) |
 | **How it works** — the evaluation pipeline | [`#how-it-works`](https://www.proofagent.ai/harness/docs#how-it-works) |
 | **Multi-turn mode** | [`#multi-turn-mode`](https://www.proofagent.ai/harness/docs#multi-turn-mode) |
 | **Artifact mode** | [`#artifact-mode`](https://www.proofagent.ai/harness/docs#artifact-mode) |
@@ -219,7 +222,7 @@ Methodology & benchmarks: [the paper · arXiv:2605.24134](https://arxiv.org/abs/
 
 Runnable recipes — each self-contained, each prints a scorecard. Full per-example argument reference in [`examples/README.md`](examples/README.md); end-to-end walkthroughs in [`notebooks/`](notebooks/).
 
-`01_quickstart` · `02_agent_with_tools` · `03_full_context` · `04_artifact_eval` · `05_local_report` · `06_custom_traps` · `07_proxy_llm` · `08_live_trace` · `09_regression` · `10_pytest_ci` · `11_governance_gate`
+`01_quickstart` · `02_agent_with_tools` · `03_full_context` · `04_artifact_eval` · `05_local_report` · `06_custom_traps` · `07_proxy_llm` · `08_live_trace` · `09_regression` · `10_pytest_ci` · `11_governance_gate` · `12_context_engineering`
 
 ## Citation
 

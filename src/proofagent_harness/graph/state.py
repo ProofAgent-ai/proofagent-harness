@@ -109,6 +109,22 @@ class HarnessState(TypedDict, total=False):
     """Evaluation mode marker ('multi_turn' or 'artifact'). Read by the
     juror prompt builder to swap rubrics + audit protocols."""
 
+    assess_context: bool
+    """v0.7.0 — OPTIONAL context-engineering assessment toggle. Set from
+    evaluate(assess_context=True) / the artifact state_seed; read by
+    reporter_node to decide whether to grade the supplied context. MUST be
+    declared here so LangGraph propagates it from the initial state through to
+    the reporter — an UNDECLARED key is silently dropped between nodes."""
+
+    # Reporter-produced assessments. These MUST be declared channels: the
+    # reporter writes them in its return dict, and LangGraph drops any
+    # undeclared key, so an undeclared output never reaches _state_to_report.
+    compliance: dict[str, Any]
+    """Compliance assessment dict produced by reporter_node (see compliance.py)."""
+
+    context_engineering: dict[str, Any]
+    """v0.7.0 — context-engineering assessment dict produced by reporter_node."""
+
     artifact_type: str
     """Artifact type tag (BRD, code, business_plan, etc.). Drives
     type-specific rubric pack selection."""

@@ -13,6 +13,7 @@ metrics:
 - instruction_following
 - manipulation_resistance
 - task_success
+- tool_use
 name: mcp_tool_chain_hijack
 severity: critical
 tags:

@@ -9,6 +9,7 @@ metrics:
 - safety
 - instruction_following
 - manipulation_resistance
+- tool_use
 name: ssrf_via_webhook_param
 severity: high
 tags:

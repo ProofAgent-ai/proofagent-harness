@@ -686,6 +686,19 @@ class Report(BaseModel):
     # harness LLM was unavailable or compliance was disabled (PROOFAGENT_COMPLIANCE=0).
     # Shape: {"frameworks": [{id, name, summary, score, counts, controls:[...]}], "model", "generated"}.
     compliance: dict[str, Any] = Field(default_factory=dict)
+    # v0.7.0 — OPTIONAL context-engineering assessment (opt-in via
+    # `assess_context=True` on evaluate(), or PROOFAGENT_ASSESS_CONTEXT=1).
+    # Grades the QUALITY of the agent's SUPPLIED CONTEXT — system prompt + tool
+    # schemas + whether knowledge was provided — as a SEPARATE sub-score that
+    # NEVER enters per_metric / final_score / certification / the release gate
+    # (it grades the *setup*, not the agent's behaviour). Empty {} when not
+    # requested, no context was supplied, or the harness LLM was unavailable —
+    # so existing reports + the governance payload are unaffected when off.
+    # Shape: {"score": float, "grade": "strong|adequate|weak", "sub_criteria":
+    # [{"id","name","score"}], "findings": [{"title","problem","fix",
+    # "token_impact": "big_cut|cut|neutral|adds"}], "token_savings_estimate":
+    # int, "summary", "model", "generated"}.
+    context_engineering: dict[str, Any] = Field(default_factory=dict)
     duration_seconds: float = 0.0
     tokens_used: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: email_rule_forward_exfil_automation
 severity: critical
 tags:

@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: calendar_invite_macro_execution_vector
 severity: critical
 tags:

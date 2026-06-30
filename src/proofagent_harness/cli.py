@@ -64,6 +64,12 @@ def run(
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
+    assess_context: bool = typer.Option(
+        False, "--assess-context",
+        help="Also grade the QUALITY of the agent's context (system prompt + "
+             "tool schemas) as a SEPARATE sub-score. Off by default; never "
+             "affects the metric scores, certification, or the gate.",
+    ),
     # ── Governance upload (gate CI/CD on the release decision) ──
     # OFF by default — a vanilla `proof run` stays fully local, no network.
     upload: bool = typer.Option(
@@ -123,7 +129,10 @@ def run(
         business_case=business_case,
         goal=goal,
         knowledge=str(knowledge) if knowledge else None,
+        assess_context=assess_context,
     )
+
+    _print_context_engineering(report)
 
     if json_out:
         report.to_json(str(json_out))
@@ -170,6 +179,12 @@ def artifact(
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
+    assess_context: bool = typer.Option(
+        False, "--assess-context",
+        help="Also grade the QUALITY of the producing agent's context "
+             "(auto-bundled agent_system_prompt.md / agent_tools.json) as a "
+             "SEPARATE sub-score. Off by default; never affects the score or gate.",
+    ),
     upload: bool = typer.Option(
         False, "--upload/--no-upload",
         help="Upload to the Governance API and gate on the decision (exit 0/1/2).",
@@ -224,7 +239,10 @@ def artifact(
         business_case=business_case,
         context=context,
         agent_trace=agent_trace,
+        assess_context=assess_context,
     )
+
+    _print_context_engineering(report)
 
     if json_out:
         report.to_json(str(json_out))
@@ -273,6 +291,30 @@ def _transcript_text(report) -> str | None:
             a = getattr(t, "answer", "") or getattr(t, "agent", "") or getattr(t, "response", "") or ""
         out.append(f"[turn {idx}] USER: {u}\n[turn {idx}] AGENT: {a}")
     return ("\n".join(out)[:24000]) or None
+
+
+def _print_context_engineering(report) -> None:
+    """Echo the OPTIONAL context-engineering sub-score to the terminal when
+    `--assess-context` produced one. It is also written to the Markdown report
+    and the governance payload; this just surfaces it next to the scorecard."""
+    ce = getattr(report, "context_engineering", None) or {}
+    if not isinstance(ce, dict) or not ce.get("generated"):
+        return
+    arrows = {"big_cut": "↓↓", "cut": "↓", "neutral": "→", "adds": "↑"}
+    savings = int(ce.get("token_savings_estimate") or 0)
+    head = f"[bold cyan]Context Engineering[/bold cyan]  {ce.get('score')}/10  ({ce.get('grade')})"
+    if savings:
+        head += f"   ·   ~{savings:,} tokens reclaimable"
+    console.print()
+    console.print(head)
+    if ce.get("summary"):
+        console.print(f"  [dim]{ce['summary']}[/dim]")
+    for s in ce.get("sub_criteria") or []:
+        console.print(f"  {s.get('name', '')!s:<26} {s.get('score')}/10")
+    for f in ce.get("findings") or []:
+        a = arrows.get(str(f.get("token_impact", "neutral")), "→")
+        console.print(f"  [{a}] [bold]{f.get('title', '')}[/bold]: {f.get('fix', '')}")
+    console.print("  [dim](Separate sub-score — never affects the metric scores or the gate.)[/dim]")
 
 
 def _upload_and_gate(

@@ -6,6 +6,7 @@ forbidden_tools:
 metrics:
 - safety
 - instruction_following
+- tool_use
 name: workflow_automation_infinite_loop_trigger
 severity: critical
 tags:
