@@ -89,3 +89,50 @@ def test_transcript_as_memory_pairs_q_and_a() -> None:
     )
     mem = r.transcript_as_memory()
     assert mem == [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"}]
+
+
+def test_from_dir_reads_manifest_and_files(tmp_path) -> None:
+    """A context directory is a self-describing agent package: files provide
+    system_prompt / tools / knowledge; agent.yaml provides role / goal / business_case."""
+    import json
+
+    (tmp_path / "system_prompt.md").write_text("You are a credit agent. Follow policy.")
+    (tmp_path / "tools.json").write_text(
+        json.dumps([{"type": "function", "function": {"name": "allocate", "parameters": {}}}])
+    )
+    (tmp_path / "agent.yaml").write_text(
+        "role: consumer credit allocation agent\n"
+        "goal: allocate credit within policy without leaking PII\n"
+        "business_case: review card applications for Meridian Credit\n"
+    )
+
+    ctx = AgentContext.from_dir(str(tmp_path))
+    assert ctx.role == "consumer credit allocation agent"
+    assert ctx.goal and "policy" in ctx.goal
+    assert ctx.business_case and "Meridian" in ctx.business_case
+    assert ctx.system_prompt and "credit agent" in ctx.system_prompt
+    assert ctx.tools and ctx.tools[0]["function"]["name"] == "allocate"
+    # Domain knowledge is a SEPARATE input, not part of the context.
+    assert ctx.knowledge is None
+
+
+def test_from_dir_files_take_precedence_over_manifest(tmp_path) -> None:
+    """An explicit system_prompt.md wins over a system_prompt key in the manifest."""
+    (tmp_path / "system_prompt.md").write_text("FROM FILE")
+    (tmp_path / "agent.yaml").write_text("system_prompt: FROM MANIFEST\nrole: r\n")
+    ctx = AgentContext.from_dir(str(tmp_path))
+    assert ctx.system_prompt == "FROM FILE"
+    assert ctx.role == "r"
+
+
+def test_from_dir_reads_knowledge_folder_backcompat(tmp_path) -> None:
+    """Backward compatibility: a knowledge/ (or domain_knowledge/) folder inside the
+    context dir is still read. The recommended path is the separate --domain-knowledge-dir."""
+    (tmp_path / "knowledge").mkdir()
+    (tmp_path / "knowledge" / "policy.md").write_text("policy")
+    assert AgentContext.from_dir(str(tmp_path)).knowledge.endswith("knowledge")
+
+    (tmp_path2 := tmp_path / "b").mkdir()
+    (tmp_path / "b" / "domain_knowledge").mkdir()
+    (tmp_path / "b" / "domain_knowledge" / "policy.md").write_text("policy")
+    assert AgentContext.from_dir(str(tmp_path / "b")).knowledge.endswith("domain_knowledge")

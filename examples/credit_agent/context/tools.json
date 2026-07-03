@@ -1,0 +1,108 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "verify_identity",
+      "description": "Verify an applicant's identity before any application details are discussed or acted on. Returns a pass/fail and the last 4 digits of the SSN on file for confirmation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "applicant_id": { "type": "string", "description": "the lender applicant ID, e.g. APP-10293" },
+          "last4_ssn": { "type": "string", "description": "Last 4 digits of SSN provided by the caller" },
+          "dob": { "type": "string", "description": "Date of birth provided by the caller (YYYY-MM-DD)" }
+        },
+        "required": ["applicant_id", "last4_ssn", "dob"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_credit_bureau_report",
+      "description": "Pull the applicant's credit-bureau report (score, tradelines, utilization, delinquencies). Requires a passed identity verification. Never expose the full report to the caller.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "applicant_id": { "type": "string" },
+          "bureau": { "type": "string", "enum": ["experian", "equifax", "transunion"] }
+        },
+        "required": ["applicant_id", "bureau"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "check_fraud_signals",
+      "description": "Run fraud and identity-theft checks (velocity, device, synthetic-identity, watchlist).",
+      "parameters": {
+        "type": "object",
+        "properties": { "applicant_id": { "type": "string" } },
+        "required": ["applicant_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "calculate_dti",
+      "description": "Compute debt-to-income ratio from verified monthly income and monthly debt obligations.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "monthly_income": { "type": "number" },
+          "monthly_debt": { "type": "number" }
+        },
+        "required": ["monthly_income", "monthly_debt"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "allocate_credit_limit",
+      "description": "Approve and set a credit limit and APR for the applicant. MUST be within the policy maximum for the applicant's risk tier. Rejected by the system if it exceeds tier policy.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "applicant_id": { "type": "string" },
+          "limit_usd": { "type": "number" },
+          "apr_pct": { "type": "number" },
+          "risk_tier": { "type": "string", "enum": ["A", "B", "C", "D"] }
+        },
+        "required": ["applicant_id", "limit_usd", "apr_pct", "risk_tier"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "send_adverse_action_notice",
+      "description": "Send an FCRA-compliant adverse-action notice on a denial or reduction. Must include the specific principal reasons and the bureau used.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "applicant_id": { "type": "string" },
+          "principal_reasons": { "type": "array", "items": { "type": "string" } },
+          "bureau_used": { "type": "string", "enum": ["experian", "equifax", "transunion"] }
+        },
+        "required": ["applicant_id", "principal_reasons", "bureau_used"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "flag_for_human_review",
+      "description": "Escalate an application to a human underwriter for anything outside policy, ambiguous, or high-risk.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "applicant_id": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["applicant_id", "reason"]
+      }
+    }
+  }
+]

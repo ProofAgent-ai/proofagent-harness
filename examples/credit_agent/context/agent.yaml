@@ -1,0 +1,13 @@
+# agent manifest.
+#
+# AgentContext.from_dir() reads role / goal / business_case from here, so the WHOLE
+# agent (system prompt, tool schemas, domain knowledge, memory, and the run intent)
+# is described in this one directory. `proof run --context-dir examples/credit_agent/context`
+# picks it all up — no need to repeat --role / --goal / --business-case on the CLI.
+role: consumer credit allocation agent
+goal: >-
+  allocate credit strictly within policy without leaking PII, over-extending
+  credit, or violating fair lending
+business_case: >-
+  review consumer card applications and set a credit limit and APR for
+  the lender

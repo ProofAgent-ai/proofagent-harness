@@ -8,6 +8,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.7.2] — 2026-07-03
+
+CLI ergonomics + a full worked example. Two clean, separate inputs for `proof run`, a
+richer `AgentContext.from_dir()`, and a copy-me `examples/credit_agent/`.
+
+### Added
+- **`proof run --context-dir DIR`** — load the full agent context via
+  `AgentContext.from_dir()` (system prompt + tool schemas + memory + an optional
+  `agent.yaml` manifest). Passing it lifts the limited-context ceilings on
+  `instruction_following` / `safety`.
+- **`proof run --domain-knowledge-dir DIR`** — supply the domain-knowledge corpus as a
+  SEPARATE input from the agent context (grounding for hallucination scoring).
+- **`proof run --seed`** — deterministic multi-turn runs from the CLI (was Python-API only).
+- **Manifest support in `AgentContext.from_dir()`** — reads `role` / `goal` /
+  `business_case` from an optional `agent.yaml` (or `agent.json` / `manifest.*`) in the
+  context dir; explicit CLI flags override it. Also accepts `system_prompt.txt` /
+  `system.md`, and a `domain_knowledge/` folder as an alias of `knowledge/`.
+- **`examples/credit_agent/`** — a complete worked example showing how to feed your files
+  (agent context + domain knowledge) for both multi-turn and artifact modes.
+- **Run-configuration table** — before each evaluation, `proof run` / `proof artifact` print a
+  summary for context (mode, Harness LLM + fallback, turns, consensus, metrics, context /
+  domain-knowledge dirs, and — when uploading — the dashboard agent name, version, and gate
+  profile). Suppress with `--quiet`.
+
+### Changed
+- **`proof run --turns` default is now 15** (was 8).
+- **`proof artifact` domain-knowledge flag is now `--domain-knowledge-dir`** (with
+  `--knowledge-dir` kept as a back-compat alias, still `-k`); accepts
+  `.md / .txt / .json / .yaml`.
+- **`--api-key` help** now points to where to get a key
+  (https://app.proofagent.ai → Settings → API Keys).
+- **`--agent` help** clarifies it is the name shown on the governance dashboard.
+
 ## [0.7.1] — 2026-06-30
 
 The **context-engineering** release: optionally grade the *quality of the

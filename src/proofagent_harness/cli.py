@@ -9,10 +9,12 @@ import sys
 from pathlib import Path
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
 from proofagent_harness import (
+    AgentContext,
     CANONICAL_METRICS,
     METRIC_DESCRIPTIONS,
     Harness,
@@ -39,8 +41,12 @@ def run(
     role: str = typer.Option("an AI agent", "--role"),
     business_case: str = typer.Option("", "--business-case"),
     goal: str = typer.Option("", "--goal"),
-    turns: int = typer.Option(8, "--turns", min=1, max=50),
+    turns: int = typer.Option(15, "--turns", min=1, max=50),
     consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
+    seed: int | None = typer.Option(
+        None, "--seed",
+        help="Deterministic scoring for reproducible runs (OpenAI / Gemini honor it; "
+             "Anthropic does not yet)."),
     metrics: str | None = typer.Option(None, "--metrics", help="Comma-separated metric names."),
     extra_traps: str | None = typer.Option(
         None, "--extra-traps",
@@ -52,7 +58,19 @@ def run(
         help="Comma-separated trap NAMES to FORCE into the plan regardless of "
              "selection scoring (client report B2 — pin a custom trap that would "
              "otherwise lose to domain-matched traps)."),
-    knowledge: Path | None = typer.Option(None, "--knowledge", exists=True),
+    context_dir: Path | None = typer.Option(
+        None, "--context-dir",
+        exists=True, file_okay=False, dir_okay=True,
+        help="Directory that DEFINES THE AGENT, loaded via AgentContext.from_dir(): "
+             "system_prompt.md (or .txt), tools.json, memory.jsonl, and an optional agent.yaml "
+             "manifest (role / goal / business-case). Lifts the limited-context ceilings on "
+             "instruction_following / safety. Explicit CLI flags override the manifest."),
+    domain_knowledge_dir: Path | None = typer.Option(
+        None, "--domain-knowledge-dir",
+        exists=True,
+        help="Directory of DOMAIN KNOWLEDGE the agent is grounded on (policies, specs, FAQs — "
+             "any .md / .txt / .json / .yaml). A SEPARATE input from --context-dir. Used for "
+             "hallucination-resistance scoring."),
     llm: str | None = typer.Option(None, "--llm", help="Model id (LiteLLM target)."),
     fallback_llm: str | None = typer.Option(
         None, "--fallback-llm",
@@ -79,12 +97,13 @@ def run(
     ),
     api_key: str | None = typer.Option(
         None, "--api-key",
-        help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY.",
+        help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY. "
+             "Get a key at https://app.proofagent.ai -> Settings -> API Keys.",
     ),
     agent: str | None = typer.Option(
         None, "--agent",
-        help="Logical name of the agent under test (groups runs + regressions "
-             "in the dashboard). Defaults to --role.",
+        help="Name of the agent under test — this is the name shown on the governance "
+             "dashboard, and it groups runs + regressions together. Defaults to --role.",
     ),
     agent_version: str | None = typer.Option(
         None, "--agent-version", help="Version / git ref of the agent under test."),
@@ -117,18 +136,53 @@ def run(
         metrics=metric_list,
         turns=turns,
         consensus=consensus,
+        seed=seed,
         extra_traps=_csv(extra_traps),
         trap_packs=_csv(trap_packs),
         pin_traps=_csv(pin_traps),
         verbose=not quiet,
     )
 
+    # Load the full agent context from a directory when --context-dir is given.
+    # This passes system_prompt + tools + knowledge + memory to the harness (no
+    # limited-context ceilings) and lets role/goal/business-case live in the
+    # context's manifest. Explicit CLI flags always win over the manifest.
+    ctx = AgentContext.from_dir(str(context_dir)) if context_dir else None
+    eff_role = role if role != "an AI agent" else (ctx.role if ctx and ctx.role else role)
+    eff_goal = goal or (ctx.goal if ctx and ctx.goal else goal)
+    eff_business = business_case or (ctx.business_case if ctx and ctx.business_case else business_case)
+
+    if not quiet:
+        cfg = [
+            ("Agent file", f"{agent_file}  (entry: {entry})"),
+            ("Harness LLM", llm or "(default)"),
+            ("Fallback LLM", fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM") or "—"),
+            ("Turns", str(turns)),
+            ("Consensus", consensus),
+            ("Seed", str(seed) if seed is not None else "—"),
+            ("Metrics", ", ".join(metric_list)),
+            ("Context dir", str(context_dir) if context_dir else "—"),
+            ("Domain knowledge", str(domain_knowledge_dir) if domain_knowledge_dir else "—"),
+            ("Assess context", "yes" if assess_context else "no"),
+            ("Role", eff_role),
+            ("Upload", "yes  →  app.proofagent.ai" if upload else "no (local only)"),
+        ]
+        if upload:
+            cfg += [
+                ("Agent (dashboard)", agent or eff_role),
+                ("Agent version", agent_version or "—"),
+                ("Gate profile", profile or "—"),
+                ("Fail on", fail_on),
+            ]
+        _print_run_config("multi-turn", cfg)
+
     report = harness.evaluate(
         callable_obj,
-        role=role,
-        business_case=business_case,
-        goal=goal,
-        knowledge=str(knowledge) if knowledge else None,
+        role=eff_role,
+        business_case=eff_business,
+        goal=eff_goal,
+        context=ctx,          # the agent: system_prompt + tools + memory
+        knowledge=str(domain_knowledge_dir) if domain_knowledge_dir else None,
         assess_context=assess_context,
     )
 
@@ -163,7 +217,10 @@ def artifact(
         ..., exists=True, help="Deliverable to score (.md/.txt/.pdf/.docx/.html/.png)."
     ),
     knowledge_dir: Path | None = typer.Option(
-        None, "--knowledge-dir", "-k", help="Folder of ground-truth docs to grade against."
+        None, "--domain-knowledge-dir", "--knowledge-dir", "-k",
+        help="Folder of DOMAIN KNOWLEDGE / ground-truth docs to grade the artifact against "
+             "(policies, specs, source data — .md / .txt / .json / .yaml). "
+             "(--knowledge-dir is a back-compat alias.)"
     ),
     artifact_type: str = typer.Option(
         "BRD", "--type", "-t", help="Artifact type: BRD | report | code | business_plan | ..."
@@ -190,10 +247,14 @@ def artifact(
         help="Upload to the Governance API and gate on the decision (exit 0/1/2).",
     ),
     api_key: str | None = typer.Option(
-        None, "--api-key", help="API key. Defaults to env PROOFAGENT_API_KEY."
+        None, "--api-key",
+        help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY. "
+             "Get a key at https://app.proofagent.ai -> Settings -> API Keys."
     ),
     agent: str | None = typer.Option(
-        None, "--agent", help="Logical agent name (groups runs). Defaults to --role."
+        None, "--agent",
+        help="Name of the agent shown on the governance dashboard (groups runs). "
+             "Defaults to --role."
     ),
     agent_version: str | None = typer.Option(None, "--agent-version"),
     profile: str | None = typer.Option(
@@ -209,7 +270,7 @@ def artifact(
 
     art = AgentArtifact.from_path(artifact_path, type=artifact_type)
     corpus = (
-        KnowledgeCorpus(sources=[str(knowledge_dir)], extensions=[".md", ".txt"], max_chars=200_000)
+        KnowledgeCorpus(sources=[str(knowledge_dir)], extensions=[".md", ".txt", ".json", ".yaml", ".yml"], max_chars=200_000)
         if knowledge_dir and Path(knowledge_dir).exists()
         else None
     )
@@ -224,6 +285,27 @@ def artifact(
         if (system_prompt or tools)
         else None
     )
+
+    if not quiet:
+        cfg = [
+            ("Artifact", f"{artifact_path}  (type: {artifact_type})"),
+            ("Harness LLM", llm or "(default)"),
+            ("Fallback LLM", fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM") or "—"),
+            ("Consensus", consensus),
+            ("Seed", str(seed)),
+            ("Domain knowledge", str(knowledge_dir) if knowledge_dir else "—"),
+            ("Assess context", "yes" if assess_context else "no"),
+            ("Role", role),
+            ("Upload", "yes  →  app.proofagent.ai" if upload else "no (local only)"),
+        ]
+        if upload:
+            cfg += [
+                ("Agent (dashboard)", agent or role),
+                ("Agent version", agent_version or "—"),
+                ("Gate profile", profile or "—"),
+                ("Fail on", fail_on),
+            ]
+        _print_run_config("artifact", cfg)
 
     report = Harness(
         mode="artifact",
@@ -272,6 +354,20 @@ def artifact(
         )
 
     raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
+
+
+def _print_run_config(mode: str, rows: list[tuple[str, str]]) -> None:
+    """Print a compact configuration table for context before the evaluation starts."""
+    t = Table(
+        title=f"ProofAgent Harness — {mode} evaluation",
+        title_style="bold cyan", title_justify="left",
+        show_header=False, box=box.ROUNDED, padding=(0, 1),
+    )
+    t.add_column(style="dim", no_wrap=True)
+    t.add_column(style="bold")
+    for k, v in rows:
+        t.add_row(k, str(v))
+    console.print(t)
 
 
 def _transcript_text(report) -> str | None:

@@ -90,14 +90,25 @@ Final score: 8.67 / 10    Tokens: 61,204
 
 `report.to_json("path.json")` / `report.to_markdown("path.md")` give you the full transcript, reasoning, and findings.
 
-**CLI** — point `proof run` at any `.py` exposing a callable named `agent`, or grade a finished file with `proof artifact`:
+**CLI** — point `proof run` at any `.py` exposing a callable named `agent`, or grade a finished file with `proof artifact`. The agent and the domain are **two separate inputs**:
 
 ```bash
-proof run my_agent.py --turns 8 --consensus delphi --seed 42 \
-    --role "customer support" --goal "handle refunds safely"
+# Multi-turn — the AGENT via --context-dir, the DOMAIN via --domain-knowledge-dir
+proof run my_agent.py \
+    --context-dir ./my_agent/ \            # system_prompt.md + tools.json + memory.jsonl + agent.yaml
+    --domain-knowledge-dir ./knowledge/ \  # policies, specs, FAQs (grounding docs)
+    --llm gpt-4.1-mini --consensus delphi --assess-context
 
-proof artifact ./proposal.md --type BRD --knowledge-dir ./docs --llm gpt-4.1-mini
+# Artifact — grade a finished deliverable against a ground-truth corpus
+proof artifact ./proposal.md \
+    --type BRD --domain-knowledge-dir ./docs --llm gpt-4.1-mini
 ```
+
+`--context-dir` loads the full `AgentContext` (system prompt + tool schemas + memory + an optional
+`agent.yaml` manifest that supplies role / goal / business-case), so scoring isn't capped by missing
+context. `--turns` defaults to **15**. Each run prints a configuration summary before it starts
+(mode, LLMs, turns, dirs, upload target) — suppress with `--quiet`. A complete, copy-me project is in
+[`examples/credit_agent/`](examples/credit_agent/).
 
 > **Two independent LLM choices.** `llm=` is the **harness** model — it powers the whole evaluation pipeline end-to-end, *not* one model grading once. Your **agent's** LLM is whatever you call inside `my_agent`; the harness only sees its outputs. Pick a strong harness model — weak grading gives noisy scores (see [Choosing a harness LLM](#choosing-a-harness-llm)).
 
@@ -173,8 +184,10 @@ The harness runs **fully local by default**. Add `--upload` to turn any evaluati
 ```bash
 export PROOFAGENT_API_KEY="pa_live_..."   # Dashboard → Settings → API Keys
 
-proof run my_agent.py --turns 12 --upload --fail-on block \
-    --agent airline-support --agent-version "$(git rev-parse --short HEAD)" \
+proof run my_agent.py --upload --fail-on block \
+    --context-dir ./my_agent/ --domain-knowledge-dir ./knowledge/ \
+    --agent airline-support \                      # ← the name shown on the governance dashboard
+    --agent-version "$(git rev-parse --short HEAD)" \
     --profile airline_customer_support
 ```
 
@@ -194,6 +207,77 @@ Governance gate: BLOCK
 On the dashboard, the finished report renders as a release decision, a per-metric scorecard, per-metric jury consensus, and a compliance posture — with a control plane across every governed agent. See the **[dashboard walkthrough → harness/docs#governance](https://www.proofagent.ai/harness/docs#governance)** for annotated screenshots.
 
 Two reporter extras travel with each upload (on by default, no-op-safe, never affect the gate): **compliance assessment** (`report.compliance`; disable with `PROOFAGENT_COMPLIANCE=0`) and **evidence-driven findings** (disable with `PROOFAGENT_EVIDENCE=0`). Full reference — GitHub Actions, exit codes, and the programmatic `proofagent_harness.governance` API — in [`docs/governance-upload.md`](docs/governance-upload.md).
+
+## CLI reference
+
+Every flag for the two evaluation commands, with its default. Both share the same governance / upload group (below). For the full **parameter reference** — each flag *and* its Python-API equivalent, with guidance on when to reach for it — see the **[documentation](https://www.proofagent.ai/harness/docs#parameters)**.
+
+### `proof run` — multi-turn evaluation
+
+```bash
+proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named `agent`
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `AGENT_FILE` | *(required)* | Python file exposing a callable named `agent` |
+| `--entry` | `agent` | Name of the callable inside the file |
+| `--context-dir` | — | Directory that **defines the agent**, loaded via `AgentContext.from_dir()`: `system_prompt.md`, `tools.json`, `memory.jsonl`, and an optional `agent.yaml` manifest (role / goal / business-case). Lifts the limited-context ceilings on instruction-following & safety |
+| `--domain-knowledge-dir` | — | Directory of **domain knowledge** the agent is grounded on (policies, specs, FAQs — `.md/.txt/.json/.yaml`). A **separate** input from `--context-dir`; used for hallucination scoring |
+| `--role` | `an AI agent` | The agent's role (overrides the manifest) |
+| `--goal` | — | The agent's objective (overrides the manifest) |
+| `--business-case` | — | Business context (overrides the manifest) |
+| `--turns` | `15` | Adversarial conversation turns (1–50) |
+| `--consensus` | `delphi` | Juror consensus: `independent` \| `delphi` \| `debate` |
+| `--seed` | — | Deterministic scoring for reproducible runs (OpenAI / Gemini honor it) |
+| `--metrics` | *all six* | Comma-separated subset of the six canonical metrics |
+| `--llm` | env `PROOFAGENT_LLM` | Harness LLM (any LiteLLM target) |
+| `--fallback-llm` | env `PROOFAGENT_FALLBACK_LLM` | Backup Harness LLM if the primary call fails |
+| `--extra-traps` | — | Comma-separated paths to custom trap `.md` files or dirs |
+| `--trap-packs` | — | Comma-separated community trap packs |
+| `--pin-traps` | — | Force-include specific traps by name |
+| `--assess-context` | off | Add the context-engineering sub-score (additive, never gates) |
+| `--json` | — | Write the report JSON to this path |
+| `--markdown` | — | Write the report Markdown to this path |
+| `--quiet` | off | Suppress the config summary + live progress UI |
+| *governance / upload group* | | *(see below)* |
+
+### `proof artifact` — artifact evaluation
+
+```bash
+proof artifact ARTIFACT_PATH [OPTIONS]   # grade a finished deliverable (no live agent)
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `ARTIFACT_PATH` | *(required)* | The deliverable to grade (`.md/.txt/.pdf/.docx/.html/.json/…`) |
+| `--type` / `-t` | `BRD` | Rubric pack: `BRD` \| `report` \| `business_plan` \| `tech_spec` \| `requirements` \| `code` \| `runbook` \| `data_contract` \| `model_card` \| … |
+| `--domain-knowledge-dir` / `-k` | — | Ground-truth corpus to grade the artifact against (`--knowledge-dir` is a back-compat alias) |
+| `--role` | `an AI agent producing a deliverable` | The producing agent's role |
+| `--business-case` | — | Business context for the deliverable |
+| `--consensus` | `delphi` | `independent` \| `delphi` \| `debate` |
+| `--seed` | `42` | Deterministic scoring |
+| `--llm` / `--fallback-llm` | env | Harness LLM + backup |
+| `--assess-context` | off | Add the context-engineering sub-score |
+| `--json` / `--markdown` | — | Write the report |
+| `--quiet` | off | Suppress the config summary + progress |
+| *governance / upload group* | | *(see below)* |
+
+### Governance / upload group (both commands)
+
+Add `--upload` to push the finished report to the Governance API and gate on the returned decision.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--upload` | off | Push the run to the dashboard and gate on the decision |
+| `--api-key` | env `PROOFAGENT_API_KEY` | Governance API key. Get one at **app.proofagent.ai → Settings → API Keys** |
+| `--agent` | `--role` | **The name shown on the governance dashboard**; groups runs + regressions |
+| `--agent-version` | — | Version / git ref of the agent under test |
+| `--profile` | — | Governance profile slug to gate against |
+| `--fail-on` | `block` | Which decision fails the build: `pass` \| `review` \| `block` |
+| `--source` | `ci_cd` | Provenance tag: `local` \| `ci_cd` \| `manual` \| `api` \| `scheduled` |
+
+Also available: `proof traps list | validate | stats`, `proof metrics`, `proof version`.
 
 ## Documentation
 

@@ -153,6 +153,17 @@ class AgentContext(BaseModel):
     """Calibration examples (question, expected_answer) shown to jurors so they
     learn the agent's expected tone and format."""
 
+    role: str | None = None
+    """The agent's role, e.g. 'airline customer support agent'. Optional. When a
+    context directory ships a manifest (agent.yaml), from_dir() reads it here so the
+    CLI can use it as the default --role — the whole agent is described in one place."""
+
+    goal: str | None = None
+    """The agent's objective for the evaluation. Optional; read from the manifest."""
+
+    business_case: str | None = None
+    """The business context the agent operates in. Optional; read from the manifest."""
+
     metadata: dict[str, Any] = Field(default_factory=dict)
     """Free-form tags. Useful for tracking agent versions across runs."""
 
@@ -181,16 +192,26 @@ class AgentContext(BaseModel):
 
         kwargs: dict[str, Any] = {}
 
-        sys_p = root / "system_prompt.md"
-        if sys_p.exists():
-            kwargs["system_prompt"] = sys_p.read_text()
+        for sp_name in ("system_prompt.md", "system_prompt.txt", "system.md", "system.txt"):
+            sp = root / sp_name
+            if sp.exists():
+                kwargs["system_prompt"] = sp.read_text()
+                break
 
-        kb_dir = root / "knowledge"
-        kb_file = root / "knowledge.md"
-        if kb_dir.is_dir():
-            kwargs["knowledge"] = str(kb_dir)
-        elif kb_file.exists():
-            kwargs["knowledge"] = str(kb_file)
+        # Domain knowledge (optional, for backward compatibility): a `knowledge/`
+        # or `domain_knowledge/` folder, or a `knowledge.md` file inside the context
+        # dir. The RECOMMENDED way to supply domain knowledge is the SEPARATE input —
+        # `evaluate(knowledge=...)` / `proof run --domain-knowledge-dir` — which keeps
+        # the agent (context) and the domain corpus cleanly apart.
+        for kb_name in ("knowledge", "domain_knowledge"):
+            kb_dir = root / kb_name
+            if kb_dir.is_dir():
+                kwargs["knowledge"] = str(kb_dir)
+                break
+        else:
+            kb_file = root / "knowledge.md"
+            if kb_file.exists():
+                kwargs["knowledge"] = str(kb_file)
 
         tools_p = root / "tools.json"
         if tools_p.exists():
@@ -208,6 +229,28 @@ class AgentContext(BaseModel):
         meta_p = root / "metadata.json"
         if meta_p.exists():
             kwargs["metadata"] = json.loads(meta_p.read_text())
+
+        # Optional manifest — describes the run intent (role / goal / business_case)
+        # and may fill any field above. Makes a context directory a complete,
+        # self-describing agent package. Explicit files above take precedence over
+        # manifest keys (setdefault), so agent.yaml never silently overrides
+        # system_prompt.md, tools.json, etc.
+        for name in ("agent.yaml", "agent.yml", "agent.json",
+                     "manifest.yaml", "manifest.yml", "manifest.json"):
+            mf = root / name
+            if not mf.exists():
+                continue
+            import yaml
+            raw = mf.read_text()
+            data = json.loads(raw) if mf.suffix == ".json" else (yaml.safe_load(raw) or {})
+            if isinstance(data, dict):
+                for key in ("role", "goal", "business_case",
+                            "system_prompt", "knowledge", "tools", "memory"):
+                    if data.get(key) is not None:
+                        kwargs.setdefault(key, data[key])
+                if isinstance(data.get("metadata"), dict):
+                    kwargs["metadata"] = {**data["metadata"], **kwargs.get("metadata", {})}
+            break
 
         return cls(**kwargs)
 

@@ -1,0 +1,4 @@
+{"role": "user", "content": "Following up on application APP-10188 from earlier."}
+{"role": "assistant", "content": "Identity verified. APP-10188 was approved on the Everyday Card at a $9,000 limit and 20.99% APR (tier B). Fraud and bureau checks passed."}
+{"role": "user", "content": "And APP-10190 — did the $20,000 request go through?"}
+{"role": "assistant", "content": "No. APP-10190 is tier C, whose ceiling is $5,000, so the $20,000 request was declined and the exception was escalated to human review. I can't approve above the tier ceiling."}
