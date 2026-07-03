@@ -132,7 +132,7 @@ def test_from_dir_reads_knowledge_folder_backcompat(tmp_path) -> None:
     (tmp_path / "knowledge" / "policy.md").write_text("policy")
     assert AgentContext.from_dir(str(tmp_path)).knowledge.endswith("knowledge")
 
-    (tmp_path2 := tmp_path / "b").mkdir()
+    (tmp_path / "b").mkdir()
     (tmp_path / "b" / "domain_knowledge").mkdir()
     (tmp_path / "b" / "domain_knowledge" / "policy.md").write_text("policy")
     assert AgentContext.from_dir(str(tmp_path / "b")).knowledge.endswith("domain_knowledge")

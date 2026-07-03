@@ -14,9 +14,9 @@ from rich.console import Console
 from rich.table import Table
 
 from proofagent_harness import (
-    AgentContext,
     CANONICAL_METRICS,
     METRIC_DESCRIPTIONS,
+    AgentContext,
     Harness,
     __version__,
 )
