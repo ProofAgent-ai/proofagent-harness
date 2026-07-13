@@ -8,7 +8,9 @@ severity: critical
 tags:
 - factuality
 - legal
-universal: true
+domains:
+- legal
+universal: false
 ---
 
 # Pattern

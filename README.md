@@ -2,7 +2,7 @@
 
 # proofagent-harness
 
-**`pytest` for AI agents.** The open-source, domain-aware harness that red-teams AI agents with multi-turn adversarial pressure **and** grades finished artifacts (code, BRDs, specs, reports), then gates your release on a governance decision in CI.
+**`pytest` + observability infrastructure for AI agents.** Evaluate the agents you **build**: multi-turn adversarial red teaming and artifact grading (code, BRDs, specs, reports). Observe the agents you **use**: intelligent risk screening and intent trajectories for coding agents (Claude Code, Cursor, …).
 
 [![PyPI](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
@@ -12,30 +12,36 @@
 
 <img src="docs/architecture.png" alt="ProofAgent Harness evaluation pipeline" width="720" />
 
-[Install](#install) · [Quickstart](#quickstart) · [Modes](#evaluation-modes) · [Harness LLM](#choosing-a-harness-llm) · [Metrics](#metrics) · [Governance gate](#governance--ci-release-gate) · [Docs](https://www.proofagent.ai/harness/docs)
+[Install](#install) · [Quickstart](#quickstart) · [Observability](#observe-the-coding-agents-you-use) · [Modes](#evaluation-modes) · [Harness LLM](#choosing-a-harness-llm) · [Metrics](#metrics) · [Governance gate](#governance--ci-release-gate) · [Docs](https://www.proofagent.ai/harness/docs)
 
 **📖 Full docs:** [proofagent.ai/harness/docs](https://www.proofagent.ai/harness/docs) · **📄 Paper:** [arXiv:2605.24134](https://arxiv.org/abs/2605.24134)
 
 </div>
 
-`proofagent-harness` puts an adversary and an auditor in front of your AI agent before your users do. It runs realistic **multi-turn red-team** conversations against a live agent, and scores **finished deliverables** against ground truth — both through the same multi-agent consensus jury over six production-critical metrics. Bring your own LLM, bring your own traps, run locally or in CI. Your code, prompts, and data never leave your machine unless you opt in. One flag (`--upload`) turns the evaluation into a **release gate** — pass / review / block, straight from your pipeline.
+`proofagent-harness` puts an adversary and an auditor in front of your AI agent before your users do. It runs realistic **multi-turn red team** conversations against a live agent, and scores **finished deliverables** against ground truth, both through the same multi-agent consensus jury over six production metrics. And when the agent is the one writing your code, `proof watch` attaches to the live session (Claude Code and Cursor natively, anything else via the git working tree) with **intelligent risk screening** at zero token cost and a **harness synthesis** of the session into an intent trajectory of what the agent actually did. Bring your own LLM, bring your own traps, run locally or in CI. Your code, prompts, and data never leave your machine unless you opt in. One flag (`--upload`) turns the evaluation into a **release gate**: pass / review / block, straight from your pipeline.
 
-> **This README covers the essentials.** The full reference — every CLI flag, the Python API, configuration, model-selection guidance, and the FAQ — lives in the **[documentation](https://www.proofagent.ai/harness/docs)**.
+> **This README covers the essentials.** The full reference (every CLI flag, the Python API, configuration, model selection guidance, and the FAQ) lives in the **[documentation](https://www.proofagent.ai/harness/docs)**.
 
 ---
 
 ## Features
 
 **Evaluation**
-- **Two modes** — **multi-turn adversarial** (pressure-test a live agent) and **artifact** (grade a finished deliverable: code, BRD, plan, spec, report, runbook, …).
-- **183 traps across 11 families** — social engineering, prompt injection, data exfiltration, tool misuse, compliance, bias, … Author your own as one `.md` file.
-- **6 metrics, jury personas & 3 consensus strategies** (`independent` / `delphi` / `debate`), with a deterministic **zero-tolerance cap** for genuine violations.
-- **Tool-use & phantom-call scoring** — required tools must actually be invoked; invented tools and "done, with no tool call" fail (scored even when no tools are provided).
+- **Two modes**: **multi-turn adversarial** (pressure test a live agent) and **artifact** (grade a finished deliverable: code, BRD, plan, spec, report, runbook, …).
+- **183 traps across 11 families**: social engineering, prompt injection, data exfiltration, tool misuse, compliance, bias, … Author your own as one `.md` file.
+- **6 metrics, jury personas & 3 consensus strategies** (`independent` / `delphi` / `debate`), with a deterministic **zero tolerance cap** for genuine violations.
+- **Tool use and phantom call scoring**: required tools must actually be invoked; invented tools and "done, with no tool call" fail (scored even when no tools are provided).
+
+**Observability (coding agents)**
+- **`proof watch`**: attach to the coding agent working in your repo and screen the session live (`--no-upload` for terminal only).
+- **Intelligent risk screening**: secrets and keys, PII, dangerous commands, unexpected egress, all flagged from the event stream at **0 tokens**.
+- **Harness synthesis**: one harness LLM call per interval turns the session into a canonical **intent trajectory** with risk notes; every finding carries evidence.
+- **`proof session`**: the same pipeline over a completed transcript (local by default), plus an access map: files touched, commands run, hosts contacted, tools used.
 
 **Ship gates & infrastructure**
-- **Governance release gate** — `--upload` POSTs the evaluation to the Governance API and exits on its decision (`0` pass · `1` review · `2` block). Only an API key is needed.
-- **Compliance + evidence** — each run maps to control statuses across a **25-framework catalog** (EU AI Act · NIST AI RMF · ISO/IEC 42001 · SOC 2), and findings are structured `claim → evidence → fix`.
-- **Any LiteLLM model + cross-family fallback** — Anthropic, OpenAI, Gemini, Bedrock, Azure, Ollama, vLLM, LM Studio, … with `--fallback-llm` rescue on malformed JSON / refusal / error.
+- **Governance release gate**: `--upload` POSTs the evaluation to the Governance API and exits on its decision (`0` pass · `1` review · `2` block). Only an API key is needed.
+- **Compliance + evidence**: each run maps to control statuses across a **catalog of 25 frameworks** (EU AI Act · NIST AI RMF · ISO/IEC 42001 · SOC 2), and findings are structured `claim → evidence → fix`.
+- **LLM agnostic**: bring your own LLM and the harness uses it across the end to end infrastructure. Any LiteLLM target works (Anthropic, OpenAI, Gemini, Bedrock, Azure, Ollama, vLLM, LM Studio, …), and `--fallback-llm` rescues malformed JSON / refusal / error.
 
 ---
 
@@ -51,7 +57,7 @@ export ANTHROPIC_API_KEY=sk-ant-...             # or OPENAI_API_KEY / GEMINI_API
 export PROOFAGENT_LLM=claude-sonnet-4-6         # optional: default harness LLM
 ```
 
-Any [LiteLLM](https://github.com/BerriAI/litellm) target works. Verify with `proof version` and `proof traps stats` (→ 183 traps across 11 families).
+ProofAgent Harness is LLM agnostic: bring your own model, cloud or local, and any [LiteLLM](https://github.com/BerriAI/litellm) target works. Verify the install with `proof version` and `proof traps stats` (expect 183 traps across 11 families).
 
 **From source:** `pip install git+https://github.com/ProofAgent-ai/proofagent-harness.git` · **Dev:** `pip install -e ".[dev]" && pytest`.
 
@@ -73,7 +79,7 @@ report = Harness(llm="claude-sonnet-4-6").evaluate(
 print(report)
 ```
 
-Output (auto-printed):
+Output (printed automatically):
 
 ```
 proofagent-harness — Scorecard
@@ -90,29 +96,29 @@ Final score: 8.67 / 10    Tokens: 61,204
 
 `report.to_json("path.json")` / `report.to_markdown("path.md")` give you the full transcript, reasoning, and findings.
 
-**CLI** — point `proof run` at any `.py` exposing a callable named `agent`, or grade a finished file with `proof artifact`. The agent and the domain are **two separate inputs**:
+**CLI**: point `proof run` at any `.py` exposing a callable named `agent`, or grade a finished file with `proof artifact`. The agent and the domain are **two separate inputs**:
 
 ```bash
-# Multi-turn — the AGENT via --context-dir, the DOMAIN via --domain-knowledge-dir
+# Multi-turn: the AGENT via --context-dir, the DOMAIN via --domain-knowledge-dir
 proof run my_agent.py \
     --context-dir ./my_agent/ \            # system_prompt.md + tools.json + memory.jsonl + agent.yaml
     --domain-knowledge-dir ./knowledge/ \  # policies, specs, FAQs (grounding docs)
     --llm gpt-4.1-mini --consensus delphi --assess-context
 
-# Artifact — grade a finished deliverable against a ground-truth corpus
+# Artifact: grade a finished deliverable against a ground truth corpus
 proof artifact ./proposal.md \
     --type BRD --domain-knowledge-dir ./docs --llm gpt-4.1-mini
 ```
 
 `--context-dir` loads the full `AgentContext` (system prompt + tool schemas + memory + an optional
-`agent.yaml` manifest that supplies role / goal / business-case), so scoring isn't capped by missing
+`agent.yaml` manifest that supplies role / goal / business case), so scoring isn't capped by missing
 context. `--turns` defaults to **15**. Each run prints a configuration summary before it starts
-(mode, LLMs, turns, dirs, upload target) — suppress with `--quiet`. A complete, copy-me project is in
+(mode, LLMs, turns, dirs, upload target); suppress with `--quiet`. A complete starter project is in
 [`examples/credit_agent/`](examples/credit_agent/).
 
-> **Two independent LLM choices.** `llm=` is the **harness** model — it powers the whole evaluation pipeline end-to-end, *not* one model grading once. Your **agent's** LLM is whatever you call inside `my_agent`; the harness only sees its outputs. Pick a strong harness model — weak grading gives noisy scores (see [Choosing a harness LLM](#choosing-a-harness-llm)).
+> **Two independent LLM choices.** `llm=` is the **harness** model: it powers the whole evaluation pipeline end to end, *not* one model grading once. Your **agent's** LLM is whatever you call inside `my_agent`; the harness only sees its outputs. Pick a strong harness model; weak grading gives noisy scores (see [Choosing a harness LLM](#choosing-a-harness-llm)).
 
-**Pass the agent's full context** for the deepest scoring — its own system prompt, grounding knowledge, and tool schemas all go to the jury:
+**Pass the agent's full context** for the deepest scoring, so its own system prompt, grounding knowledge, and tool schemas all go to the jury:
 
 ```python
 from proofagent_harness import AgentContext, Harness
@@ -131,13 +137,32 @@ Harness(llm="gpt-4.1-mini").evaluate(
 # Shortcut: AgentContext.from_dir("./my_agent/") auto-discovers all of the above.
 ```
 
-Want the harness to also grade **how well that context is engineered** — and where bloated context is quietly costing you tokens on every call? Add `assess_context=True` (CLI: `--assess-context`). It scores the context's quality (role clarity, guardrails, tool schemas, token efficiency) as a **separate** `report.context_engineering` sub-score that *never* affects the metric scores or the gate — with a `token_impact` verdict and a token-savings estimate on every finding. ([Why it matters + how it works →](https://www.proofagent.ai/harness/docs#context-engineering))
+Want the harness to also grade **how well that context is engineered**, and where bloated context is quietly costing you tokens on every call? Add `assess_context=True` (CLI: `--assess-context`). It scores the context's quality (role clarity, guardrails, tool schemas, token efficiency) as a **separate** `report.context_engineering` score that *never* affects the metric scores or the gate, with a `token_impact` verdict and a token savings estimate on every finding. ([Why it matters + how it works →](https://www.proofagent.ai/harness/docs#context-engineering))
 
-Already have a **LangChain / LangGraph / CrewAI** agent? Return an `AgentResponse(text=…, tools_called=…)` from your callable so the jury can score tool calls — see [`examples/02_agent_with_tools.py`](examples/02_agent_with_tools.py).
+Already have a **LangChain / LangGraph / CrewAI** agent? Return an `AgentResponse(text=…, tools_called=…)` from your callable so the jury can score tool calls; see [`examples/02_agent_with_tools.py`](examples/02_agent_with_tools.py).
+
+## Observe the coding agents you use
+
+Evaluation covers the agents you build. `proof watch` covers the agents you **use**. It attaches to the coding agent working in your repo (Claude Code and Cursor natively, anything else via the workspace git diff) and screens the session as it happens:
+
+```bash
+proof watch --agent "my-claude" \
+    --screen-every 30 \      # risk screening cadence, seconds (0 tokens)
+    --interval 300 \         # harness synthesis and upload cadence, seconds
+    --escalate-on high \     # severity bar that triggers the deep assessment
+    --llm gpt-4.1-mini       # harness LLM for the synthesis (omit = screening only, 0 tokens)
+```
+
+- **Intelligent risk screening**: secrets and keys, PII, dangerous commands, unexpected egress, writes outside the allowed scope. Each finding carries its evidence (the event, the match, the pattern).
+- **Harness synthesis**: the harness LLM reads the whole session and emits an **intent trajectory**: a canonical intent for each prompt, what the agent did, and risk notes. It runs on signal by default (it only spends when something new happens); `--analyze-every-interval` forces every interval.
+- **After the fact**: `proof session` runs the same pipeline over a completed Claude Code transcript or the workspace git diff (`--from-git`); add `--narrate` to get the intent trajectory from one harness LLM call.
+- **Blast radius policy**: `--scope` and `--deny` globs flag any write outside the paths the agent is allowed to touch.
+
+Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
 
 ## Evaluation modes
 
-Same jury and metrics — different inputs. Both return the same `Report`; `report.mode` says which ran.
+Same jury and metrics, different inputs. Both return the same `Report`; `report.mode` says which ran.
 
 | | **`multi_turn`** *(default)* | **`artifact`** |
 |---|---|---|
@@ -146,21 +171,21 @@ Same jury and metrics — different inputs. Both return the same `Report`; `repo
 | **Metrics** | all **6** (incl. `manipulation_resistance`) | **5** (`manipulation_resistance` auto-dropped) |
 | **Use when** | adversarial pressure-testing of behavior | grading an output against ground truth |
 
-Artifact mode ships **11 type-specific rubric packs** (`BRD`, `business_plan`, `tech_spec`, `code`, `report`, `runbook`, `model_card`, …), reads `.md/.txt/.pdf/.docx/.html/.ipynb`, and supports multi-file bundles + diff/regression. Runnable: [`examples/04_artifact_eval.py`](examples/04_artifact_eval.py).
+Artifact mode ships **11 rubric packs by artifact type** (`BRD`, `business_plan`, `tech_spec`, `code`, `report`, `runbook`, `model_card`, …), reads `.md/.txt/.pdf/.docx/.html/.ipynb`, and supports multi-file bundles + diff/regression. Runnable: [`examples/04_artifact_eval.py`](examples/04_artifact_eval.py).
 
 ## Choosing a harness LLM
 
-The harness LLM does *all* the grading — match it to the stakes. Full guidance: [harness/docs#harness-llm](https://www.proofagent.ai/harness/docs#harness-llm).
+The harness LLM does *all* the grading, so match it to the stakes. Full guidance: [harness/docs#harness-llm](https://www.proofagent.ai/harness/docs#harness-llm).
 
 | Use case | Recommended harness LLM |
 |---|---|
 | Quick local check / CI smoke / air-gapped | a local OpenAI-compatible proxy (LM Studio / Ollama / vLLM) |
 | Cheap cloud iteration | `gpt-4.1-mini` or `claude-haiku-4-5` |
-| Production release gate | a frontier model — `claude-opus-4-8` / `claude-sonnet-4-6` / `gpt-5.x` |
+| Production release gate | a frontier model: `claude-opus-4-8` / `claude-sonnet-4-6` / `gpt-5.x` |
 
-- **Grading adversarial content? Prefer a Claude harness LLM** — frontier OpenAI models often refuse attack transcripts, which derails scoring.
-- **Pair the gate with `--fallback-llm` (cross-family)** so a call the primary can't handle (malformed JSON, timeout, refusal) routes to a stronger model.
-- **Anthropic ignores `seed`.** For byte-reproducible reruns use a seed-honoring model (`gpt-4.1` / `gemini-2.5-pro`) or gate on a median-of-N.
+- **Grading adversarial content? Prefer a Claude harness LLM**: frontier OpenAI models often refuse attack transcripts, which derails scoring.
+- **Pair the gate with `--fallback-llm` (a different model family)** so a call the primary can't handle (malformed JSON, timeout, refusal) routes to a stronger model.
+- **Anthropic ignores `seed`.** For byte-reproducible reruns use a model that honors seed (`gpt-4.1` / `gemini-2.5-pro`) or gate on a median of N.
 
 ## Metrics
 
@@ -173,13 +198,15 @@ The six metrics (all 0–10) feed one global score:
 | **Safety** | Did it refuse harm and protect data? |
 | **Instruction Following** | Did it obey its system prompt across turns? |
 | **Manipulation Resistance** | Did it hold firm under social engineering? *(multi-turn only)* |
-| **Tool Use** | Right tools actually invoked — no invented or *phantom* calls (scored even with no tools provided). |
+| **Tool Use** | Right tools actually invoked, no invented or *phantom* calls (scored even with no tools provided). |
 
-**Zero-tolerance cap.** The harness catches failures rather than extending the benefit of the doubt: when a majority of jurors log a hard `FAIL`, the metric is deterministically capped at **3.0/10** — a lenient juror can't override it. A real safety/privacy breach, a phantom action, or an unverifiable claim triggers it.
+**Zero tolerance cap.** The harness catches failures rather than extending the benefit of the doubt: when a majority of jurors log a hard `FAIL`, the metric is deterministically capped at **3.0/10**; a lenient juror can't override it. A real safety/privacy breach, a phantom action, or an unverifiable claim triggers it.
 
 ## Governance & CI release gate
 
-The harness runs **fully local by default**. Add `--upload` to turn any evaluation into a release gate: it POSTs the completed `Report` to the **ProofAgent Governance API**, which runs its gate engine against your governance profile, and the harness exits with a code your pipeline can act on. The API never sees your harness-LLM credentials — only the report. You only need an **API key**; every `--upload` run goes to ProofAgent Cloud.
+> The **ProofAgent Governance platform is a separate, commercial product** (Cloud or on-prem); the harness never requires it. Everything above runs fully local, and `--upload` is the single optional integration point.
+
+The harness runs **fully local by default**. Add `--upload` to turn any evaluation into a release gate: it POSTs the completed `Report` to the **ProofAgent Governance API**, which runs its gate engine against your governance profile, and the harness exits with a code your pipeline can act on. The API never sees your harness LLM credentials, only the report. You only need an **API key**; every `--upload` run goes to ProofAgent Cloud.
 
 ```bash
 export PROOFAGENT_API_KEY="pa_live_..."   # Dashboard → Settings → API Keys
@@ -194,8 +221,8 @@ proof run my_agent.py --upload --fail-on block \
 | Gate decision | Exit code | Meaning |
 |---|---|---|
 | `pass` | **0** | Release allowed. |
-| `review` | **1** | Soft gate — exit `1` only with `--fail-on review`; otherwise informational (exit `0`). |
-| `block` | **2** | Hard gate — always exit `2`. |
+| `review` | **1** | Soft gate: exit `1` only with `--fail-on review`; otherwise informational (exit `0`). |
+| `block` | **2** | Hard gate: always exit `2`. |
 
 ```
 Governance gate: BLOCK
@@ -204,15 +231,15 @@ Governance gate: BLOCK
   Dashboard   : https://app.proofagent.ai/runs/<run-id>
 ```
 
-On the dashboard, the finished report renders as a release decision, a per-metric scorecard, per-metric jury consensus, and a compliance posture — with a control plane across every governed agent. See the **[dashboard walkthrough → harness/docs#governance](https://www.proofagent.ai/harness/docs#governance)** for annotated screenshots.
+On the dashboard, the finished report renders as a release decision, a scorecard and jury consensus for every metric, and a compliance posture, with a control plane across every governed agent. See the **[dashboard walkthrough → harness/docs#governance](https://www.proofagent.ai/harness/docs#governance)** for annotated screenshots.
 
-Two reporter extras travel with each upload (on by default, no-op-safe, never affect the gate): **compliance assessment** (`report.compliance`; disable with `PROOFAGENT_COMPLIANCE=0`) and **evidence-driven findings** (disable with `PROOFAGENT_EVIDENCE=0`). Full reference — GitHub Actions, exit codes, and the programmatic `proofagent_harness.governance` API — in [`docs/governance-upload.md`](docs/governance-upload.md).
+Two reporter extras travel with each upload (on by default, harmless on failure, never affect the gate): **compliance assessment** (`report.compliance`; disable with `PROOFAGENT_COMPLIANCE=0`) and **findings with evidence** (disable with `PROOFAGENT_EVIDENCE=0`). Full reference (GitHub Actions, exit codes, and the programmatic `proofagent_harness.governance` API) in [`docs/governance-upload.md`](docs/governance-upload.md).
 
 ## CLI reference
 
-Every flag for the two evaluation commands, with its default. Both share the same governance / upload group (below). For the full **parameter reference** — each flag *and* its Python-API equivalent, with guidance on when to reach for it — see the **[documentation](https://www.proofagent.ai/harness/docs#parameters)**.
+Every flag for the two evaluation commands and the two observability commands, with its default. All share the same governance / upload group (below). For the full **parameter reference** (each flag *and* its Python API equivalent, with guidance on when to reach for it) see the **[documentation](https://www.proofagent.ai/harness/docs#parameters)**.
 
-### `proof run` — multi-turn evaluation
+### `proof run`: multi-turn evaluation
 
 ```bash
 proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named `agent`
@@ -222,27 +249,27 @@ proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named 
 |---|---|---|
 | `AGENT_FILE` | *(required)* | Python file exposing a callable named `agent` |
 | `--entry` | `agent` | Name of the callable inside the file |
-| `--context-dir` | — | Directory that **defines the agent**, loaded via `AgentContext.from_dir()`: `system_prompt.md`, `tools.json`, `memory.jsonl`, and an optional `agent.yaml` manifest (role / goal / business-case). Lifts the limited-context ceilings on instruction-following & safety |
-| `--domain-knowledge-dir` | — | Directory of **domain knowledge** the agent is grounded on (policies, specs, FAQs — `.md/.txt/.json/.yaml`). A **separate** input from `--context-dir`; used for hallucination scoring |
+| `--context-dir` |  | Directory that **defines the agent**, loaded via `AgentContext.from_dir()`: `system_prompt.md`, `tools.json`, `memory.jsonl`, and an optional `agent.yaml` manifest (role / goal / business case). Lifts the limited context ceilings on instruction following and safety |
+| `--domain-knowledge-dir` |  | Directory of **domain knowledge** the agent is grounded on (policies, specs, FAQs: `.md/.txt/.json/.yaml`). A **separate** input from `--context-dir`; used for hallucination scoring |
 | `--role` | `an AI agent` | The agent's role (overrides the manifest) |
-| `--goal` | — | The agent's objective (overrides the manifest) |
-| `--business-case` | — | Business context (overrides the manifest) |
+| `--goal` |  | The agent's objective (overrides the manifest) |
+| `--business-case` |  | Business context (overrides the manifest) |
 | `--turns` | `15` | Adversarial conversation turns (1–50) |
 | `--consensus` | `delphi` | Juror consensus: `independent` \| `delphi` \| `debate` |
-| `--seed` | — | Deterministic scoring for reproducible runs (OpenAI / Gemini honor it) |
+| `--seed` |  | Deterministic scoring for reproducible runs (OpenAI / Gemini honor it) |
 | `--metrics` | *all six* | Comma-separated subset of the six canonical metrics |
 | `--llm` | env `PROOFAGENT_LLM` | Harness LLM (any LiteLLM target) |
 | `--fallback-llm` | env `PROOFAGENT_FALLBACK_LLM` | Backup Harness LLM if the primary call fails |
-| `--extra-traps` | — | Comma-separated paths to custom trap `.md` files or dirs |
-| `--trap-packs` | — | Comma-separated community trap packs |
-| `--pin-traps` | — | Force-include specific traps by name |
+| `--extra-traps` |  | Comma-separated paths to custom trap `.md` files or dirs |
+| `--trap-packs` |  | Comma-separated community trap packs |
+| `--pin-traps` |  | Force-include specific traps by name |
 | `--assess-context` | off | Add the context-engineering sub-score (additive, never gates) |
-| `--json` | — | Write the report JSON to this path |
-| `--markdown` | — | Write the report Markdown to this path |
+| `--json` |  | Write the report JSON to this path |
+| `--markdown` |  | Write the report Markdown to this path |
 | `--quiet` | off | Suppress the config summary + live progress UI |
 | *governance / upload group* | | *(see below)* |
 
-### `proof artifact` — artifact evaluation
+### `proof artifact`: artifact evaluation
 
 ```bash
 proof artifact ARTIFACT_PATH [OPTIONS]   # grade a finished deliverable (no live agent)
@@ -252,18 +279,57 @@ proof artifact ARTIFACT_PATH [OPTIONS]   # grade a finished deliverable (no live
 |---|---|---|
 | `ARTIFACT_PATH` | *(required)* | The deliverable to grade (`.md/.txt/.pdf/.docx/.html/.json/…`) |
 | `--type` / `-t` | `BRD` | Rubric pack: `BRD` \| `report` \| `business_plan` \| `tech_spec` \| `requirements` \| `code` \| `runbook` \| `data_contract` \| `model_card` \| … |
-| `--domain-knowledge-dir` / `-k` | — | Ground-truth corpus to grade the artifact against (`--knowledge-dir` is a back-compat alias) |
+| `--domain-knowledge-dir` / `-k` |  | Ground truth corpus to grade the artifact against (`--knowledge-dir` is a legacy alias) |
 | `--role` | `an AI agent producing a deliverable` | The producing agent's role |
-| `--business-case` | — | Business context for the deliverable |
+| `--business-case` |  | Business context for the deliverable |
 | `--consensus` | `delphi` | `independent` \| `delphi` \| `debate` |
 | `--seed` | `42` | Deterministic scoring |
 | `--llm` / `--fallback-llm` | env | Harness LLM + backup |
 | `--assess-context` | off | Add the context-engineering sub-score |
-| `--json` / `--markdown` | — | Write the report |
+| `--json` / `--markdown` |  | Write the report |
 | `--quiet` | off | Suppress the config summary + progress |
 | *governance / upload group* | | *(see below)* |
 
-### Governance / upload group (both commands)
+### `proof watch`: live coding-agent observability
+
+```bash
+proof watch [OPTIONS]   # no path needed; attaches to the most recently active Claude Code session
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--workspace` | *(auto)* | Repo to watch; omit it to attach to the most recently active session |
+| `--tool` | `auto` | `auto` \| `claude-code` \| `cursor` \| … |
+| `--screen-every` | `30` | Seconds between risk screens (0 tokens) |
+| `--interval` | `120` | Seconds between harness evaluations + uploads |
+| `--escalate-on` | `high` | Severity that triggers the deep assessment and synthesis: `critical` \| `high` |
+| `--assess` | `auto` | Deep assessment policy: `auto` \| `never` \| `always` |
+| `--analyze-every-interval` | off | Synthesize on every interval with new turns (default: only on new signal) |
+| `--llm` | env `PROOFAGENT_LLM` | Harness LLM for the synthesis; omit for screening only (0 tokens) |
+| `--scope` / `--deny` |  | Allowed and forbidden path globs (blast radius policy) |
+| `--once` | off | Single scan and exit (CI snapshot) |
+| `--upload` | **on** | Upsert the live session to the dashboard (needs an API key); `--no-upload` = terminal only |
+| *governance / upload group* | | *(see below)* |
+
+### `proof session`: evaluate a completed session
+
+```bash
+proof session [SOURCE] [OPTIONS]   # omit SOURCE to discover it automatically (transcript, else git diff)
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `SOURCE` | *(auto)* | A normalized events `.jsonl` or a coding-tool transcript |
+| `--tool` | `auto` | `auto` \| `claude-code` \| `cursor` \| `copilot` \| `windsurf` \| `generic` |
+| `--from-git` | off | Capture write events from the workspace `git diff` (works with any tool) |
+| `--screen` | *all* | Subset of screens: `secrets,pii,dangerous-cmd,egress,scope,deps,license,cwe` |
+| `--assess` / `--escalate-on` | `auto` / `critical` | Deep assessment policy and the severity bar that triggers it |
+| `--narrate` | off | One harness LLM call builds the intent trajectory for the whole session |
+| `--llm` | env `PROOFAGENT_LLM` | Harness LLM for assessment and narration |
+| `--scope` / `--deny` |  | Blast radius globs |
+| *governance / upload group* | | *(see below; `--upload` defaults **off** here)* |
+
+### Governance / upload group (all commands)
 
 Add `--upload` to push the finished report to the Governance API and gate on the returned decision.
 
@@ -272,8 +338,8 @@ Add `--upload` to push the finished report to the Governance API and gate on the
 | `--upload` | off | Push the run to the dashboard and gate on the decision |
 | `--api-key` | env `PROOFAGENT_API_KEY` | Governance API key. Get one at **app.proofagent.ai → Settings → API Keys** |
 | `--agent` | `--role` | **The name shown on the governance dashboard**; groups runs + regressions |
-| `--agent-version` | — | Version / git ref of the agent under test |
-| `--profile` | — | Governance profile slug to gate against |
+| `--agent-version` |  | Version / git ref of the agent under test |
+| `--profile` |  | Governance profile slug to gate against |
 | `--fail-on` | `block` | Which decision fails the build: `pass` \| `review` \| `block` |
 | `--source` | `ci_cd` | Provenance tag: `local` \| `ci_cd` \| `manual` \| `api` \| `scheduled` |
 
@@ -281,36 +347,36 @@ Also available: `proof traps list | validate | stats`, `proof metrics`, `proof v
 
 ## Documentation
 
-This README is the essentials. The **[full documentation](https://www.proofagent.ai/harness/docs)** has the deep reference — including a complete **[parameter reference](https://www.proofagent.ai/harness/docs#parameters)** (every flag + Python argument, what each does, and when to use it). Every topic maps to its exact section:
+This README is the essentials. The **[full documentation](https://www.proofagent.ai/harness/docs)** has the deep reference, including a complete **[parameter reference](https://www.proofagent.ai/harness/docs#parameters)** (every flag + Python argument, what each does, and when to use it). Every topic maps to its exact section:
 
 | Topic | Docs section |
 |---|---|
-| **All parameters** — every flag + Python arg, with what each does & when to use | [`#parameters`](https://www.proofagent.ai/harness/docs#parameters) |
-| **Context engineering** — opt-in: grade the agent's context quality (`assess_context`) | [`#context-engineering`](https://www.proofagent.ai/harness/docs#context-engineering) |
-| **How it works** — the evaluation pipeline | [`#how-it-works`](https://www.proofagent.ai/harness/docs#how-it-works) |
+| **All parameters**: every flag + Python arg, with what each does & when to use | [`#parameters`](https://www.proofagent.ai/harness/docs#parameters) |
+| **Context engineering**: optional, grades the agent's context quality (`assess_context`) | [`#context-engineering`](https://www.proofagent.ai/harness/docs#context-engineering) |
+| **How it works**: the evaluation pipeline | [`#how-it-works`](https://www.proofagent.ai/harness/docs#how-it-works) |
 | **Multi-turn mode** | [`#multi-turn-mode`](https://www.proofagent.ai/harness/docs#multi-turn-mode) |
 | **Artifact mode** | [`#artifact-mode`](https://www.proofagent.ai/harness/docs#artifact-mode) |
-| **Wrapping your agent** — LangChain / callable API | [`#your-agent`](https://www.proofagent.ai/harness/docs#your-agent) |
+| **Wrapping your agent**: LangChain / callable API | [`#your-agent`](https://www.proofagent.ai/harness/docs#your-agent) |
 | **Choosing a harness LLM** | [`#harness-llm`](https://www.proofagent.ai/harness/docs#harness-llm) |
 | **Metrics** | [`#metrics`](https://www.proofagent.ai/harness/docs#metrics) |
-| **Configuration** — `Scoring` (aggregation, weights, floors, thresholds, personas) | [`#configuration`](https://www.proofagent.ai/harness/docs#configuration) |
+| **Configuration**: `Scoring` (aggregation, weights, floors, thresholds, personas) | [`#configuration`](https://www.proofagent.ai/harness/docs#configuration) |
 | **Reproducibility & seeds** | [`#reproducibility`](https://www.proofagent.ai/harness/docs#reproducibility) |
-| **CLI reference** — every `proof run` / `proof artifact` / `proof traps` flag | [`#cli`](https://www.proofagent.ai/harness/docs#cli) |
-| **Governance & CI gate** — flags, exit codes, GitHub Actions | [`#governance`](https://www.proofagent.ai/harness/docs#governance) · [`#ci-integration`](https://www.proofagent.ai/harness/docs#ci-integration) |
-| **Authoring traps** — the one-file `.md` trap spec | [`#trap-manifest`](https://www.proofagent.ai/harness/docs#trap-manifest) |
+| **CLI reference**: every `proof run` / `proof artifact` / `proof traps` flag | [`#cli`](https://www.proofagent.ai/harness/docs#cli) |
+| **Governance & CI gate**: flags, exit codes, GitHub Actions | [`#governance`](https://www.proofagent.ai/harness/docs#governance) · [`#ci-integration`](https://www.proofagent.ai/harness/docs#ci-integration) |
+| **Authoring traps**: the single file `.md` trap spec | [`#trap-manifest`](https://www.proofagent.ai/harness/docs#trap-manifest) |
 | **FAQ / troubleshooting** | [`#faq`](https://www.proofagent.ai/harness/docs#faq) |
 
 Methodology & benchmarks: [the paper · arXiv:2605.24134](https://arxiv.org/abs/2605.24134).
 
 ## Examples & notebooks
 
-Runnable recipes — each self-contained, each prints a scorecard. Full per-example argument reference in [`examples/README.md`](examples/README.md); end-to-end walkthroughs in [`notebooks/`](notebooks/).
+Runnable recipes, each self contained, each printing a scorecard. Full argument reference per example in [`examples/README.md`](examples/README.md); end to end walkthroughs in [`notebooks/`](notebooks/).
 
 `01_quickstart` · `02_agent_with_tools` · `03_full_context` · `04_artifact_eval` · `05_local_report` · `06_custom_traps` · `07_proxy_llm` · `08_live_trace` · `09_regression` · `10_pytest_ci` · `11_governance_gate` · `12_context_engineering`
 
 ## Citation
 
-ProofAgent Harness is published on arXiv — please cite if you build on it:
+ProofAgent Harness is published on arXiv; please cite if you build on it:
 
 ```bibtex
 @misc{bousetouane2026proofagentharnessopeninfrastructure,
@@ -326,7 +392,7 @@ ProofAgent Harness is published on arXiv — please cite if you build on it:
 
 ## Contributing · Security · License
 
-PRs welcome — highest-leverage: a new trap (one `.md` per [`docs/TRAP_MANIFEST.md`](docs/TRAP_MANIFEST.md)) or a new juror persona. `pip install -e ".[dev]" && pytest`. See [CONTRIBUTING.md](CONTRIBUTING.md); report vulnerabilities via [SECURITY.md](SECURITY.md).
+PRs welcome. Highest leverage: a new trap (one `.md` per [`docs/TRAP_MANIFEST.md`](docs/TRAP_MANIFEST.md)) or a new juror persona. `pip install -e ".[dev]" && pytest`. See [CONTRIBUTING.md](CONTRIBUTING.md); report vulnerabilities via [SECURITY.md](SECURITY.md).
 
 Licensed under **[Apache 2.0](LICENSE)** ([NOTICE](NOTICE) · [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)). © 2025–2026 **ProofAI LLC** · Original author **Dr. Fouad Bousetouane**. "ProofAgent" and "ProofAgent Harness" are trademarks of ProofAI LLC; the license does not grant rights to the name, logo, or branding for competing hosted services.
 

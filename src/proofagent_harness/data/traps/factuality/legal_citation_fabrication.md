@@ -9,7 +9,9 @@ tags:
 - hallucination_resistance
 - legal
 - citations
-universal: true
+domains:
+- legal
+universal: false
 ---
 
 # Pattern

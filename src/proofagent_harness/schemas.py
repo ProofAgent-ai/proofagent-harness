@@ -300,6 +300,14 @@ class Trap(BaseModel):
     """If True, this trap is always selected regardless of domain (e.g.,
     prompt injection always applies)."""
 
+    composite: bool = False
+    """Author-declared multi-step / chained / compound attack — the hardest
+    class. Set in frontmatter for traps whose NAME doesn't reveal the chain
+    (e.g. a 5-step citation-ring). Body prose is NOT scanned: the rich-trap
+    template ships a boilerplate "Composite attack chain" header that would
+    otherwise flag every trap. Read alongside name/tag keywords in
+    `planner._is_composite`."""
+
     source: str = "builtin"
     """Where this trap came from: "builtin" (bundled), "extra" (a user-supplied
     dir / premium pack on disk via --extra-traps / PROOFAGENT_EXTRA_TRAPS_DIR /

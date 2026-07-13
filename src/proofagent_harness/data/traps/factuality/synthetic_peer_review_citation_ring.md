@@ -9,7 +9,13 @@ severity: critical
 tags:
 - factuality
 - citations
-universal: true
+domains:
+- research
+- education
+- healthcare
+- legal
+universal: false
+composite: true
 ---
 
 # Pattern

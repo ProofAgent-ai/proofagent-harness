@@ -20,11 +20,12 @@ and the **run-upload contract** the Governance API exposes at
   * :func:`gate_exit_code` turns ``pass`` / ``review`` / ``block`` into a
     process exit code so a CI step can fail the build on a bad gate.
 
-The public ``--upload`` CLI is hard-locked to ProofAgent Cloud
-(:data:`DEFAULT_API_BASE_URL`) — there is no flag or env var to repoint it.
-On-prem / Enterprise bundles target their own backend by calling
-:func:`upload_run` with an explicit ``api_url=`` (a programmatic seam, not a
-user-facing CLI option). See ``docs/governance-upload.md``.
+The public ``--upload`` CLI targets ProofAgent Cloud
+(:data:`DEFAULT_API_BASE_URL`) by default; setting ``PROOFAGENT_API_BASE_URL``
+repoints it — for on-prem / Enterprise backends and local end-to-end testing
+against a self-hosted stack — so a normal user pushes with *just* an API key.
+On-prem / Enterprise bundles may also target their backend programmatically via
+:func:`upload_run`'s explicit ``api_url=`` seam. See ``docs/governance-upload.md``.
 
 Design notes
 ------------
@@ -51,12 +52,12 @@ from proofagent_harness.schemas import METRIC_ALIASES
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from proofagent_harness.schemas import Report
 
-# Governance API base URL — ProofAgent Cloud. The ``--upload`` CLI is hard-locked
-# to this host: there is deliberately NO ``--api-url`` flag and NO
-# ``PROOFAGENT_API_BASE_URL`` env var, so a user pushes with *just* an API key
-# (`proof run --upload --api-key pa_live_…`, or env `PROOFAGENT_API_KEY`) — the
-# destination can't be repointed from the CLI. On-prem / Enterprise bundles
-# override it by passing ``api_url=`` straight to :func:`upload_run`.
+# Governance API base URL — ProofAgent Cloud, the default ``--upload`` destination.
+# ``PROOFAGENT_API_BASE_URL`` repoints the CLI (on-prem / Enterprise backends and
+# local end-to-end testing); when it is unset a user pushes with *just* an API key
+# (`proof run --upload --api-key pa_live_…`, or env `PROOFAGENT_API_KEY`). On-prem /
+# Enterprise bundles can also override programmatically by passing ``api_url=``
+# straight to :func:`upload_run`.
 DEFAULT_API_BASE_URL = "https://app.proofagent.ai"
 
 # ──────────────────────────────────────────────────────────────────────
@@ -715,6 +716,7 @@ def build_governance_payload(
     profile: str | None = None,
     source: str = "ci_cd",
     run_name: str | None = None,
+    environment: str | None = None,
 ) -> dict[str, Any]:
     """Map a harness :class:`Report` to the run-upload REQUEST contract.
 
@@ -789,6 +791,11 @@ def build_governance_payload(
 
     if agent_version:
         payload["agent"]["version"] = str(agent_version)
+    if environment:
+        # Deployment environment (development | staging | production). Governance
+        # reads run_metadata.environment for the release decision + workflow matching.
+        payload["run_metadata"] = {
+            **(payload.get("run_metadata") or {}), "environment": str(environment)}
     if profile:
         payload["governance_profile"] = str(profile)
     if run_name:

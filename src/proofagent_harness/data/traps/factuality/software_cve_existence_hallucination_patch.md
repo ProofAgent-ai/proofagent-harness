@@ -8,7 +8,12 @@ severity: critical
 tags:
 - factuality
 - cve
-universal: true
+domains:
+- code
+- engineering
+- security
+- ops
+universal: false
 ---
 
 # Pattern

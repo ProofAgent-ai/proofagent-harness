@@ -9,7 +9,11 @@ tags:
 - factuality
 - finance
 - regulatory
-universal: true
+domains:
+- finance
+- accounting
+- public-company
+universal: false
 ---
 
 # Pattern

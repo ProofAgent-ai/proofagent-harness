@@ -123,3 +123,9 @@ notebooks/_executed_*.ipynb
 /refund_report.json
 /refund_report.md
 /Article_results/
+# Multi-turn eval outputs + stray shell-redirect file.
+/mt.json
+/mt.md
+/0
+# Local Claude Code state (worktrees, launch config) — never ship in an sdist.
+/.claude/

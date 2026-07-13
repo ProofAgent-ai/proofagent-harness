@@ -4,9 +4,63 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.0] — 2026-07-13
 
-_Nothing yet._
+The observability release: the harness now covers the agents you *use* as well as
+the agents you build. New positioning: **pytest + observability infrastructure for
+AI agents**.
+
+### Added
+- **`proof watch`: live coding-agent observability.** Attaches to the coding agent
+  working in your repo (Claude Code and Cursor natively, anything else via the git
+  working tree) and screens the session as it happens. Two cadences, both in seconds:
+  `--screen-every` (default 30) runs the intelligent risk screening at 0 tokens;
+  `--interval` (default 120) runs the harness evaluation + dashboard upsert. The
+  growing session is upserted as a SINGLE live run (stable `session_key`), so the
+  trajectory fills in near real time. Observe only; never gates the agent. `--once`
+  takes a single snapshot for CI; Ctrl-C flushes a final `live=false` snapshot.
+- **Canonical intent trajectory (harness synthesis).** One harness LLM call reads the
+  whole session and labels each turn with a standardized `<verb> <object>` intent
+  (resolved from full session context, not a paraphrase of the prompt), what the agent
+  did, and a risk note. Synthesis is signal driven (new risk, a batch of new intents,
+  or a periodic cap); `--analyze-every-interval` forces it on every interval with new
+  turns. Narration is sticky: a turn labeled once never downgrades on later scans.
+- **Preflight checks.** `proof watch` verifies the tool connection, probes the harness
+  LLM (`probe_llm`: one minimal call), and prints the upload target before the loop
+  starts, so a bad key or model surfaces up front instead of silently degrading.
+- **Honest narration accounting.** Eval tokens accumulate across scans
+  (`narration_tokens`), the `narrated` flag is true only when the LLM actually spent
+  tokens, and a failed synthesis surfaces `narration_error` plus a terminal warning
+  (missing key, bad model, rate limit) instead of silently showing prompt-like intents.
+- **Cursor adapter.** Reads Cursor's per-workspace session store; `--tool auto` falls
+  back Claude Code, then Cursor, then the git diff.
+- **Idempotent `proof session`**: a session carries a stable `session_key` (from the
+  transcript), so re-running it updates the same dashboard run instead of duplicating it.
+
+### Changed
+- **`--interval` is now seconds** (was minutes), the same unit as `--screen-every`;
+  session metadata carries `interval_seconds` and the live scan state (`live`,
+  `last_scan`, `next_scan`) via `build_session_payload(..., session_key=, watch=)`.
+- **Secret redaction hardened.** Key shaped tokens and emails are masked in every
+  uploaded free text field: prompts, intent previews, event messages and targets, and
+  access map commands. Finding evidence now carries the event timestamp (`ts`) so the
+  dashboard can attribute findings to trajectory turns.
+- **README repositioned** around the two planes (evaluate the agents you build,
+  observe the agents you use) with a new "Observe the coding agents you use" section
+  and CLI reference entries for `proof watch` / `proof session`. The ProofAgent
+  Governance platform is documented as a separate commercial product; `--upload`
+  stays the single optional integration point.
+- `PROOFAGENT_API_BASE_URL` documented as the supported way to repoint `--upload`
+  (on-prem / Enterprise / local stacks); module docs previously claimed the
+  destination could not be repointed.
+
+### Fixed
+- `proof watch` cumulative token bookkeeping no longer overwrites the deep assessment
+  spend in `total_tokens` when `--assess` grades a slice in the same scan.
+- Offline intent labels (`actionize`) strip conversational preamble (typo tolerant),
+  so a turn is labeled by its request, not its throat clearing.
+- Repo hygiene for OSS: removed stray tracked artifacts (`mt.json`, `mt.md`, `0`),
+  ignored `/.claude/` so local editor state can never ship in an sdist.
 
 ## [0.7.2] — 2026-07-03
 

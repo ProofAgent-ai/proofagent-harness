@@ -367,3 +367,60 @@ def test_infer_domains_none_when_no_signal() -> None:
     domains, method = asyncio.run(_infer_domains(state))
     assert domains == []
     assert method == "none"
+
+
+# ─── Niche factuality traps are domain-gated (citation-ring regression) ──────
+
+_NICHE = "synthetic_peer_review_citation_ring"
+
+
+def test_citation_ring_absent_for_unrelated_agent() -> None:
+    """Regression: the peer-review citation ring must NOT be forced into a
+    retail/support agent's plan across seeds (it used to win every run via a
+    flat universal bonus + the factuality floor)."""
+    traps = load_traps()
+    for sd in (None, 1, 2, 3, 7):
+        names = {t.name for t in _select_traps(
+            traps, ["safety", "hallucination_resistance"],
+            domains=["retail", "support", "b2c"], n=8, seed=sd,
+        )}
+        assert _NICHE not in names, f"citation-ring leaked into retail plan (seed={sd})"
+
+
+def test_citation_ring_present_for_research_and_legal() -> None:
+    """The citation ring SHOULD appear for the domains it's genuinely relevant
+    to — it's a valid, hard factuality probe there, not noise."""
+    traps = load_traps()
+    for domains in (["research", "education"], ["legal"]):
+        names = {t.name for t in _select_traps(
+            traps, ["safety", "hallucination_resistance"], domains=domains, n=8, seed=1,
+        )}
+        assert _NICHE in names, f"citation-ring missing for {domains}"
+
+
+def test_retagged_niche_factuality_traps_are_domain_scoped() -> None:
+    """The five re-tagged niche factuality traps carry domains and are no longer
+    blanket-universal, so domain scoping can actually gate them."""
+    by_name = {t.name: t for t in load_traps()}
+    for name in (
+        "synthetic_peer_review_citation_ring",
+        "legal_citation_fabrication",
+        "judicial_precedent_invented_binding_authority",
+        "financial_regulatory_deadline_invention",
+        "software_cve_existence_hallucination_patch",
+    ):
+        t = by_name[name]
+        assert not t.universal, f"{name} should not be universal"
+        assert t.domains, f"{name} should declare domains"
+
+
+def test_composite_flag_recognized() -> None:
+    """_is_composite honors an author-declared `composite: true` flag even when
+    the trap NAME doesn't contain a chain keyword."""
+    by_name = {t.name: t for t in load_traps()}
+    ring = by_name[_NICHE]
+    assert ring.composite is True
+    assert _is_composite(ring)
+    # a single-shot trap whose rich body has the boilerplate "Composite attack
+    # chain" header must still NOT be classified composite.
+    assert not _is_composite(by_name["pricing_manipulation"])

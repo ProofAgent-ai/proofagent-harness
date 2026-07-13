@@ -371,7 +371,16 @@ def _is_factuality(t: Trap) -> bool:
     return t.family == "factuality"
 
 def _is_composite(t: Trap) -> bool:
-    """A multi-step / chained / compound attack — the sharpest class of trap."""
+    """A multi-step / chained / compound attack — the sharpest class of trap.
+
+    Two signals: an author-declared `composite: true` flag (for chains whose
+    NAME doesn't reveal them, e.g. the peer-review citation ring), OR a
+    name/tag keyword match. Body prose is deliberately NOT scanned — the
+    rich-trap template ships a boilerplate "Composite attack chain" header that
+    is present even in single-shot traps, so scanning it flags everything.
+    """
+    if getattr(t, "composite", False):
+        return True
     blob = (t.name + " " + " ".join(t.tags or [])).lower()
     return any(k in blob for k in _HARD_KEYWORDS)
 
@@ -410,7 +419,12 @@ def _select_traps(
         return []
 
     domain_set = set(domains)
-    rng = random.Random(seed if seed is not None else 42)
+    # De-determinized tie-breaker: an EXPLICIT seed still reproduces the plan
+    # exactly (Harness(seed=...) / CI), but an UNSET seed now draws from OS
+    # entropy so the trap mix and order rotate across runs. Previously seed=None
+    # collapsed to a fixed 42, which — combined with the tiny jitter — made the
+    # same top-scoring trap win every single run (the citation-ring bug).
+    rng = random.Random(seed)
 
     # Score every trap ONCE. Higher = picked sooner. Domain match dominates,
     # then attack DIFFICULTY (composite + severity + sustained multi-turn
@@ -426,14 +440,24 @@ def _select_traps(
         supplied = getattr(t, "source", "builtin") != "builtin"
         if supplied:
             s += 10.0
-        if t.universal:
-            s += 5.0
+        # Domain relevance is a soft gradient (issue: niche factuality traps like
+        # the peer-review citation ring used to win every run via a flat universal
+        # bonus). A trap that names its relevant domains floats UP when the agent
+        # is in one of them, and DOWN (built-in, non-universal only) when it isn't
+        # — so a legal-citation probe outranks a generic one for a legal agent and
+        # is penalized out for a refund bot.
         if t.domains:
             overlap = len(set(t.domains) & domain_set)
             if overlap > 0:
                 s += 6.0 + overlap
-            elif not supplied:
-                s -= 3.0           # off-domain penalty — never for supplied traps
+            elif not supplied and not t.universal:
+                s -= 3.0           # off-domain SPECIFIC built-in — penalize out.
+                                   # universal-with-hints off-domain: no penalty
+                                   # (still applies), just no boost.
+        # Universal baseline REDUCED 5.0 → 3.0 so the domain gradient can actually
+        # differentiate cross-cutting traps instead of tying them all at the top.
+        if t.universal:
+            s += 3.0
         s += _difficulty(t)        # composite + severity + seed-count
         s += rng.random() * 0.25   # small tie-breaker — difficulty dominates
         return s
@@ -478,8 +502,16 @@ def _select_traps(
             _take([t for t in scored if pred(t)], shortfall)
 
     # ── MANDATORY FLOORS (preserve the tested guarantees) ────────────────
-    # 1) Factuality floor — grounding / hallucination probes.
-    _take_pref(_is_factuality, min(n, max(0, min_factuality_traps)))
+    # 1) Factuality floor — grounding / hallucination probes. RELEVANCE-GATED:
+    #    only universal or domain-matched factuality traps count, so a niche
+    #    factuality attack (peer-review DOI ring, legal citations, CVE patch)
+    #    never fills the floor for an unrelated agent. Universal factuality traps
+    #    are plentiful, so the floor is always satisfiable without an off-domain
+    #    leak — no fallback to ineligible traps here (unlike the other floors).
+    _take(
+        [t for t in scored if _is_factuality(t) and _eligible(t)],
+        min(n, max(0, min_factuality_traps)),
+    )
 
     # 2) Critical share — prompt_injection / hallucination (highest-leverage).
     n_critical_min = max(1, math.ceil(n * min_critical_share))

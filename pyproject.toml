@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "proofagent-harness"
 dynamic = ["version"]
-description = "The open-source, domain-aware test harness for AI agents. Run multi-turn adversarial evaluations with jury-based scoring across production-critical metrics — hallucination, policy compliance, drift, tool use, manipulation resistance. BYO LLM. BYO traps."
+description = "pytest + observability infrastructure for AI agents. Evaluate the agents you build: multi-turn adversarial red teaming and artifact grading with jury based scoring. Observe the agents you use: intelligent risk screening and intent trajectories for coding agents (Claude Code, Cursor). LLM agnostic."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
@@ -28,7 +28,8 @@ keywords = [
     "multi-turn-evaluation",
     "ai-safety",
     "hallucination-detection",
-    "llm-judge",
+    "agent-observability",
+    "coding-agents",
     "red-teaming",
 ]
 classifiers = [
