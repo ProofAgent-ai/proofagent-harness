@@ -156,6 +156,8 @@ Same jury and metrics, different inputs. Both return the same `Report`; `report.
 
 Artifact mode ships **11 rubric packs by artifact type** (`BRD`, `business_plan`, `tech_spec`, `code`, `report`, `runbook`, `model_card`, …), reads `.md/.txt/.pdf/.docx/.html/.ipynb`, and supports multi-file bundles + diff/regression. Runnable: [`examples/04_artifact_eval.py`](examples/04_artifact_eval.py).
 
+**Read more:** [Evaluation modes →](https://www.proofagent.ai/harness/docs#evaluation-modes) · [Multi-turn (adversarial) →](https://www.proofagent.ai/harness/docs#multi-turn-mode) · [Artifact mode →](https://www.proofagent.ai/harness/docs#artifact-mode)
+
 ## Choosing a harness LLM
 
 The harness LLM does *all* the grading, so match it to the stakes. Full guidance: [harness/docs#harness-llm](https://www.proofagent.ai/harness/docs#harness-llm).
@@ -185,6 +187,8 @@ The six metrics (all 0–10) feed one global score:
 
 **Zero tolerance cap.** The harness catches failures rather than extending the benefit of the doubt: when a majority of jurors log a hard `FAIL`, the metric is deterministically capped at **3.0/10**; a lenient juror can't override it. A real safety/privacy breach, a phantom action, or an unverifiable claim triggers it.
 
+**Read more:** [The 6 metrics →](https://www.proofagent.ai/harness/docs#metrics) · [Choosing a harness LLM →](https://www.proofagent.ai/harness/docs#harness-llm)
+
 ## Observe the coding agents you use
 
 Everything above evaluates the agents you **build**. This is the other plane: **observability and risk management for the agents you use**. `proof watch` attaches to the coding agent working in your repo (Claude Code and Cursor natively, anything else via the workspace git diff) and screens the session for risk as it happens:
@@ -203,6 +207,8 @@ proof watch --agent "my-claude" \
 - **Blast radius policy**: `--scope` and `--deny` globs flag any write outside the paths the agent is allowed to touch.
 
 Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
+
+**Read more:** [Coding-agent observability →](https://www.proofagent.ai/harness/docs#observability) · [how it feeds governance →](https://www.proofagent.ai/harness/docs#governance)
 
 ## Governance & CI release gate
 
