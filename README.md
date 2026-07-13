@@ -4,6 +4,8 @@
 
 **`pytest` + observability infrastructure for AI agents.** Evaluate the agents you **build**: multi-turn adversarial red teaming and artifact grading (code, BRDs, specs, reports). Observe the agents you **use**: intelligent risk screening and intent trajectories for coding agents (Claude Code, Cursor, …).
 
+Built on the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of AI agents — humans oversee from the bridge while the harness carries the evidence, instead of gating every step by hand.
+
 [![PyPI](https://img.shields.io/pypi/v/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![Python](https://img.shields.io/pypi/pyversions/proofagent-harness.svg)](https://pypi.org/project/proofagent-harness/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -12,7 +14,7 @@
 
 <img src="docs/architecture.png" alt="ProofAgent Harness evaluation pipeline" width="720" />
 
-[Install](#install) · [Quickstart](#quickstart) · [Observability](#observe-the-coding-agents-you-use) · [Modes](#evaluation-modes) · [Harness LLM](#choosing-a-harness-llm) · [Metrics](#metrics) · [Governance gate](#governance--ci-release-gate) · [Docs](https://www.proofagent.ai/harness/docs)
+[Install](#install) · [Quickstart](#quickstart) · [Modes](#evaluation-modes) · [Harness LLM](#choosing-a-harness-llm) · [Metrics](#metrics) · [Observability](#observe-the-coding-agents-you-use) · [Governance gate](#governance--ci-release-gate) · [Docs](https://www.proofagent.ai/harness/docs)
 
 **📖 Full docs:** [proofagent.ai/harness/docs](https://www.proofagent.ai/harness/docs) · **📄 Paper:** [arXiv:2605.24134](https://arxiv.org/abs/2605.24134)
 
@@ -35,7 +37,7 @@
 **Observability (coding agents)**
 - **`proof watch`**: attach to the coding agent working in your repo and screen the session live (`--no-upload` for terminal only).
 - **Intelligent risk screening**: secrets and keys, PII, dangerous commands, unexpected egress, all flagged from the event stream at **0 tokens**.
-- **Harness synthesis**: one harness LLM call per interval turns the session into a canonical **intent trajectory** with risk notes; every finding carries evidence.
+- **Harness synthesis**: the ProofAgent Harness infrastructure analyzes the session in depth, building a canonical **intent trajectory** and surfacing the risks along it, with every finding carrying its evidence.
 - **`proof session`**: the same pipeline over a completed transcript (local by default), plus an access map: files touched, commands run, hosts contacted, tools used.
 
 **Ship gates & infrastructure**
@@ -141,25 +143,6 @@ Want the harness to also grade **how well that context is engineered**, and wher
 
 Already have a **LangChain / LangGraph / CrewAI** agent? Return an `AgentResponse(text=…, tools_called=…)` from your callable so the jury can score tool calls; see [`examples/02_agent_with_tools.py`](examples/02_agent_with_tools.py).
 
-## Observe the coding agents you use
-
-Evaluation covers the agents you build. `proof watch` covers the agents you **use**. It attaches to the coding agent working in your repo (Claude Code and Cursor natively, anything else via the workspace git diff) and screens the session as it happens:
-
-```bash
-proof watch --agent "my-claude" \
-    --screen-every 30 \      # risk screening cadence, seconds (0 tokens)
-    --interval 300 \         # harness synthesis and upload cadence, seconds
-    --escalate-on high \     # severity bar that triggers the deep assessment
-    --llm gpt-4.1-mini       # harness LLM for the synthesis (omit = screening only, 0 tokens)
-```
-
-- **Intelligent risk screening**: secrets and keys, PII, dangerous commands, unexpected egress, writes outside the allowed scope. Each finding carries its evidence (the event, the match, the pattern).
-- **Harness synthesis**: the harness LLM reads the whole session and emits an **intent trajectory**: a canonical intent for each prompt, what the agent did, and risk notes. It runs on signal by default (it only spends when something new happens); `--analyze-every-interval` forces every interval.
-- **After the fact**: `proof session` runs the same pipeline over a completed Claude Code transcript or the workspace git diff (`--from-git`); add `--narrate` to get the intent trajectory from one harness LLM call.
-- **Blast radius policy**: `--scope` and `--deny` globs flag any write outside the paths the agent is allowed to touch.
-
-Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
-
 ## Evaluation modes
 
 Same jury and metrics, different inputs. Both return the same `Report`; `report.mode` says which ran.
@@ -201,6 +184,25 @@ The six metrics (all 0–10) feed one global score:
 | **Tool Use** | Right tools actually invoked, no invented or *phantom* calls (scored even with no tools provided). |
 
 **Zero tolerance cap.** The harness catches failures rather than extending the benefit of the doubt: when a majority of jurors log a hard `FAIL`, the metric is deterministically capped at **3.0/10**; a lenient juror can't override it. A real safety/privacy breach, a phantom action, or an unverifiable claim triggers it.
+
+## Observe the coding agents you use
+
+Everything above evaluates the agents you **build**. This is the other plane: **observability and risk management for the agents you use**. `proof watch` attaches to the coding agent working in your repo (Claude Code and Cursor natively, anything else via the workspace git diff) and screens the session for risk as it happens:
+
+```bash
+proof watch --agent "my-claude" \
+    --screen-every 30 \      # risk screening cadence, seconds (0 tokens)
+    --interval 300 \         # harness synthesis and upload cadence, seconds
+    --escalate-on high \     # severity bar that triggers the deep assessment
+    --llm gpt-4.1-mini       # harness LLM for the synthesis (omit = screening only, 0 tokens)
+```
+
+- **Intelligent risk screening**: secrets and keys, PII, dangerous commands, unexpected egress, writes outside the allowed scope. Each finding carries its evidence (the event, the match, the pattern).
+- **Harness synthesis**: the ProofAgent Harness infrastructure analyzes the whole session in depth and builds an **intent trajectory**: a canonical intent for each prompt, what the agent did, and the risks along the way. It works on signal by default (deepening the analysis when something new happens); `--analyze-every-interval` re-analyzes every interval.
+- **After the fact**: `proof session` runs the same pipeline over a completed Claude Code transcript or the workspace git diff (`--from-git`); add `--narrate` for the full intent trajectory.
+- **Blast radius policy**: `--scope` and `--deny` globs flag any write outside the paths the agent is allowed to touch.
+
+Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
 
 ## Governance & CI release gate
 
@@ -376,9 +378,17 @@ Runnable recipes, each self contained, each printing a scorecard. Full argument 
 
 ## Citation
 
-ProofAgent Harness is published on arXiv; please cite if you build on it:
+ProofAgent Harness implements the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of AI agents. If you build on it, please cite both the paradigm and the tool:
 
 ```bibtex
+@misc{bousetouane2026humanonthebridge,
+      title={Human-on-the-Bridge: Scalable Evaluation for AI Agents},
+      author={Fouad Bousetouane},
+      year={2026},
+      archivePrefix={arXiv},
+      primaryClass={cs.MA},
+}
+
 @misc{bousetouane2026proofagentharnessopeninfrastructure,
       title={ProofAgent Harness: Open Infrastructure for Adversarial Evaluation of AI Agents},
       author={Fouad Bousetouane},
