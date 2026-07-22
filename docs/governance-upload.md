@@ -140,10 +140,12 @@ proof run my_agent.py --governance-profile governance.yaml --fail-on block
 
 Precedence: a `--governance-profile` file wins; `--assess-governance` instead
 pulls the profile bound to `--agent NAME` from the dashboard (best-effort — an
-offline run proceeds without it); with neither, no governance hooks run. The
-profile also steers adversarial trap selection, holds `--assess-context` to the
-tier's bar, and scopes `--assess-compliance` (see the README's **Agent
-Governance Profile** section for the full YAML anatomy and tier guardrails).
+offline run proceeds without it); with neither, the evaluation runs exactly as
+before. With a profile attached the whole run is governed by the classification:
+the adversarial evaluation targets the declared risk, `--assess-context` is held
+to the tier's bar, and `--assess-compliance` is scoped to the profile's
+frameworks (see the README's **Agent Governance Profile** section for the full
+YAML anatomy and tier guardrails).
 With `--upload`, the profile travels in the payload as
 `agent_governance_profile` and fills the agent's risk classification on the
 dashboard.
