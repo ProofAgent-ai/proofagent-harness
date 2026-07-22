@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.9.0] — Unreleased
+## [0.9.0] — 2026-07-22
 
 The governance as code release: the agent's risk classification becomes a YAML
 file in your repo, and the harness derives the whole governance posture from it —
