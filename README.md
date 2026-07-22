@@ -41,7 +41,7 @@ Built on the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of A
 - **`proof session`**: the same pipeline over a completed transcript (local by default), plus an access map: files touched, commands run, hosts contacted, tools used.
 
 **Ship gates & infrastructure**
-- **Agent Governance Profile (governance as code)**: one YAML declares the agent's risk context; a deterministic classifier derives the risk tier, obligations and frameworks, steers the traps and the context bar, and **gates the release locally** — zero LLM calls, zero network, no account.
+- **Agent Governance Profile (governance as code)**: `--governance-profile governance.yaml` declares the agent's risk context in one YAML; the harness infrastructure derives the full risk classification (tier, obligations, frameworks in scope), governs the whole evaluation with it, and **gates the release locally** with the standard CI exit codes — deterministic, fully local, no account.
 - **Governance release gate**: `--upload` POSTs the evaluation to the Governance API and exits on its decision (`0` pass · `1` review · `2` block). Only an API key is needed.
 - **Compliance + evidence**: opt-in `--assess-compliance` maps a run to control statuses across a **catalog of 25 frameworks** (EU AI Act · NIST AI RMF · ISO/IEC 42001 · SOC 2), and findings are structured `claim → evidence → fix`.
 - **LLM agnostic**: bring your own LLM and the harness uses it across the end to end infrastructure. Any LiteLLM target works (Anthropic, OpenAI, Gemini, Bedrock, Azure, Ollama, vLLM, LM Studio, …), and `--fallback-llm` rescues malformed JSON / refusal / error.
@@ -248,9 +248,11 @@ Two reporter extras can travel with the report (harmless on failure, never affec
 
 ## Agent Governance Profile: governance as code
 
-> Fully open source and fully local: the profile is a YAML file in your repo, the classifier is deterministic (zero LLM calls, zero network), and the gate runs on your machine. No account needed.
+> The profile is a YAML file in your repo, the classification is deterministic, and the gate runs on your machine. No account needed.
 
-An **Agent Governance Profile** declares *what your agent is* — its use case, autonomy, data sensitivity, region, and oversight — and the harness derives everything else. It runs the **same deterministic risk classifier the ProofAgent dashboard uses** to produce the agent's full risk classification: the **tier** (Minimal / Limited / High / Unacceptable risk, EU AI Act aligned), the **obligations** that follow from it, the **regulatory frameworks in scope**, and the **tier guardrails**. That one classification then steers the whole evaluation and gates the release locally.
+An **Agent Governance Profile** puts your agent's risk classification in the repo, next to the code it governs. You declare *what the agent is* — use case, autonomy, data sensitivity, region, oversight — and the harness infrastructure derives everything else: the **risk tier** (Minimal / Limited / High / Unacceptable risk, EU AI Act aligned), the **obligations** that follow from it, the **regulatory frameworks in scope**, and the **tier guardrails**. The whole evaluation is then governed by that classification, ending in a **local release gate** (pass / review / block) your CI acts on. The classification logic is the same as the ProofAgent dashboard's, so the terminal verdict and the dashboard card always agree.
+
+All you need is the YAML:
 
 ```yaml
 # governance.yaml — the entire input; everything else is derived
@@ -267,17 +269,15 @@ agent_governance_profile:
 ```
 
 ```bash
-proof run my_agent.py --governance-profile governance.yaml --assess-context --assess-compliance --turns 8
+proof run my_agent.py --governance-profile governance.yaml --turns 8
 ```
 
-The profile drives **four hooks** across the run:
+With a profile attached, the run is governed end to end:
 
-| Hook | What the profile changes |
-|---|---|
-| **Adversarial planning** | Trap selection is steered toward the declared risk (for the profile above: fair lending, PII disclosure, financial manipulation) on top of the usual domain inference |
-| **Context engineering** (`--assess-context`) | The context quality assessment holds the agent to the tier's bar — a High risk agent is expected to carry guardrails, oversight rules, and full grounding in its context |
-| **Compliance scope** (`--assess-compliance`) | The profile's frameworks become the assessed set (the credit profile above scopes EU AI Act high risk obligations, NIST AI RMF, ISO/IEC 42001, GDPR, SOC 2); an explicit `--frameworks` still wins |
-| **Local release gate** | After the jury, the tier guardrails decide pass / review / block — printed as a verdict and mapped to the same exit codes as the table above, so CI can gate with no cloud involved |
+- the **adversarial evaluation targets the declared risk** — the credit profile above is pressured on fair lending, PII disclosure, and financial manipulation, not a generic script;
+- `--assess-context` holds the agent's context to the **tier's bar** — a High risk agent is expected to carry guardrails, oversight rules, and full grounding;
+- `--assess-compliance` is **scoped to the profile's frameworks** (for the profile above: EU AI Act high risk obligations, NIST AI RMF, ISO/IEC 42001, GDPR, SOC 2); an explicit `--frameworks` still wins;
+- the run ends with the **local release gate**: a printed verdict and the same exit codes as the table above, no cloud involved.
 
 The tier guardrails (derived, not configured):
 
@@ -288,13 +288,16 @@ The tier guardrails (derived, not configured):
 | High risk | 85% | high or worse | required (gate says `review`, never auto-pass) | weekly |
 | Unacceptable risk | — | — | — | prohibited use case: the gate **always blocks** (EU AI Act Article 5) |
 
-Three ways a profile reaches the harness, in precedence order:
+The arguments:
 
-1. **`--governance-profile file.yaml`** — governance as code in your repo (wins over everything).
-2. **`--assess-governance`** — pull the profile bound to `--agent NAME` from the governance dashboard (needs an API key; best-effort, an offline run simply proceeds without it).
-3. Neither — no governance hooks; the evaluation is unchanged.
+| Flag | What it does | What you need |
+|---|---|---|
+| `--governance-profile FILE` | Load the profile from a YAML/JSON file in your repo. Wins over everything | just the file |
+| `--assess-governance` | Use the profile bound to `--agent NAME` on the governance dashboard instead of a local file. Best-effort: offline or unauthenticated, the run simply proceeds without it | `--agent` + an API key (`--api-key` or `PROOFAGENT_API_KEY`) |
+| `--fail-on` | Which gate decision fails CI: `pass` \| `review` \| `block`. Defaults to the profile's `fail_on`, else `block` | — |
+| `--upload` | Also send the finished run with the profile to the dashboard: the agent's risk classification and governing policy fill in from the same YAML that gated CI | an API key |
 
-With `--upload`, the profile travels with the report: the dashboard fills the agent's risk classification and derives its governing policy from the tier guardrails, so the same YAML that gated CI is what the governance team sees. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block.
+With neither `--governance-profile` nor `--assess-governance`, nothing changes — the evaluation runs exactly as before. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block.
 
 ## CLI reference
 
@@ -327,8 +330,8 @@ proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named 
 | `--assess-context` | off | Add the context-engineering sub-score (additive, never gates) |
 | `--assess-compliance` | off | Post-jury compliance assessment against the selected regulatory frameworks — one harness-LLM call covering all of them; never affects the scores, certification, or the gate |
 | `--frameworks` | *profile selection, else core set* | Comma-separated framework ids for `--assess-compliance` (e.g. `eu_ai_act,soc2,iso_42001`); overrides the platform profile's selection |
-| `--governance-profile` |  | Agent Governance Profile YAML/JSON (governance as code): derives the risk tier, steers traps + the context bar, scopes compliance, and **gates the release locally** |
-| `--assess-governance` | off | Pull the Agent Governance Profile bound to `--agent` from the dashboard and use it the same way (best-effort; ignored when `--governance-profile` is set) |
+| `--governance-profile` |  | Agent Governance Profile YAML/JSON (governance as code): the harness derives the risk classification, governs the evaluation with it, and **gates the release locally** |
+| `--assess-governance` | off | Use the Agent Governance Profile bound to `--agent` on the dashboard instead of a local file (best-effort; ignored when `--governance-profile` is set) |
 | `--json` |  | Write the report JSON to this path |
 | `--markdown` |  | Write the report Markdown to this path |
 | `--quiet` | off | Suppress the config summary + live progress UI |
