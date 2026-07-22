@@ -38,7 +38,33 @@ def _score_display(report: Report) -> str:
     placeholder 0.0 is never shown as if it were an agent grade."""
     if report.certification == Certification.INCOMPLETE:
         return "— (not scored)"
-    return f"{report.final_score:.2f} / 10"
+    return f"{round(report.final_score * 10)}%"
+
+
+def _finding_body_lines(f: Any) -> list[str]:
+    """Render a Finding as concise Problem / Proof / Fix bullets — falling back to
+    the legacy detail/recommendation strings for older findings."""
+    out: list[str] = []
+    problems = list(getattr(f, "problem", None) or [])
+    if not problems and getattr(f, "detail", ""):
+        problems = [f.detail]
+    fixes = list(getattr(f, "fix", None) or [])
+    if not fixes and getattr(f, "recommendation", ""):
+        fixes = [f.recommendation]
+    proof = getattr(f, "proof", "") or ""
+    if len(problems) == 1:
+        out.append(f"- **Problem:** {problems[0]}")
+    elif problems:
+        out.append("- **Problem:**")
+        out.extend(f"    - {p}" for p in problems)
+    if proof:
+        out.append(f"- **Proof:** {proof}")
+    if len(fixes) == 1:
+        out.append(f"- **Fix:** {fixes[0]}")
+    elif fixes:
+        out.append("- **Fix:**")
+        out.extend(f"    - {fx}" for fx in fixes)
+    return out
 
 def render_rich(report: Report) -> Any:
     """Build a Rich renderable for terminal printing."""
@@ -99,6 +125,10 @@ def render_rich(report: Report) -> Any:
     cert_line.append("Certification: ", style="bold")
     cert_line.append(cert_text)
     cert_line.append(f"    Tokens: {report.tokens_used:,}", style="dim")
+    # Harness-LLM spend — the number a corporate buyer asks about first.
+    _harness_cost = float(report.primary_cost_usd or 0.0) + float(report.fallback_cost_usd or 0.0)
+    if _harness_cost > 0:
+        cert_line.append(f"    Harness LLM cost: ${_harness_cost:.4f}", style="dim")
 
     blocks: list[Any] = [table, Text(""), cert_line]
 
@@ -212,6 +242,9 @@ def render_markdown(report: Report) -> str:
     lines.append(f"**Certification:** `{report.certification.value}`  ")
     lines.append(f"**Mode:** `{report.mode}`  ")
     lines.append(f"**Tokens used:** `{report.tokens_used}`  ")
+    _harness_cost = float(report.primary_cost_usd or 0.0) + float(report.fallback_cost_usd or 0.0)
+    if _harness_cost > 0:
+        lines.append(f"**Harness LLM cost:** `${_harness_cost:.4f}`  ")
     lines.append(f"**Duration:** `{report.duration_seconds:.1f}s`\n")
 
     lines.append(f"> {report.summary}\n")
@@ -233,19 +266,38 @@ def render_markdown(report: Report) -> str:
                 lines.append(f"_{fw['summary']}_\n")
             lines.append("| Control | Status | Rationale |")
             lines.append("|---|---|---|")
+            _noncompliant = []
             for c in fw.get("controls", []):
                 ref = f"{c.get('ref', '')} {c.get('title', '')}".strip()
                 lines.append(f"| {ref} | {c.get('status', '')} | {c.get('rationale', '')} |")
+                if c.get("problem") or c.get("fix"):
+                    _noncompliant.append((ref, c))
             lines.append("")
+            # Why-not-compliant / proof / fix for the controls that need attention.
+            for ref, c in _noncompliant:
+                lines.append(f"**{ref} — {c.get('status', '')}**")
+                for p in (c.get("problem") or []):
+                    lines.append(f"- Problem: {p}")
+                if c.get("proof"):
+                    lines.append(f"- Proof: {c['proof']}")
+                for fx in (c.get("fix") or []):
+                    lines.append(f"- Fix: {fx}")
+                lines.append("")
 
     # ── Context engineering (optional, reporter-generated) ───────────
     _ce = getattr(report, "context_engineering", None) or {}
     if isinstance(_ce, dict) and _ce.get("generated"):
         _impact = {"big_cut": "↓↓", "cut": "↓", "neutral": "→", "adds": "↑"}
         _savings = int(_ce.get("token_savings_estimate") or 0)
-        head = f"## Context engineering — {_ce.get('score', '?')}/10 ({_ce.get('grade', '')})"
+        _ce_score = _ce.get("score")
+        _ce_pct = f"{round(_ce_score * 10)}%" if isinstance(_ce_score, (int, float)) else "?"
+        head = f"## Context engineering — {_ce_pct} ({_ce.get('grade', '')})"
         if _savings:
             head += f" · ~{_savings:,} tokens reclaimable"
+            _sv_pct = _ce.get("token_savings_pct")
+            _ctx_tok = int(_ce.get("context_tokens") or 0)
+            if _sv_pct is not None and _ctx_tok:
+                head += f" ({_sv_pct}% of the {_ctx_tok:,}-token context)"
         lines.append(head)
         if _ce.get("summary"):
             lines.append(f"_{_ce['summary']}_\n")
@@ -254,15 +306,19 @@ def render_markdown(report: Report) -> str:
             lines.append("| Criterion | Score |")
             lines.append("|---|---|")
             for s in _subs:
-                lines.append(f"| {s.get('name', s.get('id', ''))} | {s.get('score', '?')}/10 |")
+                _s = s.get("score")
+                _s_pct = f"{round(_s * 10)}%" if isinstance(_s, (int, float)) else "?"
+                lines.append(f"| {s.get('name', s.get('id', ''))} | {_s_pct} |")
             lines.append("")
         _cf = _ce.get("findings") or []
         if _cf:
-            lines.append("| Finding | Fix | Tokens |")
-            lines.append("|---|---|---|")
+            lines.append("| Finding | Proof | Fix | Tokens |")
+            lines.append("|---|---|---|---|")
             for f in _cf:
+                _proof = str(f.get("proof", "")).replace("|", "\\|")
                 lines.append(
                     f"| {f.get('title', '')} — {f.get('problem', '')} "
+                    f"| {('“' + _proof + '”') if _proof else '—'} "
                     f"| {f.get('fix', '')} | {_impact.get(f.get('token_impact', 'neutral'), '→')} |"
                 )
             lines.append("")
@@ -287,7 +343,7 @@ def render_markdown(report: Report) -> str:
         sev = report.severity.get(metric, Severity.PASS).value
         conf = report.confidence.get(metric, 0.0)
         lines.append(
-            f"| {pretty} | {score:.1f} / 10 | {conf:.2f} | {sev} |"
+            f"| {pretty} | {round(score * 10)}% | {conf:.2f} | {sev} |"
         )
     lines.append("")
 
@@ -370,9 +426,7 @@ def render_markdown(report: Report) -> str:
         lines.append("## Findings\n")
         for f in report.findings:
             lines.append(f"### {f.headline}")
-            lines.append(f"- **Detail:** {f.detail}")
-            if f.recommendation:
-                lines.append(f"- **Recommendation:** {f.recommendation}")
+            lines.extend(_finding_body_lines(f))
             lines.append("")
 
     if getattr(report, "technical_issues", None):
@@ -387,9 +441,7 @@ def render_markdown(report: Report) -> str:
             lines.append(f"### [{sev.upper()}] {f.headline}")
             if f.metric:
                 lines.append(f"- **Type:** `{f.metric}`")
-            lines.append(f"- **Detail:** {f.detail}")
-            if f.recommendation:
-                lines.append(f"- **Recommendation:** {f.recommendation}")
+            lines.extend(_finding_body_lines(f))
             lines.append("")
 
     if report.transcript:

@@ -93,7 +93,7 @@ from proofagent_harness import (
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 EXAMPLE_DIR  = Path(__file__).resolve().parent
 SAMPLES_DIR  = EXAMPLE_DIR / "sample_artifacts"
@@ -268,7 +268,7 @@ def main() -> int:
             print(f"  knowledge    : {knowledge_path}")
             print(f"                 (will load .md/.txt up to {corpus.max_chars:,} chars)")
         else:
-            print(f"  knowledge    : <none>  (path missing — eval will run without corpus)")
+            print("  knowledge    : <none>  (path missing — eval will run without corpus)")
         print(f"  role         : {args.role}")
         print(f"  business case: {args.business_case[:100]}...")
         print(f"  tools_used   : {tools_used or '<none>'}")
@@ -278,7 +278,7 @@ def main() -> int:
         print(f"  llm          : {args.llm}")
         print(f"  fallback llm : {args.fallback_llm or '<none>'}")
         print(f"  consensus    : {args.consensus}")
-        print(f"  metrics      : 5 incl. tool_use (manipulation_resistance auto-dropped in artifact mode)")
+        print("  metrics      : 5 incl. tool_use (manipulation_resistance auto-dropped in artifact mode)")
         print("\n[--list-only] No eval run. Drop --list-only to actually evaluate.")
         return 0
 

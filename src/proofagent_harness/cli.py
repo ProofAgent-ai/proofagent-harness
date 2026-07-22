@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 from rich import box
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from proofagent_harness import (
@@ -34,6 +35,30 @@ traps_app = typer.Typer(name="traps", help="Manage trap libraries.", no_args_is_
 app.add_typer(traps_app)
 
 console = Console()
+
+
+def _abort_on_agent_crash(exc) -> None:
+    """Turn the conductor's AgentUnderTestError into a clean, actionable panel
+    (never a raw traceback) and exit 2 — the agent under test is misconfigured,
+    which is the USER's code, not a harness bug."""
+    hint = ""
+    if "temperature" in exc.last_error.lower():
+        hint = (
+            "\n\nThis model deprecated `temperature`. If your agent sends it, "
+            "drop it for this model (see examples/credit_agent/agent.py's "
+            "_agent_completion for the drop-and-retry pattern)."
+        )
+    console.print(Panel(
+        f"[bold red]The agent under test crashed[/bold red] "
+        f"{exc.consecutive} turns in a row with the same error "
+        f"([yellow]{exc.exc_type}[/yellow]):\n\n  {exc.last_error}\n\n"
+        f"The harness stopped so it wouldn't spend the jury on empty answers. "
+        f"This is a config bug in the AGENT (model id, API key, deprecated "
+        f"params) — not the harness. Fix the agent and re-run.{hint}",
+        title="Evaluation aborted", border_style="red",
+    ))
+    raise typer.Exit(code=2)
+
 
 @app.command("run")
 def run(
@@ -89,12 +114,27 @@ def run(
              "tool schemas) as a SEPARATE sub-score. Off by default; never "
              "affects the metric scores, certification, or the gate.",
     ),
+    assess_compliance: bool = typer.Option(
+        False, "--assess-compliance",
+        help="After the jury, map the run to the SELECTED regulatory frameworks "
+             "(status + why-not-compliant / proof / fix per control), using the "
+             "jury's findings as evidence. One extra harness-LLM call covering all "
+             "selected frameworks. "
+             "Off by default; never affects the metric scores, certification, or the gate.",
+    ),
+    frameworks: str | None = typer.Option(
+        None, "--frameworks",
+        help="Comma-separated framework ids to assess with --assess-compliance "
+             "(e.g. eu_ai_act,soc2,iso_42001). Defaults to the profile's selection "
+             "(or the core set). Ignored unless --assess-compliance is set.",
+    ),
     # ── Governance upload (gate CI/CD on the release decision) ──
     # OFF by default - a vanilla `proof run` stays fully local, no network.
     upload: bool = typer.Option(
         False, "--upload/--no-upload",
         help="Upload the result to the ProofAgent Governance API and gate on "
-             "the returned decision (exit 0 pass / 1 review / 2 block).",
+             "the returned decision (exit 0 pass · 2 block; review exits 1 "
+             "only with --fail-on review, else 0).",
     ),
     api_key: str | None = typer.Option(
         None, "--api-key",
@@ -112,10 +152,22 @@ def run(
         None, "--profile",
         help="Governance profile slug to evaluate against (e.g. "
              "airline_customer_support)."),
-    fail_on: str = typer.Option(
-        "block", "--fail-on",
+    governance_profile: Path | None = typer.Option(
+        None, "--governance-profile",
+        help="Agent Governance Profile as CODE — a local YAML/JSON risk-classification "
+             "file (same shape as the dashboard's). The harness classifies it, steers "
+             "trap selection + the context bar to that risk tier, scopes compliance, and "
+             "gates the release LOCALLY (tier guardrails → pass/review/block). Works fully "
+             "offline; with --upload it also stores the classification on the agent."),
+    assess_governance: bool = typer.Option(
+        False, "--assess-governance",
+        help="Pull the Agent Governance Profile bound to --agent FROM the cloud (by name) "
+             "and gate against it. Needs an API key. Ignored if --governance-profile is set."),
+    fail_on: str | None = typer.Option(
+        None, "--fail-on",
         help="Which gate decision fails the build: pass | review | block. "
-             "Default 'block' (review is informational)."),
+             "Default: the attached governance profile's fail_on when present, "
+             "else 'block' (review is informational)."),
     source: str = typer.Option(
         "ci_cd", "--source",
         help="Origin of this run: local | ci_cd | manual | api | scheduled."),
@@ -142,6 +194,10 @@ def run(
         turns=turns,
         consensus=consensus,
         seed=seed,
+        # Optional panel-size control: PROOFAGENT_PERSONAS="rigorous,lenient"
+        # runs a smaller jury (fewer LLM calls) for cost/latency-bound runs.
+        # Unset → the default 3-persona panel (unchanged behavior).
+        personas=_csv(os.environ.get("PROOFAGENT_PERSONAS")),
         extra_traps=_csv(extra_traps),
         trap_packs=_csv(trap_packs),
         pin_traps=_csv(pin_traps),
@@ -157,6 +213,39 @@ def run(
     eff_goal = goal or (ctx.goal if ctx and ctx.goal else goal)
     eff_business = business_case or (ctx.business_case if ctx and ctx.business_case else business_case)
 
+    # Agent Governance Profile (governance as code) — optional. Attaching it makes
+    # the run's risk classification steer trap selection + the context-engineering
+    # bar (via harness.governance_profile → graph state), auto-scope compliance to
+    # its frameworks, and drive the LOCAL gate. Resolved BEFORE compliance so its
+    # frameworks-in-scope can auto-scope --assess-compliance.
+    gov_profile = _resolve_governance_profile(
+        file=governance_profile,
+        assess=assess_governance,
+        agent=agent or eff_role,
+        api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+        api_base=os.environ.get("PROOFAGENT_API_BASE_URL"),
+    )
+    harness.governance_profile = gov_profile
+
+    # --fail-on precedence: explicit flag > the profile's declared fail_on > block.
+    eff_fail_on = (fail_on or (gov_profile.fail_on if gov_profile else None) or "block").lower()
+    if eff_fail_on not in ("pass", "review", "block"):
+        console.print(f"[red]--fail-on must be pass | review | block (got {eff_fail_on!r}).[/red]")
+        raise typer.Exit(code=2)
+
+    # Compliance scope: --frameworks wins; else the attached governance profile's
+    # frameworks-in-scope; else --assess-compliance with a key fetches the platform
+    # selection; else the local default core set (pure OSS).
+    compliance_fw, compliance_src = _resolve_compliance_frameworks(
+        enabled=assess_compliance,
+        explicit=_csv(frameworks),
+        api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+        api_base=os.environ.get("PROOFAGENT_API_BASE_URL"),
+        profile=profile,
+        agent=agent or eff_role,
+        governance_frameworks=(gov_profile.compliance_framework_ids() if gov_profile else None),
+    )
+
     if not quiet:
         cfg = [
             ("Agent file", f"{agent_file}  (entry: {entry})"),
@@ -169,6 +258,8 @@ def run(
             ("Context dir", str(context_dir) if context_dir else "-"),
             ("Domain knowledge", str(domain_knowledge_dir) if domain_knowledge_dir else "-"),
             ("Assess context", "yes" if assess_context else "no"),
+            ("Assess compliance", f"yes · {compliance_src}" if assess_compliance else "no"),
+            ("Governance profile", f"{gov_profile.tier_label} · {gov_profile.name}" if gov_profile else "-"),
             ("Role", eff_role),
             ("Upload", "yes  →  app.proofagent.ai" if upload else "no (local only)"),
         ]
@@ -177,19 +268,27 @@ def run(
                 ("Agent (dashboard)", agent or eff_role),
                 ("Agent version", agent_version or "-"),
                 ("Gate profile", profile or "-"),
-                ("Fail on", fail_on),
+                ("Fail on", eff_fail_on),
             ]
         _print_run_config("multi-turn", cfg)
+        if gov_profile is not None:
+            _print_governance_card(gov_profile)
 
-    report = harness.evaluate(
-        callable_obj,
-        role=eff_role,
-        business_case=eff_business,
-        goal=eff_goal,
-        context=ctx,          # the agent: system_prompt + tools + memory
-        knowledge=str(domain_knowledge_dir) if domain_knowledge_dir else None,
-        assess_context=assess_context,
-    )
+    from proofagent_harness.agents.conductor import AgentUnderTestError
+    try:
+        report = harness.evaluate(
+            callable_obj,
+            role=eff_role,
+            business_case=eff_business,
+            goal=eff_goal,
+            context=ctx,          # the agent: system_prompt + tools + memory
+            knowledge=str(domain_knowledge_dir) if domain_knowledge_dir else None,
+            assess_context=assess_context,
+            assess_compliance=assess_compliance,
+            compliance_frameworks=compliance_fw,
+        )
+    except AgentUnderTestError as exc:
+        _abort_on_agent_crash(exc)
 
     _print_context_engineering(report)
 
@@ -200,14 +299,32 @@ def run(
         report.to_markdown(str(md_out))
         console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
 
+    # Agent Governance Profile gate is AUTHORITATIVE when a profile is attached —
+    # the tier guardrails decide pass/review/block locally (and the run + profile
+    # upload for the dashboard when --upload). Always raises typer.Exit.
+    if gov_profile is not None:
+        _governance_gate_and_exit(
+            report,
+            gov_profile,
+            fail_on=eff_fail_on,
+            upload=upload,
+            api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+            agent_name=agent or eff_role,
+            agent_version=agent_version,
+            profile_slug=profile,
+            source=source,
+            environment=environment,
+            transcript=_transcript_text(report),
+        )
+
     if upload:
         _upload_and_gate(
             report,
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
-            agent_name=agent or role,
+            agent_name=agent or eff_role,
             agent_version=agent_version,
             profile=profile,
-            fail_on=fail_on,
+            fail_on=eff_fail_on,
             source=source,
             environment=environment,
             transcript=_transcript_text(report),
@@ -247,6 +364,17 @@ def artifact(
         help="Also grade the QUALITY of the producing agent's context "
              "(auto-bundled agent_system_prompt.md / agent_tools.json) as a "
              "SEPARATE sub-score. Off by default; never affects the score or gate.",
+    ),
+    assess_compliance: bool = typer.Option(
+        False, "--assess-compliance",
+        help="After the jury, map the artifact to the SELECTED regulatory frameworks "
+             "(status + why/proof/fix per control). One extra harness-LLM call per "
+             "framework. Off by default; never affects the score, certification, or gate.",
+    ),
+    frameworks: str | None = typer.Option(
+        None, "--frameworks",
+        help="Comma-separated framework ids for --assess-compliance "
+             "(e.g. eu_ai_act,soc2). Defaults to the profile selection / core set.",
     ),
     upload: bool = typer.Option(
         False, "--upload/--no-upload",
@@ -295,6 +423,17 @@ def artifact(
         else None
     )
 
+    # Compliance scope: --frameworks wins; else --assess-compliance with a key fetches
+    # the governance profile's selection; else the local default core set (pure OSS).
+    compliance_fw, compliance_src = _resolve_compliance_frameworks(
+        enabled=assess_compliance,
+        explicit=[x.strip() for x in frameworks.split(",") if x.strip()] if frameworks else None,
+        api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+        api_base=os.environ.get("PROOFAGENT_API_BASE_URL"),
+        profile=profile,
+        agent=agent or role,
+    )
+
     if not quiet:
         cfg = [
             ("Artifact", f"{artifact_path}  (type: {artifact_type})"),
@@ -304,6 +443,7 @@ def artifact(
             ("Seed", str(seed)),
             ("Domain knowledge", str(knowledge_dir) if knowledge_dir else "-"),
             ("Assess context", "yes" if assess_context else "no"),
+            ("Assess compliance", f"yes · {compliance_src}" if assess_compliance else "no"),
             ("Role", role),
             ("Upload", "yes  →  app.proofagent.ai" if upload else "no (local only)"),
         ]
@@ -316,22 +456,28 @@ def artifact(
             ]
         _print_run_config("artifact", cfg)
 
-    report = Harness(
-        mode="artifact",
-        llm=llm,
-        fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
-        consensus=consensus,
-        seed=seed,
-        verbose=not quiet,
-    ).evaluate(
-        artifact=art,
-        knowledge_corpus=corpus,
-        role=role,
-        business_case=business_case,
-        context=context,
-        agent_trace=agent_trace,
-        assess_context=assess_context,
-    )
+    from proofagent_harness.agents.conductor import AgentUnderTestError
+    try:
+        report = Harness(
+            mode="artifact",
+            llm=llm,
+            fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
+            consensus=consensus,
+            seed=seed,
+            verbose=not quiet,
+        ).evaluate(
+            artifact=art,
+            knowledge_corpus=corpus,
+            role=role,
+            business_case=business_case,
+            context=context,
+            agent_trace=agent_trace,
+            assess_context=assess_context,
+            assess_compliance=assess_compliance,
+            compliance_frameworks=compliance_fw,
+        )
+    except AgentUnderTestError as exc:
+        _abort_on_agent_crash(exc)
 
     _print_context_engineering(report)
 
@@ -1045,6 +1191,49 @@ def _upload_session_and_gate(payload: dict, *, api_key: str | None, fail_on: str
     raise typer.Exit(code=code)
 
 
+def _resolve_compliance_frameworks(
+    *,
+    enabled: bool,
+    explicit: list[str] | None,
+    api_key: str | None,
+    api_base: str | None,
+    profile: str | None,
+    agent: str | None,
+    governance_frameworks: list[str] | None = None,
+) -> tuple[list[str] | None, str]:
+    """Resolve the compliance scope for ``--assess-compliance``. Precedence:
+
+    1. explicit ``--frameworks`` (fully local — always wins);
+    2. the attached Agent Governance Profile's frameworks-in-scope (governance as
+       code — the risk classification decides which regulations apply);
+    3. the GOVERNANCE PLATFORM's profile selection, fetched from
+       ``GET /compliance/selection`` when an API key is present (this is the
+       "linked to my platform" path — brings back the framework ids + profile name);
+    4. otherwise ``None`` → the harness uses its LOCAL default core set (pure
+       open-source, no network call).
+
+    Returns ``(framework_ids_or_None, human_source_label)``."""
+    if explicit:
+        return explicit, f"local · {len(explicit)} framework(s)"
+    if governance_frameworks:
+        return governance_frameworks, f"governance profile · {len(governance_frameworks)} framework(s)"
+    if not enabled or not api_key:
+        return None, "local core set"
+    from proofagent_harness.governance import fetch_compliance_selection
+    sel = fetch_compliance_selection(api_url=api_base, api_key=api_key, profile=profile, agent=agent)
+    ids = [str(x) for x in (sel or {}).get("frameworks", []) if x]
+    if not ids:
+        return None, "local core set (platform returned no selection)"
+    profiles = [p.get("name") for p in (sel or {}).get("profiles", []) if p.get("name")]
+    pname = ((sel or {}).get("profile") or {}).get("name") or (profiles[0] if len(profiles) == 1 else None)
+    label = (
+        f"profile '{pname}'" if pname
+        else f"{len(profiles)} platform policies" if len(profiles) > 1
+        else "platform policy"
+    )
+    return ids, f"{label} · {len(ids)} framework(s)"
+
+
 def _print_run_config(mode: str, rows: list[tuple[str, str]]) -> None:
     """Print a compact configuration table for context before the evaluation starts."""
     t = Table(
@@ -1087,8 +1276,12 @@ def _print_context_engineering(report) -> None:
         return
     arrows = {"big_cut": "↓↓", "cut": "↓", "neutral": "→", "adds": "↑"}
     savings = int(ce.get("token_savings_estimate") or 0)
+    ctx_tokens = int(ce.get("context_tokens") or 0)
+    pct = ce.get("token_savings_pct")
     head = f"[bold cyan]Context Engineering[/bold cyan]  {ce.get('score')}/10  ({ce.get('grade')})"
-    if savings:
+    if savings and pct is not None:
+        head += f"   -   ~{savings:,} tokens reclaimable ({pct}% of the {ctx_tokens:,}-token context)"
+    elif savings:
         head += f"   -   ~{savings:,} tokens reclaimable"
     console.print()
     console.print(head)
@@ -1099,6 +1292,8 @@ def _print_context_engineering(report) -> None:
     for f in ce.get("findings") or []:
         a = arrows.get(str(f.get("token_impact", "neutral")), "→")
         console.print(f"  [{a}] [bold]{f.get('title', '')}[/bold]: {f.get('fix', '')}")
+        if f.get("proof"):
+            console.print(f"      [dim]proof: \"{f['proof']}\"[/dim]")
     console.print("  [dim](Separate sub-score - never affects the metric scores or the gate.)[/dim]")
 
 
@@ -1195,6 +1390,162 @@ def _upload_and_gate(
         console.print(f"  Dashboard   : {result.get('dashboard_url')}")
     console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
 
+    raise typer.Exit(code=code)
+
+
+# ── Agent Governance Profile (governance as code) ────────────────────────────
+
+def _resolve_governance_profile(
+    *, file: Path | None, assess: bool, agent: str | None, api_key: str | None, api_base: str | None
+):
+    """Resolve the run's Agent Governance Profile. Precedence: an explicit local
+    --governance-profile file wins; else --assess-governance fetches the profile
+    bound to --agent from the cloud (by name). Returns a GovernanceProfile or None."""
+    from proofagent_harness.governance_profile import from_cloud, load_profile
+
+    if file is not None:
+        try:
+            return load_profile(file)
+        except Exception as exc:
+            console.print(f"[red]Could not load --governance-profile {file}:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+    if assess:
+        if not api_key:
+            console.print(
+                "[red]--assess-governance needs an API key (--api-key / PROOFAGENT_API_KEY) "
+                "to fetch the agent's bound profile from the cloud.[/red]"
+            )
+            raise typer.Exit(code=2)
+        from proofagent_harness.governance import fetch_agent_governance
+        data = fetch_agent_governance(
+            api_url=api_base or None, api_key=api_key, agent=agent or "",
+        )
+        if not data or not data.get("classification"):
+            console.print(
+                f"[yellow]--assess-governance: no governance profile is bound to "
+                f"agent '{agent}' in the cloud (nothing to gate against).[/yellow]"
+            )
+            return None
+        return from_cloud(
+            name=data.get("name") or (agent or "Agent Governance Profile"),
+            classification=data["classification"],
+            intake=data.get("intake") or {},
+        )
+    return None
+
+
+def _print_governance_card(profile) -> None:
+    """Render the Agent Governance Profile (risk classification) before the run —
+    the tier + guardrails that will steer the traps and gate the release."""
+    from rich.panel import Panel
+    from rich.table import Table
+
+    c = profile.controls
+    color = {"low": "green", "medium": "yellow", "high": "dark_orange", "critical": "red"}.get(
+        profile.risk_level, "white"
+    )
+    body = Table.grid(padding=(0, 2))
+    body.add_column(justify="right", style="dim")
+    body.add_column()
+    body.add_row("Tier", f"[{color}]{profile.tier_label}[/{color}]  (risk level: {profile.risk_level})")
+    body.add_row("Use case", str(profile.classification.get("use_case_label", profile.use_case)))
+    body.add_row("Frameworks", ", ".join(profile.frameworks) or "—")
+    body.add_row(
+        "Guardrails",
+        f"sign-off {'required' if c.get('signoff_required') else 'optional'} · "
+        f"min score {c.get('min_final_score', '—')}/10 · "
+        f"blocks on {c.get('block_severity', '—')}+ · "
+        f"re-eval {c.get('continuous_assurance', '—')}",
+    )
+    if profile.prohibited:
+        body.add_row("", "[bold red]Prohibited under EU AI Act Article 5 — do not deploy.[/bold red]")
+    console.print(
+        Panel(body, title=f"[bold]Agent Governance Profile[/bold] · {profile.name}",
+              subtitle="risk classification · steers traps + context bar, gates the release",
+              border_style=color)
+    )
+
+
+def _print_governance_verdict(profile, gate) -> None:
+    color = {"pass": "green", "review": "yellow", "block": "red"}.get(gate.decision, "white")
+    console.print(
+        f"\n[bold]Agent Governance gate:[/bold] [{color}]{gate.decision.upper()}[/{color}] "
+        f"[dim](tier: {profile.tier_label})[/dim]"
+    )
+    for r in gate.reasons:
+        console.print(f"  [{color}]•[/{color}] {r}")
+    if gate.failed_rules:
+        console.print("  Failed rules: " + ", ".join(f"[red]{r}[/red]" for r in gate.failed_rules))
+
+
+def _upload_run_best_effort(
+    report, *, api_key: str | None, agent_name: str | None, agent_version: str | None,
+    source: str, environment: str | None, transcript: str | None, profile,
+    profile_slug: str | None = None,
+) -> None:
+    """Upload the run WITH the attached Agent Governance Profile embedded, without
+    gating/exiting (the local governance gate is authoritative). Best-effort."""
+    if not api_key:
+        console.print("[yellow]--upload skipped: no API key.[/yellow]")
+        return
+    from proofagent_harness.governance import (
+        DEFAULT_API_BASE_URL,
+        build_governance_payload,
+        structure_findings_evidence,
+        upload_run,
+    )
+    from proofagent_harness.governance_profile import to_payload
+
+    api_url = os.environ.get("PROOFAGENT_API_BASE_URL", "").rstrip("/") or DEFAULT_API_BASE_URL
+    payload = build_governance_payload(
+        report, agent_name=agent_name, agent_version=agent_version,
+        profile=profile_slug, source=source, environment=environment,
+    )
+    payload["agent_governance_profile"] = to_payload(profile)  # rides up for the dashboard card
+
+    # Evidence-driven findings — same treatment as the plain upload path, so a
+    # governance-profile run is never a poorer record on the dashboard.
+    # Best-effort + no-op-safe; disable with PROOFAGENT_EVIDENCE=0.
+    if os.environ.get("PROOFAGENT_EVIDENCE", "1") != "0":
+        with contextlib.suppress(Exception):
+            structure_findings_evidence(
+                payload,
+                transcript=transcript,
+                model=os.environ.get("PROOFAGENT_EVIDENCE_LLM", "gpt-4.1-mini"),
+            )
+
+    console.print(f"[dim]Uploading run (+ governance profile) to {api_url} …[/dim]")
+    try:
+        result = upload_run(payload, api_url=api_url, api_key=api_key)
+        if result.get("dashboard_url"):
+            console.print(f"  Dashboard   : {result.get('dashboard_url')}")
+    except Exception as exc:  # best-effort — never fail the run on upload trouble
+        console.print(f"[yellow]Upload failed (run gated locally anyway):[/yellow] {exc}")
+
+
+def _governance_gate_and_exit(
+    report, profile, *, fail_on: str, upload: bool, api_key: str | None,
+    agent_name: str | None, agent_version: str | None, source: str,
+    environment: str | None, transcript: str | None = None,
+    profile_slug: str | None = None,
+) -> None:
+    """Apply the LOCAL Agent Governance Profile gate (authoritative), optionally
+    uploading first. Always raises typer.Exit."""
+    from proofagent_harness.governance import gate_exit_code
+
+    if upload:
+        _upload_run_best_effort(
+            report, api_key=api_key, agent_name=agent_name, agent_version=agent_version,
+            source=source, environment=environment, transcript=transcript, profile=profile,
+            profile_slug=profile_slug,
+        )
+    gate = profile.gate(
+        final_score=getattr(report, "final_score", None),
+        findings=getattr(report, "findings", None),
+    )
+    _print_governance_verdict(profile, gate)
+    code = gate_exit_code(gate.decision, fail_on=fail_on)
+    console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
     raise typer.Exit(code=code)
 
 @traps_app.command("list")

@@ -126,7 +126,6 @@ from rich.rule import Rule
 from rich.table import Table
 
 from proofagent_harness import (
-    AgentContext,
     AgentResponse,
     Event,
     Harness,
@@ -138,7 +137,7 @@ from proofagent_harness import (
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 console = Console()
 
@@ -852,7 +851,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     report.to_json(str(out_dir / f"{stem}.json"))
     report.to_markdown(str(out_dir / f"{stem}.md"))
-    console.print(f"\n[bold]Report saved:[/bold]")
+    console.print("\n[bold]Report saved:[/bold]")
     console.print(f"  {out_dir / f'{stem}.json'}")
     console.print(f"  {out_dir / f'{stem}.md'}")
 

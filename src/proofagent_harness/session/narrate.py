@@ -160,14 +160,24 @@ def narrate_trajectory(
         import litellm  # optional dep — never blocks the deterministic base
         payload = [{"i": i, "prompt": t["prompt"], "did": t["actions"][:8], "risks": t["risks"]}
                    for i, t in enumerate(turns)]
-        resp = litellm.completion(
-            model=model,
-            messages=[{"role": "system", "content": _SYS},
-                      {"role": "user", "content": json.dumps(payload)}],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        data = json.loads(resp.choices[0].message.content)
+        msgs = [{"role": "system", "content": _SYS},
+                {"role": "user", "content": json.dumps(payload)}]
+        try:
+            resp = litellm.completion(
+                model=model, messages=msgs, temperature=0, num_retries=2,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            # Local OpenAI-compatible servers (LM Studio…) reject json_object —
+            # retry once without it before degrading to the deterministic base.
+            if "response_format" not in str(exc).lower():
+                raise
+            resp = litellm.completion(
+                model=model, messages=msgs, temperature=0, num_retries=2,
+            )
+        # Loose parse — local models often fence the JSON in ```json blocks.
+        from proofagent_harness.llm import _parse_json_loose
+        data = _parse_json_loose(resp.choices[0].message.content)
         u = getattr(resp, "usage", None)
         if usage is not None and u is not None:
             usage["total_tokens"] = int(getattr(u, "total_tokens", 0) or 0)

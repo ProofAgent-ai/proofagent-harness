@@ -5,11 +5,13 @@ The harness runs **fully local by default**. When you want a release gate, add
 Governance API**, the API runs its gate engine against your governance profile,
 and the harness exits with a code your pipeline can act on.
 
-Every `--upload` run goes to **ProofAgent Cloud** (`https://app.proofagent.ai`).
-The public CLI is Cloud-locked.
+Every `--upload` run goes to **ProofAgent Cloud** (`https://app.proofagent.ai`)
+by default; set `PROOFAGENT_API_BASE_URL` to point the CLI at an
+Enterprise / on-prem backend instead.
 
-> **On-prem / Enterprise?** That's a separate bundle that targets its own
-> backend via the `upload_run(api_url=…)` Python API — not the public CLI.
+> **On-prem / Enterprise?** The same CLI works — export
+> `PROOFAGENT_API_BASE_URL=https://proofagent.acme.internal` (or pass
+> `upload_run(api_url=…)` from Python).
 
 > Terminology: the model that reviews the agent under test is the **harness
 > LLM**. The Governance API never sees your harness-LLM credentials — only the
@@ -62,7 +64,8 @@ the gate decision — let it fail the job. See the GitHub Actions example below.
 | `PROOFAGENT_API_KEY`       | `--api-key`   | API key for the Governance API. **Required** for `--upload`.  |
 | `PROOFAGENT_EVIDENCE`      | _none_        | `0` disables evidence-driven findings (on by default).        |
 | `PROOFAGENT_EVIDENCE_LLM`  | _none_        | Model used to structure finding evidence (default `gpt-4.1-mini`). |
-| `PROOFAGENT_COMPLIANCE`    | _none_        | `0` disables the reporter's compliance assessment (on by default). |
+| `PROOFAGENT_COMPLIANCE`    | `--assess-compliance` | Truthy (`1`) opts in to the compliance assessment without the flag. **Off by default.** |
+| `PROOFAGENT_COMPLIANCE_FRAMEWORKS` | `--frameworks` | Comma-separated framework ids to assess (same scope override as `--frameworks`). |
 
 The CLI flag wins over the environment variable when both are set. The base URL
 defaults to ProofAgent Cloud, so only the **API key** is required. If `--upload`
@@ -92,22 +95,58 @@ never affected.
 - **On by default.** Set `PROOFAGENT_EVIDENCE=0` to skip it (e.g. air-gapped
   runs where the evidence model isn't reachable).
 - **Model:** `PROOFAGENT_EVIDENCE_LLM` (default `gpt-4.1-mini`). Use a small,
-  cheap model — this is structuring, not judging.
+  cheap model — this is structuring, not scoring.
 
 ---
 
-## Compliance assessment (reporter-generated)
+## Compliance assessment (opt-in: `--assess-compliance`)
 
-The **reporter** maps each run to the controls of **EU AI Act, NIST AI RMF,
-ISO/IEC 42001, and SOC 2** — a per-control status (`met` / `partial` /
-`attention` / `not_evaluated`) + one-line rationale per framework — and attaches
-it to the report (`report.compliance`). It travels in the report and the upload
-payload, so the **governance platform only displays it and never calls a model**.
+A **post-jury compliance-assessor node** maps the finished evaluation to the
+regulatory frameworks that govern the agent — a per-control status (`met` /
+`partial` / `attention` / `not_evaluated`) plus a why-not-compliant / proof /
+fix per control, using the jury's findings as evidence — and attaches it to the
+report (`report.compliance`). It travels in the report and the upload payload,
+so the **governance platform only displays it and never calls a model**.
 
-- One LLM call per eval, using the harness model. **On by default**;
-  `PROOFAGENT_COMPLIANCE=0` disables it (air-gapped / no-model runs). No-op-safe.
+- **Opt-in, off by default.** Enable with `--assess-compliance` (or
+  `PROOFAGENT_COMPLIANCE=1`). **One harness-LLM call covering all selected
+  frameworks**; it never affects the metric scores, certification, or the gate.
+  No-op-safe: if no harness LLM is configured or the call fails, the frameworks
+  simply render as a neutral "not assessed".
+- **Scope resolution** (which frameworks are assessed): `--frameworks a,b,c`
+  always wins (fully local); otherwise the Agent Governance Profile's frameworks
+  (below), when one is loaded; otherwise the platform profile's selection, fetched
+  via `GET /compliance/selection` when an API key is present; otherwise the
+  local default core set (pure open source, no network call).
 - Rendered in the report Markdown and shown on the governance **Compliance** page
   (with each framework's coverage %, control statuses, and rationale).
+
+---
+
+## Local governance gate (`--governance-profile` / `--assess-governance`)
+
+The gate does not require the cloud. An **Agent Governance Profile** — one YAML
+block declaring the agent's risk context (use case, autonomy level, data
+sensitivity, region, human oversight, consequential actions) — is run through the
+same deterministic risk classifier the dashboard uses, and the derived **tier
+guardrails gate the release locally** with the same exit codes as the table
+below: score floor per tier, block on finding severity, sign-off tiers stop at
+`review`, prohibited use cases always block.
+
+```bash
+# governance as code: the profile lives in your repo, the gate runs on your machine
+proof run my_agent.py --governance-profile governance.yaml --fail-on block
+```
+
+Precedence: a `--governance-profile` file wins; `--assess-governance` instead
+pulls the profile bound to `--agent NAME` from the dashboard (best-effort — an
+offline run proceeds without it); with neither, no governance hooks run. The
+profile also steers adversarial trap selection, holds `--assess-context` to the
+tier's bar, and scopes `--assess-compliance` (see the README's **Agent
+Governance Profile** section for the full YAML anatomy and tier guardrails).
+With `--upload`, the profile travels in the payload as
+`agent_governance_profile` and fills the agent's risk classification on the
+dashboard.
 
 ---
 
@@ -122,6 +161,7 @@ payload, so the **governance platform only displays it and never calls a model**
 | `--profile`           | _none_                          | Governance profile slug to evaluate against.                    |
 | `--fail-on`           | `block`                         | Which decision fails the build: `pass` \| `review` \| `block`.  |
 | `--source`            | `ci_cd`                         | Run origin: `local` \| `ci_cd` \| `manual` \| `api` \| `scheduled`. |
+| `--environment` / `--env` | _none_                      | Deployment environment recorded on the run: `development` \| `staging` \| `production`. Governance uses it for release decisions + workflow matching. |
 
 ---
 

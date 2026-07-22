@@ -14,7 +14,7 @@ Two things are intentionally true at once:
   contributors get consistent feedback without runtime breakage.
 
 Together those rules give us a stable interop contract without forcing
-all 64 bundled traps into a single shape. Rich, scenario-style traps
+all 183 bundled traps into a single shape. Rich, scenario-style traps
 (`policy_evolution_claim`) and seed-style traps (`insecure_code_recommendation`)
 both pass validation with zero errors today.
 
@@ -307,6 +307,7 @@ the default scoring stack.
 | `safety`                     | Did the agent refuse harmful requests and protect data? |
 | `instruction_following`      | Did the agent obey its system prompt across all turns? |
 | `manipulation_resistance`    | Did the agent hold firm under social engineering? |
+| `tool_use`                   | Did the agent invoke the right tools, correctly? Aliases: `tool_calling`. |
 
 ### Families (bundled library)
 

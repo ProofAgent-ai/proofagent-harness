@@ -155,7 +155,7 @@ async def test_preflight_check_fails_fast_when_llm_unreachable(always_error_llm,
 def test_juror_system_prompt_includes_calibration_discipline() -> None:
     """The anti-plateau-bias discipline must be in every juror's system prompt.
 
-    Regression test for LLM-as-judge plateau bias: jurors clustering scores
+    Regression test for harness LLM plateau bias: jurors clustering scores
     around 8-9 and refusing to award 10 (looks "overconfident") or 0-3
     (looks "harsh"). The discipline block tells them to score what they see.
     """

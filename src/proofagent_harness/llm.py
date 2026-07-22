@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +16,21 @@ import litellm
 litellm.suppress_debug_info = True
 
 litellm.drop_params = True
+
+# litellm's background logging worker leaks an un-awaited coroutine warning at
+# interpreter shutdown ("coroutine 'Logging.async_success_handler' was never
+# awaited") — cosmetic, but it prints under every report. Silence just that one.
+warnings.filterwarnings(
+    "ignore",
+    message=r"coroutine 'Logging\.async_success_handler' was never awaited",
+    category=RuntimeWarning,
+)
+
+
+def _is_anthropic_family(model: str) -> bool:
+    """Anthropic-family models accept `cache_control` blocks (prompt caching)."""
+    m = model.lower()
+    return "claude" in m or "anthropic" in m
 
 # Per-model parameter strip table — for newer Anthropic models that reject
 # parameters older models accepted (e.g. Opus 4.7 deprecated `temperature`).
@@ -46,6 +62,13 @@ def _is_deprecated_param_error(exc: Exception) -> str | None:
     "Unsupported value"), and generic ("not supported", "not allowed").
     """
     msg = str(exc).lower()
+    # Local OpenAI-compatible servers (LM Studio, some vllm builds) reject
+    # response_format=json_object with their own phrasing ("must be
+    # 'json_schema' or 'text'") — treat any response_format complaint as a
+    # droppable param so the call self-heals and the model gets cached as
+    # not supporting it.
+    if "response_format" in msg:
+        return "response_format"
     triggers = ("deprecated", "not supported", "not allowed", "does not support", "unsupported value", "unsupported parameter")
     if not any(t in msg for t in triggers):
         return None
@@ -192,16 +215,41 @@ class LLM:
         system: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        json_mode: bool = False,
     ) -> CompletionResult:
         """Underlying single-attempt LiteLLM call. No fallback, no retry.
-        Raises LLMError on transport / API failure."""
+        Raises LLMError on transport / API failure. ``json_mode=True`` asks the
+        provider to ENFORCE syntactically valid JSON (``response_format=
+        json_object``) — supported by OpenAI/Azure/Gemini and quietly dropped
+        for providers that lack it (litellm ``drop_params``). This is what
+        keeps a weaker primary from burning the expensive fallback on
+        malformed-JSON juror replies."""
         msgs = list(messages)
         if system:
-            msgs = [{"role": "system", "content": system}, *msgs]
+            if _is_anthropic_family(self.model):
+                # Prompt caching: mark the system block ephemeral so Anthropic
+                # caches the shared juror prefix across the fan-out (OpenAI
+                # prefix caching is automatic ≥1024 tokens — no hint needed).
+                msgs = [{
+                    "role": "system",
+                    "content": [{
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                }, *msgs]
+            else:
+                msgs = [{"role": "system", "content": system}, *msgs]
 
         call_kwargs: dict[str, Any] = dict(self.extra_kwargs)
         if self.seed is not None:
             call_kwargs.setdefault("seed", self.seed)
+        # Transient 429 / 5xx resilience — litellm's native exponential backoff.
+        # A single failed juror call otherwise degrades the panel (and, before
+        # the round-2 fallback fix, could erase a metric outright).
+        call_kwargs.setdefault("num_retries", 3)
+        if json_mode:
+            call_kwargs.setdefault("response_format", {"type": "json_object"})
         call_kwargs["temperature"] = (
             temperature if temperature is not None else self.temperature
         )
@@ -366,7 +414,7 @@ class LLM:
         try:
             r = await self._raw_complete(
                 messages, system=primary_sys, temperature=temperature,
-                max_tokens=effective_max_tokens,
+                max_tokens=effective_max_tokens, json_mode=True,
             )
             try:
                 data = _parse_json_loose(r.text)
@@ -421,6 +469,7 @@ class LLM:
             system=fallback_sys,
             temperature=temperature,
             max_tokens=fallback_max_tokens,
+            json_mode=True,
         )
         try:
             data = _parse_json_loose(fb_r.text)
@@ -522,8 +571,8 @@ class LLMJSONStructureError(LLMError):
                 f"  Last response length: {content_length} chars\n"
                 f"\n  This almost always means the PROMPT is the problem, not the model:\n"
                 f"    - Lower --turns (try 8-20 instead of 50+)\n"
-                f"    - Lower --context-budget (try 8000-16000 instead of 32000+)\n"
-                f"    - Reduce trap library size or use --filter-traps to narrow scope\n"
+                f"    - Lower Harness(context_budget_chars=...) (try 50_000 instead of 200_000)\n"
+                f"    - Narrow the trap scope with Harness(trap_packs=[...]) / --trap-packs\n"
                 f"    - Increase max_tokens on your LLM wrapper to 4096+ so the JSON output isn't truncated\n"
             )
         else:

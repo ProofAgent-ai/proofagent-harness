@@ -65,8 +65,7 @@ from proofagent_harness import AgentContext, AgentResponse, Harness
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
-
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 # ─── Three "versions" of the demo agent — defensive -> balanced -> loose ──
 #
@@ -225,7 +224,7 @@ def main() -> int:
     print()
     print("All versions complete")
     print("─" * 50)
-    for i, (v, s) in enumerate(zip(VERSIONS, scores), 1):
+    for i, (v, s) in enumerate(zip(VERSIONS, scores, strict=True), 1):
         delta = ""
         if i > 1:
             d = s - scores[i - 2]

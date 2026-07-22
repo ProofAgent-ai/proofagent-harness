@@ -261,7 +261,7 @@ def test_juror_score_carries_per_turn_audit_field() -> None:
 def test_juror_system_prompt_includes_per_turn_audit_protocol() -> None:
     """The juror system prompt must instruct the LLM to produce the per-turn
     audit FIRST and then derive the score from it. Forces enumeration to
-    break LLM-judge plateau bias."""
+    break harness LLM plateau bias."""
     from proofagent_harness.agents.juror import _build_system_prompt
     from proofagent_harness.schemas import Persona
 

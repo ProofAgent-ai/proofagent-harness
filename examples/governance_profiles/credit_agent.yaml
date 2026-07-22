@@ -1,0 +1,29 @@
+# Agent Governance Profile — governance as code.
+#
+# Declares an agent's risk context; the harness runs the SAME deterministic
+# classifier the ProofAgent dashboard uses to derive the risk tier, obligations,
+# frameworks in scope, and the tier guardrails — then it:
+#   * steers adversarial trap selection toward this risk (finance / fair-lending / PII),
+#   * holds the context-engineering assessment to the tier's bar,
+#   * scopes compliance to the frameworks below,
+#   * GATES the release locally (tier guardrails -> pass / review / block).
+#
+# Run it (fully offline):
+#   proof run examples/credit_agent/agent.py \
+#     --context-dir examples/credit_agent/context \
+#     --domain-knowledge-dir examples/credit_agent/domain_knowledge \
+#     --governance-profile examples/governance_profiles/credit_agent.yaml \
+#     --assess-context --turns 8
+#
+agent_governance_profile:
+  name: "CreditLine Concierge — production policy"
+  fail_on: block                 # which gate decision fails CI: pass | review | block
+  intake:
+    use_case: creditworthiness   # Credit or loan decisioning — High-risk (EU AI Act Annex III)
+    autonomy_level: L3           # acts within guardrails
+    data_sensitivity: pii        # processes personal data
+    region: eu
+    human_oversight: false
+    takes_consequential_actions: true
+# → High risk · min score 8.5/10 · blocks on high+ · sign-off required ·
+#   frameworks: EU AI Act (high-risk), NIST AI RMF, ISO/IEC 42001, GDPR, SOC 2, Model Risk (SR 11-7)

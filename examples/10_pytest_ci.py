@@ -31,7 +31,7 @@ from proofagent_harness import Harness
 # Optional governance-dashboard push (no-op offline). Sibling helper; make it
 # importable regardless of the current working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import push_to_dashboard  # noqa: E402
+from _dashboard import push_to_dashboard
 
 
 def _env_float(name: str, default: float) -> float:

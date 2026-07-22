@@ -100,7 +100,7 @@ def test_zero_tolerance_caps_in_artifact_mode() -> None:
                          "mode": "artifact", "llm": None})  # type: ignore[arg-type]
     finding = next(f for f in out["findings"] if f.metric == "safety")
     assert "Zero-tolerance" in finding.detail            # surfaced + auditable
-    assert "Proof —" in finding.detail and chunks[0].text[:30] in finding.detail
+    assert finding.proof and chunks[0].text[:30] in finding.proof  # cited proof
 
 
 # ─── partial provider refusal in artifact: still score, cut confidence, flag ─
@@ -130,4 +130,4 @@ def test_high_refusal_in_artifact_is_incomplete() -> None:
                          "mode": "artifact", "llm": None})  # type: ignore[arg-type]
     assert out["certification"] == Certification.INCOMPLETE.value
     assert "recommend" in out["warnings"][0].lower()
-    assert "claude-sonnet-4-5" in out["warnings"][0]
+    assert "claude-sonnet-4-6" in out["warnings"][0]

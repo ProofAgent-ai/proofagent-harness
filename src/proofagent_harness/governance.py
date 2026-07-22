@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 from proofagent_harness.schemas import METRIC_ALIASES
@@ -99,6 +100,13 @@ _CANONICAL_TO_GOVERNANCE: dict[str, str] = _build_canonical_to_governance()
 # findings (e.g. "hallucination_resistance"). We normalize both toward the
 # governance enum; anything we can't confidently map falls back by severity /
 # heuristics in `_normalize_finding_type`.
+# The scored metric axes — a finding whose `metric` is one of these is a per-metric
+# quality finding (as opposed to a technical issue keyed by a defect type).
+_CANONICAL_METRICS: frozenset[str] = frozenset({
+    "task_success", "hallucination", "hallucination_resistance", "safety",
+    "instruction_following", "manipulation_resistance", "tool_use", "tool_calling",
+})
+
 _FINDING_TYPE_BY_KEY: dict[str, str] = {
     # tool-use technical issues
     "phantom_tool_call": "phantom_tool_call",
@@ -313,6 +321,10 @@ def _turn_index_for_finding(report: Report, finding: Any) -> int | None:
     ti = getattr(finding, "turn_index", None)
     if isinstance(ti, int):
         return ti
+    # 1b. The structured `turns` list (v0.6.x) — first cited turn wins.
+    turns = _finding_turns(finding)
+    if turns:
+        return turns[0]
     # 2. Parse a leading "turn N" out of the detail/headline.
     import re
 
@@ -325,9 +337,39 @@ def _turn_index_for_finding(report: Report, finding: Any) -> int | None:
     return None
 
 
+def _finding_turns(finding: Any) -> list[int]:
+    """The finding's machine-readable 1-based turn references (v0.6.x
+    ``Finding.turns``), sanitized to a deduped, sorted list of positive ints."""
+    raw = getattr(finding, "turns", None) or []
+    turns: set[int] = set()
+    for t in raw:
+        with contextlib.suppress(TypeError, ValueError):
+            ti = int(t)
+            if ti > 0 and not isinstance(t, bool):
+                turns.add(ti)
+    return sorted(turns)
+
+
 def _finding_evidence(finding: Any) -> dict[str, Any]:
-    """Collect a small evidence dict (recommendation / citation) if present."""
+    """Collect the finding's structured evidence for the dashboard to render as
+    tight Problem / Proof / Fix blocks — with `recommendation` kept for back-compat."""
     evidence: dict[str, Any] = {}
+    # Concise structured fields (v0.6.x) — the dashboard renders these as bullets.
+    problem = [str(p) for p in (getattr(finding, "problem", None) or []) if str(p).strip()]
+    if problem:
+        evidence["problem"] = problem
+    # Strengths (v0.6.x) — what the agent did RIGHT; the dashboard renders these
+    # green, so a passing metric shows its wins instead of praise-under-Problem.
+    strengths = [str(s) for s in (getattr(finding, "strengths", None) or []) if str(s).strip()]
+    if strengths:
+        evidence["strengths"] = strengths
+    fix_list = [str(f) for f in (getattr(finding, "fix", None) or []) if str(f).strip()]
+    if fix_list:
+        evidence["fix"] = fix_list
+    proof = getattr(finding, "proof", "") or ""
+    if proof:
+        evidence["proof"] = str(proof)
+    # Legacy remediation string — still consumed by older report renderers.
     rec = getattr(finding, "recommendation", "") or ""
     if rec:
         evidence["recommendation"] = str(rec)
@@ -421,8 +463,17 @@ def _build_findings(report: Report) -> list[dict[str, Any]]:
                 getattr(finding, "metric", None), severity
             ),
             "turn_index": _turn_index_for_finding(report, finding),
+            # Machine-readable 1-based turn references (all turns the finding's
+            # evidence cites — `turn_index` above stays the single legacy anchor).
+            "turns": _finding_turns(finding),
             "evidence": _finding_evidence(finding),
         }
+        # Carry the REAL scored metric so the dashboard can group each finding under
+        # its metric. finding_type is a lossy governance bucket (e.g. manipulation and
+        # task both normalise to "drift"); the metric name is not recoverable from it.
+        raw_metric = str(_enum_value(getattr(finding, "metric", "")) or "").strip().lower()
+        if raw_metric in _CANONICAL_METRICS:
+            entry["evidence"]["metric"] = raw_metric
         out.append(entry)
     return out
 
@@ -779,6 +830,10 @@ def build_governance_payload(
         # off). The contract is additionalProperties:true, so an older backend
         # ignores it and never rejects the payload.
         "context_engineering": dict(getattr(report, "context_engineering", {}) or {}),
+        # MEASURED performance block for the AGENT under test (latency/tokens/cost,
+        # provenance-flagged). Additive + {} when nothing was captured; an older
+        # backend ignores it (additionalProperties:true).
+        "performance": dict(getattr(report, "performance", {}) or {}),
         "warnings": list(getattr(report, "warnings", []) or []),
         "duration_seconds": _rfloat(report, "duration_seconds"),
         "cost_summary": _build_cost_summary(report),
@@ -868,6 +923,97 @@ def upload_run(
             f"Governance API returned non-JSON on success (HTTP {resp.status_code}): "
             f"{resp.text[:300]}"
         ) from exc
+
+
+def fetch_compliance_selection(
+    *,
+    api_url: str | None = None,
+    api_key: str | None,
+    profile: str | None = None,
+    agent: str | None = None,
+    timeout: float = 15,
+) -> dict[str, Any] | None:
+    """Ask the governance platform which regulations a policy selected — the
+    framework ids to assess, their names/regions, and the profile name — so
+    ``proof run --assess-compliance`` scores exactly the platform's scope.
+
+    Calls ``GET {api_url}/api/v1/compliance/selection?profile=&agent=`` with the
+    same ``Authorization: Bearer {api_key}`` used for uploads. ``api_url`` defaults
+    to ``PROOFAGENT_API_BASE_URL`` then :data:`DEFAULT_API_BASE_URL`.
+
+    Best-effort by design: returns ``None`` on no key, offline, non-2xx, or bad
+    JSON — the caller then falls back to the LOCAL ``--frameworks`` / default-core
+    strategy, so a pure open-source run never phones home or blocks. Returns the
+    parsed dict (``frameworks``, ``framework_details``, ``profile``, ``profiles``)
+    on success."""
+    if not api_key:
+        return None
+    import httpx
+
+    from proofagent_harness import __version__
+
+    base = (api_url or os.environ.get("PROOFAGENT_API_BASE_URL") or DEFAULT_API_BASE_URL).rstrip("/")
+    params = {k: v for k, v in (("profile", profile), ("agent", agent)) if v}
+    try:
+        resp = httpx.get(
+            f"{base}/api/v1/compliance/selection",
+            params=params,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-ProofAgent-Harness-Version": str(__version__),
+            },
+            timeout=timeout,
+        )
+        if resp.status_code < 200 or resp.status_code >= 300:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def fetch_agent_governance(
+    *,
+    api_url: str | None = None,
+    api_key: str | None,
+    agent: str | None,
+    timeout: float = 15,
+) -> dict[str, Any] | None:
+    """Fetch the Agent Governance Profile bound to ``agent`` (by name) from the
+    cloud, so ``proof run --assess-governance`` can gate against the same risk
+    classification the dashboard shows — without a slug, just the agent name the
+    harness already passes via ``--agent``.
+
+    Calls ``GET {api_url}/api/v1/agents/governance?agent=`` with the upload Bearer
+    key. Returns a dict with ``name``, ``classification`` (tier / controls /
+    frameworks / obligations), and ``intake`` on success.
+
+    Best-effort: returns ``None`` on no key, offline, non-2xx (incl. 404 when the
+    endpoint or the agent's profile doesn't exist yet), or bad JSON — the caller
+    then simply runs without a governance gate."""
+    if not api_key or not agent:
+        return None
+    import httpx
+
+    from proofagent_harness import __version__
+
+    base = (api_url or os.environ.get("PROOFAGENT_API_BASE_URL") or DEFAULT_API_BASE_URL).rstrip("/")
+    try:
+        resp = httpx.get(
+            f"{base}/api/v1/agents/governance",
+            params={"agent": agent},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-ProofAgent-Harness-Version": str(__version__),
+            },
+            timeout=timeout,
+        )
+        if resp.status_code < 200 or resp.status_code >= 300:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 def gate_exit_code(gate_status: str, fail_on: str = "block") -> int:

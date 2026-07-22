@@ -102,7 +102,7 @@ document.getElementById('kpis').innerHTML =
 
 // ---- exec brief ----
 const execBits=[];
-// "Graded against" — the assignment the jury judged the artifact against.
+// "Graded against" — the assignment the jury graded the artifact against.
 // A domain mismatch here (e.g. a refund BRD graded vs a 'library agent'
 // role) is the #1 cause of an unexpectedly low score, so surface it first.
 const _role=md.role, _bc=md.business_case, _goal=md.goal;

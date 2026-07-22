@@ -65,7 +65,7 @@ def dashboard_enabled() -> bool:
 
 
 def add_governance_upload_args(
-    parser: "argparse.ArgumentParser",
+    parser: argparse.ArgumentParser,
     *,
     default_agent: str | None = None,
     include_agent_flag: bool = True,
@@ -152,7 +152,7 @@ def add_governance_upload_args(
 
 
 def push_to_dashboard(
-    report: "Report",
+    report: Report,
     *,
     agent_name: str,
     agent_version: str | None = None,

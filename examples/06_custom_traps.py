@@ -72,7 +72,7 @@ from proofagent_harness.loaders import load_trap_index
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DEFAULT_TRAP_DIR = EXAMPLE_DIR / "custom_traps"

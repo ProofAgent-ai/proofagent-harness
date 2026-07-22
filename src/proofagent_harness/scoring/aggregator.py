@@ -106,7 +106,7 @@ def apply_certification(
 
     # NOTHING was scored (every juror call failed — e.g. the harness LLM's
     # provider refused the transcript). This is NOT a grade: returning NOT_READY
-    # here would read as "the agent failed", when in fact it was never judged.
+    # here would read as "the agent failed", when in fact it was never scored.
     # Surface a distinct INCOMPLETE state so the 0.0 is never mistaken for a
     # real score. Checked FIRST so it can't be masked by the critical-floor
     # default (an empty dict trivially passes the floors).

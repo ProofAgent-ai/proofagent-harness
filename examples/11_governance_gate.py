@@ -5,10 +5,12 @@ evaluation, you have a :class:`~proofagent_harness.schemas.Report`, and now you
 want to push it to the **ProofAgent Governance API** so it can gate a release
 (pass / review / block) and land on the governance dashboard with full fidelity.
 
-It runs WITHOUT any LLM API key. It loads a REAL saved report from ``results/``
-(produced by an earlier run), builds the upload payload, and prints a summary.
-Only the optional final step — actually POSTing the run — needs governance
-credentials, and only happens when you pass ``--upload``.
+It runs WITHOUT any LLM API key. It loads a saved report from ``results/`` —
+produced by an earlier run of any example or ``proof run`` (a fresh clone has
+none yet: run ``01_quickstart.py`` first, or point ``--report`` at any saved
+Report JSON) — builds the upload payload, and prints a summary. Only the
+optional final step — actually POSTing the run — needs governance credentials,
+and only happens when you pass ``--upload``.
 
 ──────────────────────────────────────────────────────────────────────────────
 Everything is driven from the terminal

@@ -47,6 +47,12 @@ class HarnessState(TypedDict, total=False):
 
     agent_callable: Callable[..., Any]
 
+    # Provider/framework-agnostic PerformanceCollector (performance.py) — a shared
+    # mutable object the conductor records each turn's latency + optional (answer,
+    # usage) into. Declared so LangGraph propagates it to the conductor node; the
+    # same object reference is built into Report.performance after the graph runs.
+    perf_collector: Any
+
     llm: LLM
 
     skills: list[Skill]
@@ -116,6 +122,28 @@ class HarnessState(TypedDict, total=False):
     declared here so LangGraph propagates it from the initial state through to
     the reporter — an UNDECLARED key is silently dropped between nodes."""
 
+    assess_compliance: bool
+    """OPTIONAL compliance-assessment toggle (--assess-compliance). Read by
+    compliance_assessor_node (runs after the reporter) to decide whether to map
+    the finished run to regulatory frameworks. Off by default; additive — never
+    touches per_metric / final_score / certification / the gate."""
+
+    governance_profile: Any
+    """OPTIONAL Agent Governance Profile (governance_profile.GovernanceProfile) for
+    this run. When present, its risk classification steers trap selection (planner)
+    and the context-engineering assessment bar (reporter). None → unchanged."""
+
+    seed: int | None
+    """OPTIONAL deterministic seed (Harness(seed=...) / --seed). Read by the
+    planner's trap sampler for reproducible trap selection. MUST be declared
+    here — an undeclared key is silently dropped by LangGraph, which would
+    quietly de-seed the sampler."""
+    compliance_frameworks: list[str]
+    """Framework ids to assess (from --frameworks or governance's
+    /compliance/selection). Empty → the default core set. MUST be declared so
+    LangGraph propagates it to compliance_assessor_node (undeclared keys are
+    silently dropped between nodes — the reason the env fallback existed)."""
+
     # Reporter-produced assessments. These MUST be declared channels: the
     # reporter writes them in its return dict, and LangGraph drops any
     # undeclared key, so an undeclared output never reaches _state_to_report.
@@ -124,6 +152,25 @@ class HarnessState(TypedDict, total=False):
 
     context_engineering: dict[str, Any]
     """v0.7.0 — context-engineering assessment dict produced by reporter_node."""
+
+    # ── Degradation bookkeeping (MUST be declared channels) ─────────────
+    # Accumulated inside a node and RETURNED by conductor / jury nodes;
+    # LangGraph silently drops in-place mutations of the state view, so an
+    # undeclared counter never reaches the reporter — the reason crash
+    # warnings and the conductor fail-fast were dead until these were added.
+
+    _juror_llm_failures: int
+    """Count of juror LLM calls that failed or violated the scoring protocol
+    (error, missing score, empty audit). Reporter surfaces it in warnings."""
+
+    _agent_crash_count: int
+    """Total turns on which the agent under test raised. Reporter warning."""
+
+    _agent_consecutive_crashes: int
+    """Consecutive same-type crash chain length; conductor fail-fasts at 3."""
+
+    _agent_last_crash_type: str | None
+    """Exception type of the most recent crash (None after a clean turn)."""
 
     artifact_type: str
     """Artifact type tag (BRD, code, business_plan, etc.). Drives

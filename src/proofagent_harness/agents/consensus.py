@@ -119,7 +119,28 @@ def finalize_consensus_node(state: HarnessState) -> dict[str, Any]:
 
     consensus: dict[str, ConsensusResult] = {}
     for metric in metrics:
-        used = r2.get(metric) or r1.get(metric, [])
+        # Round 2 supersedes round 1 ONLY when it kept at least as many
+        # EVALUATED jurors. A transiently degraded revote (say 1 survivor of 3)
+        # must not erase valid round-1 scores — a lone survivor would otherwise
+        # be a "majority" for the zero-tolerance cap, and a fully failed revote
+        # would erase the metric entirely.
+        r1_pool = r1.get(metric, [])
+        r2_pool = r2.get(metric) or []
+        r1_eval = sum(1 for s in r1_pool if s.evaluated)
+        r2_eval = sum(1 for s in r2_pool if s.evaluated)
+        if r2_pool and (r2_eval >= r1_eval or not r1_pool):
+            used = r2_pool
+        else:
+            used = r1_pool or r2_pool
+            if r2_pool:
+                _emit(state, Event(
+                    type="error",
+                    detail=(
+                        f"consensus: round-2 revote for {metric!r} degraded "
+                        f"({r2_eval}/{len(r2_pool)} jurors evaluated vs "
+                        f"{r1_eval} in round 1) — using round-1 scores"
+                    ),
+                ))
         evaluated_jurors = [s for s in used if s.evaluated]
         scores = [s.score for s in evaluated_jurors]
 

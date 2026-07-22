@@ -423,6 +423,24 @@ class Finding(BaseModel):
     headline: str
     detail: str
     recommendation: str = ""
+    # Concise, structured presentation of the SAME finding so reports and the
+    # dashboard render tight Problem / Proof / Fix blocks instead of a prose blob.
+    # `detail`/`recommendation` stay populated (compact) for backward compatibility.
+    problem: list[str] = Field(default_factory=list)
+    fix: list[str] = Field(default_factory=list)
+    proof: str = ""
+    # What the agent did RIGHT for this metric — positive, audit-grade
+    # observations. This is where praise belongs: a passing metric shows its
+    # STRENGTHS here (rendered green) instead of forcing positives through the
+    # `problem` field under a red "Problem" header. For a genuine failure this
+    # is usually empty; for a high/passing score it carries the wins and
+    # `problem` carries only the specific gaps to 100%.
+    strengths: list[str] = Field(default_factory=list)
+    # Machine-readable 1-based turn numbers this finding's evidence cites —
+    # deduped + sorted. Populated by the reporter from the synthesis LLM call
+    # when available, plus a deterministic derivation (turn references in the
+    # problem/proof text and non-PASS per-turn-audit entries for the metric).
+    turns: list[int] = Field(default_factory=list)
 
 class ChunkingPolicy(BaseModel):
     """User-tunable chunking policy for large artifacts in artifact mode.
@@ -750,6 +768,17 @@ class Report(BaseModel):
     # "token_impact": "big_cut|cut|neutral|adds"}], "token_savings_estimate":
     # int, "summary", "model", "generated"}.
     context_engineering: dict[str, Any] = Field(default_factory=dict)
+    # PERFORMANCE block — MEASURED (not harness-LLM-scored) operational metrics for the AGENT
+    # UNDER TEST: latency, tokens, cost, efficiency. Provider- and framework-agnostic
+    # (populated from a normalized per-call usage record via OTel / a framework adapter
+    # / the optional (answer, usage) return contract — see performance.py). Distinct
+    # from the primary_*/fallback_* fields below, which meter the HARNESS LLM's own
+    # tokens. Every figure carries a provenance flag (measured|declared|estimated|
+    # unavailable); cost is null (never $0) for a model that can't be priced. Empty {}
+    # when no usage was exposed — latency/error/turns still populate. Shape mirrors
+    # PerformanceCollector.build(): {schema_version, latency_ms, turns, error_rate,
+    # tokens, cost_usd, cost_by_model, usage_provenance, cost_provenance, ...}.
+    performance: dict[str, Any] = Field(default_factory=dict)
     duration_seconds: float = 0.0
     tokens_used: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -18,6 +18,20 @@ from fnmatch import fnmatch
 
 from proofagent_harness.session.events import SessionEvent
 
+# Per-category remediation — every deterministic screen finding ships an
+# explicit FIX (the proof already lives in `evidence`), so downstream surfaces
+# never show a flag without the action that clears it.
+_CATEGORY_FIX: dict[str, str] = {
+    "secrets": "Rotate the exposed credential now; move it to a secret manager / env injection and add a pre-commit secret scan.",
+    "pii": "Redact the personal data from prompts/code/logs; route PII through masked variables, never literals.",
+    "dangerous_cmd": "Replace the destructive/piped-remote command with a reviewed script; require human approval for prod-affecting commands.",
+    "egress": "Restrict network egress to the approved allowlist; route new endpoints through a reviewed proxy config.",
+    "scope": "Keep edits inside the declared workspace scope; add the path to scope explicitly if it is legitimate.",
+    "deps": "Pin the dependency to a vetted version from the official registry; run a supply-chain scan before install.",
+    "license": "Replace the incompatibly-licensed code or obtain approval; record the license decision in the repo.",
+    "cwe": "Patch the flagged weakness per its CWE guidance; add a regression test that exercises the vulnerable path.",
+}
+
 
 @dataclass
 class ScreenFinding:
@@ -29,6 +43,11 @@ class ScreenFinding:
     seq: int = 0
     target: str = ""
     evidence: dict = field(default_factory=dict)
+    fix: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.fix:
+            self.fix = _CATEGORY_FIX.get(self.category, "")
 
 
 @dataclass

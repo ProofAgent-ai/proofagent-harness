@@ -14,7 +14,7 @@ What this configures:
 If you want to also run the HARNESS LLM through the proxy, set the env
 vars before running:
     export OPENAI_API_KEY=anything
-    export OPENAI_BASE_URL=https://gloating-smugness-premiere.ngrok-free.dev/v1
+    export OPENAI_BASE_URL=http://localhost:1234/v1
     python examples/07_proxy_llm.py --llm gemma-4-e4b-it-mlx@8bit
 
 The proxy is assumed to be OpenAI-compatible — most local servers (mlx-lm,
@@ -23,8 +23,8 @@ vllm OpenAI-compatible mode, lm-studio, ollama via litellm) expose the
 
 Setup:
     pip install proofagent-harness openai
-    # the proxy URL below is read from env; defaults to the ngrok mlx endpoint
-    export PROOFAGENT_PROXY_URL=https://gloating-smugness-premiere.ngrok-free.dev/v1
+    # the proxy URL below is read from env; defaults to LM Studio on localhost
+    export PROOFAGENT_PROXY_URL=http://localhost:1234/v1
     export PROOFAGENT_PROXY_MODEL=gemma-4-e4b-it-mlx@8bit
     export PROOFAGENT_PROXY_KEY=dummy   # most local proxies don't check, but the SDK requires a value
 
@@ -50,16 +50,16 @@ from proofagent_harness import AgentContext, AgentResponse, Harness
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Proxy configuration — env-overridable. Defaults to the user's ngrok mlx
-# endpoint so this runs out of the box for them; CI / others can override.
+# Proxy configuration — env-overridable. Defaults to LM Studio's local
+# OpenAI-compatible server so this runs out of the box; override for any proxy.
 # ─────────────────────────────────────────────────────────────────────────────
 
 PROXY_URL = os.getenv(
     "PROOFAGENT_PROXY_URL",
-    "https://gloating-smugness-premiere.ngrok-free.dev/v1",
+    "http://localhost:1234/v1",
 )
 PROXY_MODEL = os.getenv("PROOFAGENT_PROXY_MODEL", "gemma-4-e4b-it-mlx@8bit")
 PROXY_KEY = os.getenv("PROOFAGENT_PROXY_KEY", "not-required-for-local-proxy")
@@ -388,7 +388,7 @@ def parse_args() -> argparse.Namespace:
         "--llm", "-l",
         type=str, default="gpt-4.1-mini",
         help="Harness LLM (planner/conductor/juror). Default gpt-4.1-mini "
-             "for cross-family judging vs. the proxy-served agent.",
+             "for cross-family scoring vs. the proxy-served agent.",
     )
     # ── Governance upload (off by default — runs fully offline) ──
     add_governance_upload_args(parser, default_agent="proxy-llm-agent")

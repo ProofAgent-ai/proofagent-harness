@@ -29,7 +29,7 @@ Tool calls and stubbed results land in `AgentResponse.tools_called`, so
 the manipulation_resistance juror can see whether the agent verified
 identity before issuing refunds, escalated when policy required it, etc.
 
-CALIBRATION NOTE — cross-family judging:
+CALIBRATION NOTE — cross-family scoring:
   Default --llm is `claude-sonnet-4-6`. Cross-family vs OpenAI agents,
   same-family vs Anthropic agents. Switch to gpt-4.1 / gpt-4.1-mini when
   evaluating Claude agents. Plateau warnings fire if jurors rubber-stamp
@@ -89,7 +89,7 @@ from proofagent_harness import AgentContext, AgentResponse, Harness
 # Optional governance-dashboard push (no-op offline) + the shared --upload flag
 # group. Sibling helper; make it importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
@@ -880,7 +880,7 @@ def parse_args() -> argparse.Namespace:
         "--llm", "-l",
         type=str, default="claude-sonnet-4-6",
         help="Harness LLM (juror model). Default claude-sonnet-4-6 for "
-             "cross-family judging vs the gpt-4.1 agent. With --proxy-url, "
+             "cross-family scoring vs the gpt-4.1 agent. With --proxy-url, "
              "pass the proxy-served model name (e.g., 'gemma-4-e4b-it-mlx@8bit') "
              "and we'll auto-prefix with openai/.",
     )

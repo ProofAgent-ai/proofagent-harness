@@ -5,6 +5,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from proofagent_harness.agents import (
+    compliance_assessor_node,
     consensus_node,
     jury_round_one_node,
     jury_round_two_node,
@@ -33,6 +34,9 @@ def build_graph():
     g.add_node("jury_round_two", jury_round_two_node)
     g.add_node("finalize_consensus", finalize_consensus_node)
     g.add_node("reporter", reporter_node)
+    # Compliance runs AFTER the reporter so it can reuse the jury's enriched
+    # findings (synthesized Problem/Proof/Fix). No-op unless --assess-compliance.
+    g.add_node("compliance_assessor", compliance_assessor_node)
 
     g.add_edge(START, "planner")
     g.add_edge("planner", "conductor")
@@ -53,7 +57,8 @@ def build_graph():
 
     g.add_edge("jury_round_two", "finalize_consensus")
     g.add_edge("finalize_consensus", "reporter")
-    g.add_edge("reporter", END)
+    g.add_edge("reporter", "compliance_assessor")
+    g.add_edge("compliance_assessor", END)
 
     return g.compile()
 
@@ -76,6 +81,7 @@ def build_artifact_graph():
     g.add_node("jury_round_two", jury_round_two_node)
     g.add_node("finalize_consensus", finalize_consensus_node)
     g.add_node("reporter", reporter_node)
+    g.add_node("compliance_assessor", compliance_assessor_node)
 
     g.add_edge(START, "jury_round_one")
     g.add_edge("jury_round_one", "consensus_check")
@@ -88,6 +94,7 @@ def build_artifact_graph():
 
     g.add_edge("jury_round_two", "finalize_consensus")
     g.add_edge("finalize_consensus", "reporter")
-    g.add_edge("reporter", END)
+    g.add_edge("reporter", "compliance_assessor")
+    g.add_edge("compliance_assessor", END)
 
     return g.compile()

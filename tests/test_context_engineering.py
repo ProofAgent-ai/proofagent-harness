@@ -77,8 +77,10 @@ def test_assessment_parses_and_normalizes(monkeypatch):
     }
     monkeypatch.setattr("litellm.completion", _fake_completion(payload), raising=False)
 
+    # Context large enough that the 1800-token estimate is below the measured
+    # cap (the estimate can never exceed the size of the supplied context).
     out = assess_context_engineering(
-        context=AgentContext(system_prompt="You are a helpful assistant.", tools=[{"name": "t"}]),
+        context=AgentContext(system_prompt="You are a helpful assistant. " * 300, tools=[{"name": "t"}]),
     )
     assert out["generated"] is True
     # Always exactly the fixed criteria set (model can't add/drop).
@@ -91,6 +93,15 @@ def test_assessment_parses_and_normalizes(monkeypatch):
     assert impacts["Vague role"] == "cut"
     assert impacts["Bloat"] == "neutral"
     assert out["token_savings_estimate"] == 1800
+    # Measured denominator + reclaimable share of the context.
+    assert out["context_tokens"] > 0
+    assert out["token_savings_pct"] == round(100.0 * 1800 / out["context_tokens"], 1)
+    # Savings can never exceed the measured context size.
+    small = assess_context_engineering(
+        context=AgentContext(system_prompt="short prompt", tools=[]),
+    )
+    if small.get("generated"):
+        assert small["token_savings_estimate"] <= small["context_tokens"]
 
 
 def test_malformed_response_is_noop(monkeypatch):
@@ -194,14 +205,39 @@ async def test_assess_context_off_skips_the_assessment(fake_llm, echo_agent, mon
     assert report.context_engineering == {}
 
 
-async def test_compliance_assessment_also_reaches_report(fake_llm, echo_agent, monkeypatch):
-    """Bonus regression: `compliance` is the same undeclared-output class as
-    `context_engineering` — declaring it as a graph channel means the reporter's
-    compliance dict now actually reaches the Report (it was dropped before)."""
-    monkeypatch.setattr(
-        "proofagent_harness.compliance.assess_compliance",
-        lambda **_k: {"frameworks": [], "model": "x", "generated": True, "_stub": True},
-    )
+async def test_compliance_off_by_default(fake_llm, echo_agent):
+    """Compliance assessment is OFF by default (moved behind --assess-compliance) —
+    a plain run ships NO compliance section, so governance renders those frameworks
+    as a neutral 'not assessed' rather than a misleading ASSESSED/0."""
     harness = Harness(llm=fake_llm, turns=1, consensus="independent", verbose=False)
     report = await harness.aevaluate(echo_agent, role="x", goal="y")
-    assert report.compliance.get("_stub") is True
+    assert report.compliance == {}
+
+
+async def test_compliance_assessment_reaches_report_when_enabled(
+    fake_llm, echo_agent, monkeypatch
+):
+    """With assess_compliance=True, the post-jury compliance_assessor node maps the run
+    to the SELECTED frameworks (per-control status + why/proof/fix) and its output
+    reaches the Report via the declared `compliance` graph channel."""
+    # The node reuses the reporter's _run_json_llm bridge — stub it with a verdict.
+    monkeypatch.setattr(
+        "proofagent_harness.agents.reporter._run_json_llm",
+        lambda *a, **k: {"frameworks": [{"id": "iso_42001", "summary": "gaps", "controls": [
+            {"id": "a2", "status": "attention",
+             "problem": ["The agent shipped changes without an approval gate"],
+             "proof": "bypassed human review at turn 4",
+             "fix": ["Require a human-approval step before deploy actions"]},
+        ]}]},
+    )
+    harness = Harness(llm=fake_llm, turns=1, consensus="independent", verbose=False)
+    report = await harness.aevaluate(
+        echo_agent, role="x", goal="y",
+        assess_compliance=True, compliance_frameworks=["iso_42001"],
+    )
+    assert report.compliance.get("generated") is True
+    fw = report.compliance["frameworks"][0]
+    assert fw["id"] == "iso_42001"
+    a2 = next(c for c in fw["controls"] if c["id"] == "a2")
+    assert a2["status"] == "attention"
+    assert a2["problem"] and a2["proof"] and a2["fix"]

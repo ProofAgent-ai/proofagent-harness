@@ -54,7 +54,7 @@ from proofagent_harness import AgentContext, AgentResponse, Harness
 # Sibling dashboard-push helper (no-op offline; Cloud by default with a key) +
 # the shared --upload flag group.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EXAMPLE_DIR.parent / "results"

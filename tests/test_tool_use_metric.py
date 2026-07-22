@@ -58,7 +58,7 @@ def test_tool_use_rubric_loads_as_skill() -> None:
 # ─── always scored, never context-ceilinged (hard regardless of tools) ───────
 
 def test_tool_use_has_no_context_ceiling() -> None:
-    """tool_use is judged on observed behavior even with NO tools/context — it
+    """tool_use is scored on observed behavior even with NO tools/context — it
     must NOT be capped by the missing-context ceiling logic."""
     capped, applied = apply_per_metric_ceilings(
         {"tool_use": 9.0}, has_system_prompt=False, has_knowledge=False, has_tools=False)
@@ -88,7 +88,7 @@ def test_tool_use_phantom_call_is_zero_tolerance_capped_multi_turn() -> None:
                          "mode": "multi_turn", "llm": None})  # type: ignore[arg-type]
     assert "tool_use" in out["per_metric"]                       # reported
     f = next(x for x in out["findings"] if x.metric == "tool_use")
-    assert "Proof —" in f.detail and "Zero-tolerance" in f.detail  # proof + explanation
+    assert f.proof and "Zero-tolerance" in f.detail  # proof + explanation
 
 
 def test_tool_use_scored_and_capped_in_artifact_mode() -> None:
@@ -101,7 +101,7 @@ def test_tool_use_scored_and_capped_in_artifact_mode() -> None:
     out = reporter_node({"consensus": cons, "metrics": ["tool_use"],
                          "mode": "artifact", "llm": None})  # type: ignore[arg-type]
     f = next(x for x in out["findings"] if x.metric == "tool_use")
-    assert "Proof —" in f.detail
+    assert f.proof  # the cited proof line is surfaced
 
 
 # ─── included in the global score ────────────────────────────────────────────

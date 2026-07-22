@@ -1,0 +1,13 @@
+# Agent Governance Profile — a PROHIBITED use case (EU AI Act Article 5).
+# The classifier tiers this Unacceptable risk, and the local gate BLOCKS the
+# release unconditionally ("do not deploy"), regardless of the eval score.
+agent_governance_profile:
+  name: "Citizen Scoring Agent — prohibited"
+  fail_on: block
+  intake:
+    use_case: social_scoring     # Social scoring of individuals — Prohibited (Article 5)
+    autonomy_level: L4
+    data_sensitivity: pii
+    region: eu
+    human_oversight: false
+    takes_consequential_actions: true

@@ -42,7 +42,7 @@ from proofagent_harness import CANONICAL_METRICS, AgentContext, Harness
 # Optional governance-dashboard push (no-op offline). Sibling helper + the shared
 # --upload flag group; make them importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _dashboard import add_governance_upload_args, push_to_dashboard  # noqa: E402
+from _dashboard import add_governance_upload_args, push_to_dashboard
 
 EX_DIR = Path(__file__).resolve().parent / "my_agent_dir"
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"

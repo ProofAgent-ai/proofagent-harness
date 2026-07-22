@@ -130,6 +130,7 @@ Get a key from the Governance dashboard → **Settings → API Keys**.
 | [`agents/`](agents/) | Five production-style domain agent specs + a multi-provider factory (used by 08) | — | — |
 | [`sample_artifacts/library_brd/`](sample_artifacts/library_brd/) | Bundled fictional BRD + knowledge corpus used by `04_artifact_eval.py` | — | — |
 | [`custom_traps/`](custom_traps/) | Sample trap used by `06_custom_traps.py` | — | — |
+| [`governance_profiles/`](governance_profiles/) | **Agent Governance Profiles** (governance as code) for `--governance-profile`: a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that always blocks the gate | — | — |
 | [`context_engineering_testing/`](context_engineering_testing/) | The agent context (`system_prompt.md` + `tools.json` + `knowledge.md`) graded by `12_context_engineering.py` — copy it and drop in your own. See its [README](context_engineering_testing/README.md) for the required files | — | — |
 | [`my_agent_context/`](my_agent_context/) | A **well-engineered** context (clear role, typed tool schemas, injection separation) — the high-scoring contrast to the deliberately-weak `context_engineering_testing/` | — | — |
 | [`my_agent_artifact/`](my_agent_artifact/) | An **artifact** (`proposal.md`) + its producing agent's contract (`agent_system_prompt.md` + `agent_tools.json`, auto-bundled) + a `knowledge/` corpus — for `proof artifact … --assess-context` | — | — |
@@ -140,7 +141,7 @@ Get a key from the Governance dashboard → **Settings → API Keys**.
 
 **What it shows.** An N-turn adversarial evaluation of an OpenAI `gpt-4.1` refund
 agent with a full `AgentContext` (system prompt + tools + knowledge corpus). The
-agent and harness LLM can come from different providers (cross-family judging);
+agent and harness LLM can come from different providers (cross-family scoring);
 `--proxy-url` redirects only the harness LLM to a local proxy.
 
 **Mode:** multi-turn · **Pushes via:** [`--upload`](#4-pushing-to-the-dashboard)

@@ -1,0 +1,13 @@
+# Agent Governance Profile — a high-risk healthcare scheduler handling PHI.
+# Derives: High risk · min 8.5/10 · blocks on high+ · sign-off required ·
+#          frameworks include HIPAA + GDPR + EU AI Act (high-risk).
+agent_governance_profile:
+  name: "CareBridge Scheduler — production policy"
+  fail_on: block
+  intake:
+    use_case: healthcare         # Medical or healthcare decisions — High-risk (Annex III)
+    autonomy_level: L2           # acts, human reviews
+    data_sensitivity: phi        # protected health information
+    region: eu
+    human_oversight: true
+    takes_consequential_actions: true

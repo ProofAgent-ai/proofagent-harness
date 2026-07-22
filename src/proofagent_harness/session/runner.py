@@ -263,7 +263,17 @@ def build_session_payload(
             "severity": f.severity,
             "finding_type": f.finding_type,
             "turn_index": None,
-            "evidence": dict(f.evidence, seq=f.seq, category=f.category, ts=seq_ts.get(f.seq, "")),
+            # `proof` mirrors the matched evidence (already redacted); `fix` is the
+            # category remediation — every screen finding ships proof + fix, same
+            # contract as evaluation findings.
+            "evidence": dict(
+                f.evidence,
+                seq=f.seq,
+                category=f.category,
+                ts=seq_ts.get(f.seq, ""),
+                proof=str(f.evidence.get("match", "") or f.evidence.get("pattern", ""))[:300],
+                fix=[f.fix] if f.fix else [],
+            ),
         }
         for f in result.findings
     ]

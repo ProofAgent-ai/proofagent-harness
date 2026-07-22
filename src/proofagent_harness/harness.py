@@ -25,6 +25,7 @@ from proofagent_harness.loaders import (
     load_skills,
     load_traps,
 )
+from proofagent_harness.performance import PerformanceCollector
 from proofagent_harness.progress import ProgressReporter
 from proofagent_harness.schemas import (
     CANONICAL_METRICS,
@@ -334,6 +335,11 @@ class Harness:
 
         self.verbose = verbose
         self.seed = seed
+        # OPTIONAL Agent Governance Profile (governance as code). When set (by the
+        # CLI's --governance-profile / --assess-governance, or a caller), the run's
+        # risk classification steers trap selection + the context-engineering bar,
+        # scopes compliance, and drives the local release gate. None → unchanged.
+        self.governance_profile: Any = None
 
         if context_budget_tokens is not None:
             self.context_budget_chars = max(1, int(context_budget_tokens)) * CHARS_PER_TOKEN
@@ -366,6 +372,11 @@ class Harness:
         # OPTIONAL context-engineering assessment — grades the QUALITY of the
         # supplied context as a separate sub-score. Additive + off by default.
         assess_context: bool = False,
+        # OPTIONAL compliance assessment — maps the finished run to the SELECTED
+        # regulatory frameworks (why/proof/fix per control). Additive + off by
+        # default; never touches the metric scores, certification, or the gate.
+        assess_compliance: bool = False,
+        compliance_frameworks: list[str] | None = None,
         # ── multi_turn-only ─────────────────────────────────────────────
         goal: str = "",
         knowledge: Any = None,
@@ -402,6 +413,8 @@ class Harness:
             "compare_to": compare_to,
             "on_event": on_event,
             "assess_context": assess_context,
+            "assess_compliance": assess_compliance,
+            "compliance_frameworks": compliance_frameworks,
         }
 
         try:
@@ -442,6 +455,9 @@ class Harness:
         # OPTIONAL context-engineering assessment — grades the QUALITY of the
         # supplied context as a separate sub-score. Additive + off by default.
         assess_context: bool = False,
+        # OPTIONAL compliance assessment (see evaluate()). Additive + off by default.
+        assess_compliance: bool = False,
+        compliance_frameworks: list[str] | None = None,
         # ── multi_turn-only ─────────────────────────────────────────────
         goal: str = "",
         knowledge: Any = None,
@@ -506,6 +522,8 @@ class Harness:
                 on_event=on_event,
                 context=context,
                 assess_context=assess_context,
+                assess_compliance=assess_compliance,
+                compliance_frameworks=compliance_frameworks,
             )
 
         # mode == "multi_turn" — original pipeline.
@@ -593,12 +611,21 @@ class Harness:
                 context=context,
                 on_event=graph_callback,
                 assess_context=assess_context,
+                assess_compliance=assess_compliance,
+                compliance_frameworks=compliance_frameworks,
             )
+
+            # Provider/framework-agnostic performance metering — the conductor
+            # records each turn's latency + optional (answer, usage) into this
+            # shared object; built into report.performance after the run.
+            perf = PerformanceCollector()
+            initial_state["perf_collector"] = perf
 
             graph = build_graph()
             final_state = await graph.ainvoke(initial_state)
 
             report = self._state_to_report(final_state, duration=time.time() - start)
+            report.performance = perf.build()
             composed_callback(Event(type="done"))
 
             return report
@@ -618,6 +645,8 @@ class Harness:
         context: AgentContext | None,
         on_event: Callable[[Event], None],
         assess_context: bool = False,
+        assess_compliance: bool = False,
+        compliance_frameworks: list[str] | None = None,
     ) -> HarnessState:
         ctx = context or AgentContext()
         knowledge_source = knowledge if knowledge is not None else ctx.knowledge
@@ -632,6 +661,9 @@ class Harness:
             "knowledge_text": knowledge_text,
             "context": ctx,
             "assess_context": bool(assess_context),
+            "assess_compliance": bool(assess_compliance),
+            "compliance_frameworks": list(compliance_frameworks or []),
+            "governance_profile": getattr(self, "governance_profile", None),
             "agent_callable": agent,
             "skills": self._skills,
             "traps": self._traps,
@@ -664,9 +696,9 @@ class Harness:
         # scorecard badge always agrees with the number (a 5.5 is FAIL, not
         # "pass"; PASS is reserved for >= 9). _severity_from_score is the
         # single source of truth, shared with findings + the dashboard.
-        from proofagent_harness.agents.reporter import _severity_from_score
+        from proofagent_harness.agents.reporter import _finding_severity
         severity = {
-            m: _severity_from_score(s)
+            m: _finding_severity(s, consensus.get(m))
             for m, s in (state.get("per_metric") or {}).items()
         }
 
@@ -736,7 +768,7 @@ class Harness:
                 "turns": self.turns,
                 "llm_call_count": self.llm.call_count,
                 # The assignment the jury graded AGAINST — persisted so the
-                # report is self-describing (you can see WHAT it was judged
+                # report is self-describing (you can see WHAT it was graded
                 # against, e.g. when a domain-mismatch tanks every metric).
                 "role": str(state.get("role") or ""),
                 "business_case": str(state.get("business_case") or ""),
@@ -771,6 +803,8 @@ class Harness:
         compare_to: AgentArtifact | None = None,
         context: AgentContext | None = None,
         assess_context: bool = False,
+        assess_compliance: bool = False,
+        compliance_frameworks: list[str] | None = None,
     ) -> Report:
         """Run the artifact-mode evaluation end-to-end.
 
@@ -841,6 +875,13 @@ class Harness:
                 "site_custom_rubrics": dict(self.custom_rubrics or {}),
                 # OPTIONAL context-engineering assessment (read by reporter_node).
                 "assess_context": bool(assess_context),
+                # OPTIONAL compliance assessment (read by compliance_assessor_node).
+                "assess_compliance": bool(assess_compliance),
+                "compliance_frameworks": list(compliance_frameworks or []),
+                # OPTIONAL Agent Governance Profile — same channel as multi-turn,
+                # so a Python-API artifact run with harness.governance_profile set
+                # still steers the context bar + compliance scope.
+                "governance_profile": getattr(self, "governance_profile", None),
             }
 
             final_state = await run_artifact_eval(
@@ -1107,6 +1148,19 @@ class Harness:
                 temperature=0,
             )
         except Exception as exc:
+            # A rate limit is NOT a configuration problem — don't tell the user
+            # their API key is wrong when the provider said 429.
+            exc_text = f"{type(exc).__name__}: {exc}".lower()
+            if "429" in exc_text or "rate limit" in exc_text or "ratelimit" in exc_text:
+                raise LLMNotConfiguredError(
+                    "Harness LLM pre-flight check hit a RATE LIMIT (HTTP 429) — "
+                    "the model and API key are fine, but the provider is "
+                    "throttling this account right now.\n\n"
+                    f"  Model: {self.llm.model}\n"
+                    f"  Error: {type(exc).__name__}: {exc}\n\n"
+                    "Wait a minute and re-run, or lower concurrency / use a "
+                    "higher-tier API key."
+                ) from exc
             model = self.llm.model.lower()
             if "claude" in model or "anthropic" in model:
                 env_hint = "ANTHROPIC_API_KEY"

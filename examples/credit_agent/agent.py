@@ -36,6 +36,9 @@ HERE = Path(__file__).parent
 CONTEXT = HERE / "context"
 
 AGENT_LLM = os.getenv("AGENT_LLM", "gpt-4.1-mini")
+# Fully-qualified model id for cost attribution: a bare OpenAI name (gpt-4.1-mini)
+# is prefixed so the governance dashboard prices it as `measured`, not `estimated`.
+_MODEL_ID = AGENT_LLM if "/" in AGENT_LLM else f"openai/{AGENT_LLM}"
 
 SYSTEM_PROMPT = (CONTEXT / "system_prompt.md").read_text()
 TOOLS = json.loads((CONTEXT / "tools.json").read_text())
@@ -55,6 +58,42 @@ _SYSTEM = (
 
 # Conversation history persists across turns within one evaluation.
 _history: list[dict] = []
+
+# Some newer models (e.g. Anthropic Opus 4.7+ / Fable 5) REJECT `temperature`.
+# Track once whether this AGENT_LLM accepts it so we don't re-hit the error
+# every turn — the same drop-and-retry pattern the harness LLM wrapper uses.
+_AGENT_ACCEPTS_TEMPERATURE = True
+
+
+def _system_message() -> dict:
+    """The agent's system message. `_SYSTEM` (system prompt + full knowledge
+    corpus, ~4k+ tokens) is IDENTICAL on every tool-loop call and every turn, so
+    for Anthropic models we mark it `cache_control: ephemeral` — the provider
+    caches it and bills cached reads at ~10% on all subsequent calls (big saving
+    on a multi-turn agentic loop). OpenAI-compatible providers cache long
+    prefixes automatically, so a plain string is already optimal there."""
+    m = AGENT_LLM.lower()
+    if "claude" in m or "anthropic" in m:
+        return {"role": "system",
+                "content": [{"type": "text", "text": _SYSTEM,
+                             "cache_control": {"type": "ephemeral"}}]}
+    return {"role": "system", "content": _SYSTEM}
+
+
+def _agent_completion(**kwargs):
+    """litellm.completion for the agent under test, resilient to a model that
+    deprecated `temperature` (drops it and retries, then remembers)."""
+    global _AGENT_ACCEPTS_TEMPERATURE
+    if not _AGENT_ACCEPTS_TEMPERATURE:
+        kwargs.pop("temperature", None)
+    try:
+        return litellm.completion(**kwargs)
+    except litellm.BadRequestError as exc:
+        if "temperature" in str(exc).lower() and "temperature" in kwargs:
+            _AGENT_ACCEPTS_TEMPERATURE = False
+            kwargs.pop("temperature", None)
+            return litellm.completion(**kwargs)
+        raise
 
 
 def reset() -> None:
@@ -81,19 +120,31 @@ def agent(message: str):
     """Answer one turn from the conductor. Returns AgentResponse (or str fallback)."""
     _history.append({"role": "user", "content": message})
     tools_called: list[dict] = []
+    usage: list[dict] = []  # per-call token usage for THIS turn (performance metering)
     text = ""
 
     # Small agentic loop: let the model call tools, feed a result back for EACH tool_call
     # (the OpenAI API requires it), and continue until it produces a text reply. Capped so
     # it can never loop forever.
     for _ in range(4):
-        resp = litellm.completion(
+        resp = _agent_completion(
             model=AGENT_LLM,
-            messages=[{"role": "system", "content": _SYSTEM}, *_history],
+            messages=[_system_message(), *_history],
             tools=TOOLS,
             tool_choice="auto",
             temperature=0.2,
         )
+        # Capture this internal call's token usage — the provider counts the full
+        # request (system prompt + tools + knowledge + history), so this is exact.
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            det = getattr(u, "prompt_tokens_details", None)
+            usage.append({
+                "model": _MODEL_ID,
+                "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                "output_tokens": getattr(u, "completion_tokens", 0) or 0,
+                "cache_read_tokens": (getattr(det, "cached_tokens", 0) or 0) if det else 0,
+            })
         choice = resp.choices[0].message
         text = choice.content or ""
         calls = getattr(choice, "tool_calls", None) or []
@@ -125,14 +176,41 @@ def agent(message: str):
                 "content": _stub_tool_result(tc.function.name, cargs),
             })
 
+    # A more agentic model (e.g. Fable 5 / Opus) may still be calling tools when the
+    # loop cap is hit, leaving no text reply — an empty turn the jury (correctly)
+    # scores as non-execution. Give it ONE final chance to summarize WITHOUT tools,
+    # so the turn ends with a real user-facing answer regardless of how many tool
+    # rounds the model used.
+    if not text:
+        final = _agent_completion(
+            model=AGENT_LLM,
+            messages=[_system_message(), *_history,
+                      {"role": "user", "content": "Now give the applicant your final answer in plain text."}],
+            tool_choice="none",
+            temperature=0.2,
+        )
+        text = (final.choices[0].message.content or "").strip()
+        fu = getattr(final, "usage", None)
+        if fu is not None:
+            usage.append({"model": _MODEL_ID,
+                          "input_tokens": getattr(fu, "prompt_tokens", 0) or 0,
+                          "output_tokens": getattr(fu, "completion_tokens", 0) or 0,
+                          "cache_read_tokens": 0})
+
     if _HAS_AR:
-        return AgentResponse(
+        response: object = AgentResponse(
             text=text or "(the agent issued tool calls without a text reply)",
             tools_called=tools_called,
             retrievals=[{"source": "domain_knowledge/credit_policy.md"}],
         )
-    # Fallback if AgentResponse isn't importable: plain string still evaluates.
-    return text or "(tool calls issued)"
+    else:
+        # Fallback if AgentResponse isn't importable: plain string still evaluates.
+        response = text or "(tool calls issued)"
+
+    # (answer, usage) performance contract — usage is the per-call token list for THIS
+    # turn. The harness prices it locally via litellm and surfaces latency/tokens/cost on
+    # the dashboard. Drop the `, usage` to opt out (latency/turns still populate).
+    return response, usage
 
 
 # Alias so `proof run agent.py` finds it whichever name it looks for.

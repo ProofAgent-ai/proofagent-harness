@@ -65,8 +65,16 @@ class FakeLLM(LLM):
         self.total_tokens += 15
         if self.canned_json:
             return self.canned_json.pop(0)
-        # Default: a juror score
-        return {"score": 7.5, "reasoning": "deterministic stub score"}
+        # Default: a PROTOCOL-COMPLIANT juror score. The juror contract is
+        # audit-first — a reply with no per_turn_audit is rejected as
+        # unevaluated, so the stub must include one like a real juror.
+        return {
+            "score": 7.5,
+            "reasoning": "deterministic stub score",
+            "per_turn_audit": [
+                {"turn_index": 1, "outcome": "PASS", "citation": "stub citation"}
+            ],
+        }
 
 
 class _AlwaysErrorLLM(FakeLLM):
