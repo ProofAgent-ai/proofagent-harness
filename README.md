@@ -33,6 +33,7 @@ Built on the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of A
 - **183 traps across 11 families**: social engineering, prompt injection, data exfiltration, tool misuse, compliance, bias, … Author your own as one `.md` file.
 - **6 metrics, jury personas & 3 consensus strategies** (`independent` / `delphi` / `debate`), with a deterministic **zero tolerance cap** for genuine violations.
 - **Tool use and phantom call scoring**: required tools must actually be invoked; invented tools and "done, with no tool call" fail (scored even when no tools are provided).
+- **Context engineering evaluation** (`--assess-context` / `assess_context=True`): grades the QUALITY of the context the agent runs on across 7 fixed criteria (role clarity, guardrail coverage, instruction consistency, tool schema quality, grounding sufficiency, injection hardening, token efficiency) — a separate, additive sub-score with a token impact verdict and savings estimate on every finding; never sways the metric scores or the gate.
 
 **Observability (coding agents)**
 - **`proof watch`**: attach to the coding agent working in your repo and screen the session live (`--no-upload` for terminal only).
@@ -297,7 +298,7 @@ The arguments:
 | `--fail-on` | Which gate decision fails CI: `pass` \| `review` \| `block`. Defaults to the profile's `fail_on`, else `block` | — |
 | `--upload` | Also send the finished run with the profile to the dashboard: the agent's risk classification and governing policy fill in from the same YAML that gated CI | an API key |
 
-With neither `--governance-profile` nor `--assess-governance`, nothing changes — the evaluation runs exactly as before. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block.
+With neither `--governance-profile` nor `--assess-governance`, nothing changes — the evaluation runs exactly as before. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block. Web reference: [`harness/docs#governance-profile`](https://www.proofagent.ai/harness/docs#governance-profile).
 
 ## CLI reference
 
@@ -433,6 +434,7 @@ This README is the essentials. The **[full documentation](https://www.proofagent
 | **Configuration**: `Scoring` (aggregation, weights, floors, thresholds, personas) | [`#configuration`](https://www.proofagent.ai/harness/docs#configuration) |
 | **Reproducibility & seeds** | [`#reproducibility`](https://www.proofagent.ai/harness/docs#reproducibility) |
 | **CLI reference**: every `proof run` / `proof artifact` / `proof traps` flag | [`#cli`](https://www.proofagent.ai/harness/docs#cli) |
+| **Agent Governance Profile**: governance as code — the YAML, tier guardrails, and the local release gate | [`#governance-profile`](https://www.proofagent.ai/harness/docs#governance-profile) |
 | **Governance & CI gate**: flags, exit codes, GitHub Actions | [`#governance`](https://www.proofagent.ai/harness/docs#governance) · [`#ci-integration`](https://www.proofagent.ai/harness/docs#ci-integration) |
 | **Authoring traps**: the single file `.md` trap spec | [`#trap-manifest`](https://www.proofagent.ai/harness/docs#trap-manifest) |
 | **FAQ / troubleshooting** | [`#faq`](https://www.proofagent.ai/harness/docs#faq) |
