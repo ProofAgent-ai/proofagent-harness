@@ -29,10 +29,16 @@ Setup:
     export PROOFAGENT_EDEN_AGENT_MODEL=mistral/mistral-small-latest
 
 Run:
+    # defaults: agent AND harness LLM both run mistral/mistral-small-latest
+    # on the Eden AI EU endpoint
     python examples/13_eden_eu.py
-    python examples/13_eden_eu.py --turns 15 --consensus debate --llm openai/gpt-4o
-    # --llm takes an Eden AI model id (provider/model from the EU catalog);
-    # the harness adds the litellm `openai/` prefix and the EU api_base itself.
+    python examples/13_eden_eu.py --turns 15 --consensus debate --llm mistral/mistral-large-latest
+
+    # --llm takes an Eden AI model id: `provider/model` from Eden's EU catalog
+    # (list it with: curl https://api.eu.edenai.run/v3/info). Even an id like
+    # `openai/gpt-4o` is served THROUGH Eden AI's EU endpoint with your Eden
+    # key — never directly by the provider. The script adds the litellm
+    # `openai/` compatibility prefix and the EU api_base itself.
 """
 
 from __future__ import annotations
@@ -58,6 +64,8 @@ from _dashboard import add_governance_upload_args, push_to_dashboard
 # ─────────────────────────────────────────────────────────────────────────────
 
 EDEN_URL = os.getenv("PROOFAGENT_EDEN_URL", "https://api.eu.edenai.run/v3")
+# NOTE: Eden AI's provider slug for Mistral is `mistral` (not `mistralai`);
+# ids are `provider/model` from the EU catalog (curl $EDEN_URL/info to list).
 AGENT_MODEL = os.getenv("PROOFAGENT_EDEN_AGENT_MODEL", "mistral/mistral-small-latest")
 EDEN_KEY = os.getenv("EDENAI_API_KEY", "")
 
@@ -310,9 +318,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llm", "-l",
         type=str, default="mistral/mistral-small-latest",
-        help="Harness LLM as an Eden AI model id (provider/model from the EU "
-             "catalog, e.g. mistral/mistral-small-latest or openai/gpt-4o). "
-             "The litellm `openai/` compatibility prefix and the EU api_base "
+        help="Harness LLM as an Eden AI model id: provider/model from Eden's "
+             "EU catalog, e.g. mistral/mistral-large-latest. Every id is served "
+             "through the Eden AI endpoint (never directly by the provider); "
+             "the litellm `openai/` compatibility prefix and the EU api_base "
              "are added automatically.",
     )
     # ── Governance upload (off by default — runs fully offline) ──
