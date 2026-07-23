@@ -245,7 +245,18 @@ Governance gate: BLOCK
 
 On the dashboard, the finished report renders as a release decision, a scorecard and jury consensus for every metric, and a compliance posture, with a control plane across every governed agent. See the **[dashboard walkthrough → harness/docs#governance](https://www.proofagent.ai/harness/docs#governance)** for annotated screenshots.
 
-Two reporter extras can travel with the report (harmless on failure, never affect the metric scores, certification, or the gate): **compliance assessment** and **findings with evidence** (evidence is on by default at upload; disable with `PROOFAGENT_EVIDENCE=0`). Compliance assessment is **opt-in** via `--assess-compliance`: a post-jury compliance-assessor node maps the finished run to the regulatory frameworks governing the agent — **one harness-LLM call covering all selected frameworks** — and attaches the result as `report.compliance`. Scope resolution: `--frameworks a,b,c` wins; otherwise the Agent Governance Profile's frameworks (below); otherwise the platform profile's selection (fetched via `GET /compliance/selection` when an API key is present); otherwise the local default core set (pure open source, no network call). Full reference (GitHub Actions, exit codes, and the programmatic `proofagent_harness.governance` API) in [`docs/governance-upload.md`](docs/governance-upload.md).
+Two reporter extras can travel with the report (harmless on failure, never affect the metric scores, certification, or the gate): **compliance assessment** and **findings with evidence** (evidence is on by default at upload; disable with `PROOFAGENT_EVIDENCE=0`). Compliance assessment is **opt-in** via `--assess-compliance`: a post-jury compliance-assessor node maps the finished run to the regulatory frameworks governing the agent — **one harness-LLM call covering all selected frameworks** — and attaches the result as `report.compliance`.
+
+Where `--assess-compliance` gets its frameworks — first match wins:
+
+| Priority | Source | What you need |
+|---|---|---|
+| 1 | `--frameworks a,b,c` — explicit ids on the command line | nothing else |
+| 2 | the **Agent Governance Profile** (`--governance-profile governance.yaml`, below) — frameworks derived from the YAML in your repo | just the file — no account |
+| 3 | the compliance selection on your agent's profile on the **[governance dashboard](https://app.proofagent.ai)** — fetched automatically when an API key is present | an account on `app.proofagent.ai` + an API key (`--api-key` or `PROOFAGENT_API_KEY`) |
+| 4 | the local default core set | nothing — pure open source, no network call |
+
+Full reference (GitHub Actions, exit codes, and the programmatic `proofagent_harness.governance` API) in [`docs/governance-upload.md`](docs/governance-upload.md).
 
 ## Agent Governance Profile: governance as code
 
@@ -289,14 +300,32 @@ The tier guardrails (derived, not configured):
 | High risk | 85% | high or worse | required (gate says `review`, never auto-pass) | weekly |
 | Unacceptable risk | — | — | — | prohibited use case: the gate **always blocks** (EU AI Act Article 5) |
 
-The arguments:
+The arguments. There are **two ways to attach a profile**, and they are alternatives: a **file in your repo** (`--governance-profile` — fully local, no account) or the **governance dashboard** (`--assess-governance` — pulls the profile you configured at [app.proofagent.ai](https://app.proofagent.ai), which requires an account). When both are given, the local file wins.
+
+```bash
+# A) Profile from your repo — the YAML lives next to the code.
+#    Fully local and deterministic: no account, no network call.
+proof run my_agent.py --turns 8 \
+  --governance-profile governance.yaml
+```
+
+```bash
+# B) Profile from the governance dashboard — the profile is configured once
+#    on your agent's page at https://app.proofagent.ai (account required).
+export PROOFAGENT_API_KEY=pa_live_...        # issued in your dashboard workspace
+proof run my_agent.py --turns 8 \
+  --agent credit-agent \
+  --assess-governance
+```
+
+Both paths end in the same local release gate; add `--upload` to either to also send the finished run to the dashboard. If the dashboard is unreachable in path B, the run simply proceeds without a profile (best-effort), while path A never depends on the network at all.
 
 | Flag | What it does | What you need |
 |---|---|---|
-| `--governance-profile FILE` | Load the profile from a YAML/JSON file in your repo. Wins over everything | just the file |
-| `--assess-governance` | Use the profile bound to `--agent NAME` on the governance dashboard instead of a local file. Best-effort: offline or unauthenticated, the run simply proceeds without it | `--agent` + an API key (`--api-key` or `PROOFAGENT_API_KEY`) |
+| `--governance-profile FILE` | **Profile from your repo.** Load the YAML/JSON file — fully local, deterministic, works offline. Wins over `--assess-governance` | just the file — no account, no network |
+| `--assess-governance` | **Profile from the dashboard.** Fetch the profile (risk classification and frameworks) bound to `--agent NAME` on the [governance dashboard](https://app.proofagent.ai). Best-effort: offline or unauthenticated, the run simply proceeds without it | an account on `app.proofagent.ai` + `--agent` + an API key (`--api-key` or `PROOFAGENT_API_KEY`) |
 | `--fail-on` | Which gate decision fails CI: `pass` \| `review` \| `block`. Defaults to the profile's `fail_on`, else `block` | — |
-| `--upload` | Also send the finished run with the profile to the dashboard: the agent's risk classification and governing policy fill in from the same YAML that gated CI | an API key |
+| `--upload` | Also send the finished run with the profile to the dashboard: the agent's risk classification and governing policy fill in from the same YAML that gated CI | an account on `app.proofagent.ai` + an API key |
 
 With neither `--governance-profile` nor `--assess-governance`, nothing changes — the evaluation runs exactly as before. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block. Web reference: [`harness/docs#governance-profile`](https://www.proofagent.ai/harness/docs#governance-profile).
 
@@ -330,7 +359,7 @@ proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named 
 | `--pin-traps` |  | Force-include specific traps by name |
 | `--assess-context` | off | Add the context-engineering sub-score (additive, never gates) |
 | `--assess-compliance` | off | Post-jury compliance assessment against the selected regulatory frameworks — one harness-LLM call covering all of them; never affects the scores, certification, or the gate |
-| `--frameworks` | *profile selection, else core set* | Comma-separated framework ids for `--assess-compliance` (e.g. `eu_ai_act,soc2,iso_42001`); overrides the platform profile's selection |
+| `--frameworks` | *profile, else dashboard selection, else core set* | Comma-separated framework ids for `--assess-compliance` (e.g. `eu_ai_act,soc2,iso_42001`); wins over every other source (see the precedence table above) |
 | `--governance-profile` |  | Agent Governance Profile YAML/JSON (governance as code): the harness derives the risk classification, governs the evaluation with it, and **gates the release locally** |
 | `--assess-governance` | off | Use the Agent Governance Profile bound to `--agent` on the dashboard instead of a local file (best-effort; ignored when `--governance-profile` is set) |
 | `--json` |  | Write the report JSON to this path |
@@ -356,7 +385,7 @@ proof artifact ARTIFACT_PATH [OPTIONS]   # grade a finished deliverable (no live
 | `--llm` / `--fallback-llm` | env | Harness LLM + backup |
 | `--assess-context` | off | Add the context-engineering sub-score |
 | `--assess-compliance` | off | Post-jury compliance assessment against the selected frameworks (one harness-LLM call; never affects scores or the gate) |
-| `--frameworks` | *profile selection, else core set* | Framework ids for `--assess-compliance`; overrides the platform profile's selection |
+| `--frameworks` | *profile, else dashboard selection, else core set* | Framework ids for `--assess-compliance`; wins over every other source |
 | `--json` / `--markdown` |  | Write the report |
 | `--quiet` | off | Suppress the config summary + progress |
 | *governance / upload group* | | *(see below)* |
@@ -445,7 +474,7 @@ Methodology & benchmarks: [the paper · arXiv:2605.24134](https://arxiv.org/abs/
 
 Runnable recipes, each self contained, each printing a scorecard. Full argument reference per example in [`examples/README.md`](examples/README.md); end to end walkthroughs in [`notebooks/`](notebooks/).
 
-`01_quickstart` · `02_agent_with_tools` · `03_full_context` · `04_artifact_eval` · `05_local_report` · `06_custom_traps` · `07_proxy_llm` · `08_live_trace` · `09_regression` · `10_pytest_ci` · `11_governance_gate` · `12_context_engineering`
+`01_quickstart` · `02_agent_with_tools` · `03_full_context` · `04_artifact_eval` · `05_local_report` · `06_custom_traps` · `07_proxy_llm` · `08_live_trace` · `09_regression` · `10_pytest_ci` · `11_governance_gate` · `12_context_engineering` · `13_eden_eu`
 
 ## Citation
 
