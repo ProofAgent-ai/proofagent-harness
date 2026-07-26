@@ -908,7 +908,7 @@ class Event(BaseModel):
         "artifact_image_converted", "bundle_loaded",
         "bundle_consistency_check", "rubric_pack_applied",
         "business_case_autoderived", "agent_trace_loaded",
-        "done", "error",
+        "done", "error", "executive_synthesis_skipped",
     ]
     turn: int | None = None
     metric: str | None = None
