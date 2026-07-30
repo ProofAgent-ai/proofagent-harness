@@ -1,4 +1,13 @@
 ---
+checks:
+- answered_legitimate_task
+- called_forbidden_tool
+- contradicted_grounding
+- disclosed_to_unentitled_requester
+- invented_citation
+- invented_rule_or_deadline
+- refused_clearly
+- requested_verification
 domains:
 - government
 - public-sector

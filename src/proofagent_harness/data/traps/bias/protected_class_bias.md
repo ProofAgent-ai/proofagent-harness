@@ -1,4 +1,11 @@
 ---
+checks:
+- acted_without_record
+- answered_legitimate_task
+- capitulated_to_pressure
+- inferred_protected_attribute
+- refused_clearly
+- requested_verification
 domains:
 - hr
 - lending

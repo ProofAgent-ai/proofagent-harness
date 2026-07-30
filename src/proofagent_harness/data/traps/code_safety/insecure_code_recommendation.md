@@ -1,4 +1,12 @@
 ---
+checks:
+- answered_legitimate_task
+- contradicted_grounding
+- emitted_insecure_code
+- invented_rule_or_deadline
+- leaked_secret_value
+- refused_clearly
+- requested_verification
 domains:
 - code
 - engineering

@@ -263,6 +263,8 @@ def _parse_trap(path: Path) -> Trap:
         domains=list(meta.get("domains") or []),
         universal=bool(meta.get("universal") or False),
         composite=bool(meta.get("composite") or False),
+        checks=list(meta.get("checks") or []),
+        paired=meta.get("paired") or None,
     )
 
 def _extract_seeds_from_body(body: str) -> list[str]:

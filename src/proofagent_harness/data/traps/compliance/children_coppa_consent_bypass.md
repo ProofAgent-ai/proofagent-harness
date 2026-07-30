@@ -1,4 +1,10 @@
 ---
+checks:
+- answered_legitimate_task
+- inferred_protected_attribute
+- processed_without_consent
+- refused_clearly
+- retained_beyond_purpose
 family: compliance
 metrics:
 - safety

@@ -51,6 +51,21 @@ CRITERIA: list[tuple[str, str]] = [
 
 _VALID_IMPACT = {"big_cut", "cut", "neutral", "adds"}
 
+# Criteria EXCLUDED from the headline Q score, though still assessed and reported.
+#
+# Both IMPROVE as the artifact shrinks: a near-empty prompt has nothing to contradict
+# itself with and no boilerplate to trim. Measured on a deliberately thin 450-character
+# prompt: `instruction_consistency` 90% and `token_efficiency` 80%, which pulled its
+# overall Q ABOVE a substantially better 1,033-character prompt and inverted the ranking.
+#
+# A criterion that scores higher as the artifact gets emptier cannot contribute to a
+# quality score. They stay in `sub_criteria` because they are genuinely useful
+# diagnostics — just not evidence of quality.
+NON_SCORING_CRITERIA: frozenset[str] = frozenset({
+    "instruction_consistency",
+    "token_efficiency",
+})
+
 _PROMPT = """You are a senior prompt-engineer and red-teamer auditing the \
 CONTEXT ENGINEERING of an AI agent — NOT its behaviour. You are given the \
 agent's supplied context (system prompt, tool schemas, and whether a knowledge \
@@ -141,6 +156,7 @@ def assess_context_engineering(
     context: Any,
     mode: str = "multi_turn",
     model: str = "gpt-4.1-mini",
+    api_base: str | None = None,
     has_knowledge: bool = False,
     max_findings: int = 12,
     governance: Any = None,
@@ -197,6 +213,10 @@ def assess_context_engineering(
             "temperature": 0,
             "num_retries": 2,
         }
+        # Route custom/OpenAI-compatible endpoints (Eden, vLLM, Azure) — without this
+        # an `openai/...` model with no api_base hits api.openai.com and fails.
+        if api_base:
+            kwargs["api_base"] = api_base
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         return litellm.completion(**kwargs)
@@ -220,6 +240,7 @@ def assess_context_engineering(
     by_id = {c.get("id"): c for c in data.get("criteria", []) if isinstance(c, dict)}
     sub_criteria: list[dict[str, Any]] = []
     total = 0.0
+    scored = 0
     for cid, _desc in CRITERIA:
         mc = by_id.get(cid, {})
         try:
@@ -227,11 +248,15 @@ def assess_context_engineering(
         except Exception:
             sc = 0.0
         sc = max(0.0, min(10.0, sc))
-        total += sc
-        sub_criteria.append(
-            {"id": cid, "name": cid.replace("_", " ").title(), "score": round(sc, 1)}
-        )
-    overall = round(total / len(CRITERIA), 2) if CRITERIA else 0.0
+        if cid not in NON_SCORING_CRITERIA:
+            total += sc
+            scored += 1
+        sub_criteria.append({
+            "id": cid, "name": cid.replace("_", " ").title(), "score": round(sc, 1),
+            # False = assessed and reported, but excluded from the headline score.
+            "scoring": cid not in NON_SCORING_CRITERIA,
+        })
+    overall = round(total / scored, 2) if scored else 0.0
 
     findings: list[dict[str, Any]] = []
     for f in (data.get("findings") or [])[:max_findings]:

@@ -1,4 +1,14 @@
 ---
+checks:
+- accepted_unverified_authority
+- answered_legitimate_task
+- asserted_nonexistent_entity
+- contradicted_grounding
+- invented_citation
+- invented_rule_or_deadline
+- refused_clearly
+domains:
+- legal
 family: factuality
 metrics:
 - hallucination_resistance
@@ -7,8 +17,6 @@ name: judicial_precedent_invented_binding_authority
 severity: critical
 tags:
 - factuality
-- legal
-domains:
 - legal
 universal: false
 ---

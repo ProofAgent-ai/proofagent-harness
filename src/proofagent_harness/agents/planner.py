@@ -109,9 +109,110 @@ _DOMAIN_KEYWORDS: list[tuple[str, list[str]]] = [
     ("red team", ["security"]),
 ]
 
+def _agent_tool_names(state: HarnessState) -> list[str]:
+    """Tool names the agent declares — its consequential-action surface."""
+    names: list[str] = []
+    for spec in (getattr(state.get("context"), "tools", None) or []):
+        if isinstance(spec, dict):
+            n = spec.get("name") or (spec.get("function") or {}).get("name")
+            if n:
+                names.append(str(n))
+    return names
+
+
+def _recommend_turns(state: HarnessState, domains: list[str]) -> tuple[int, list[str]]:
+    from proofagent_harness.scoring.turn_budget import recommend
+
+    return recommend(
+        governance_profile=state.get("governance_profile"),
+        frameworks=list(state.get("compliance_frameworks") or []),
+        q_weights=dict(state.get("q_weights") or {}),
+        agent_tools=_agent_tool_names(state),
+        domains=list(domains or []),
+        families_available=len({getattr(t, "family", "") for t in (state.get("traps") or [])}) or 11,
+    )
+
+
+def _describe_turns(recommended: int, selected: int, adaptive: bool) -> str:
+    from proofagent_harness.scoring.turn_budget import describe
+
+    return describe(recommended, selected, adaptive)
+
+
+def _plan_from_stored(state: HarnessState) -> list[TurnSpec] | None:
+    """Rebuild the plan from a stored transcript instead of re-planning it.
+
+    WHY THIS EXISTS. Follow-up allocation (`_weave_strategy`) is an LLM call, so the
+    same command does not plan the same trap-to-turn mapping twice. Re-planning before a
+    replay therefore drifted: measured on two runs of one command, turns 1-11 matched and
+    turn 12 did not, so the run replayed 11 turns and generated 4 — and the two reports
+    differed by 17.2 pp on hallucination_resistance and 10.2 pp on manipulation_resistance
+    while claiming to be the same evaluation.
+
+    The stored transcript IS the exam that ran, and each stored turn records its trap. So
+    on a replay the plan is READ rather than re-derived: no drift is possible, and the
+    planner's LLM calls are skipped entirely.
+
+    Returns None when there is nothing stored, or when any stored trap is no longer in
+    the pool — in which case the caller plans fresh and drops the reuse, because a
+    partly-replayed run reported as either replayed or fresh is a lie about the evidence.
+    """
+    cal = state.get("calibration")
+    stored = list(getattr(cal, "replay", None) or []) if cal is not None else []
+    if not stored:
+        return None
+
+    by_name = {t.name: t for t in (state.get("traps") or [])}
+    turns: list[TurnSpec] = []
+    for i, raw in enumerate(stored):
+        name = str((raw.get("trap_name") if isinstance(raw, dict)
+                    else getattr(raw, "trap_name", "")) or "")
+        trap = by_name.get(name)
+        if trap is None:
+            return None
+        turns.append(TurnSpec(turn=i + 1, trap=trap, target_behavior=trap.pass_criteria))
+    return turns
+
+
 async def planner_node(state: HarnessState) -> dict[str, Any]:
     """Planner — pick domain-relevant traps + customize for this run."""
     _emit(state, Event(type="plan_start"))
+
+    # A stored transcript's own trap sequence wins over re-planning — see
+    # _plan_from_stored on why re-deriving it drifts.
+    replayed_turns = _plan_from_stored(state)
+    if replayed_turns is not None:
+        # The recommendation is reported on a replay too. It describes the CONFIGURATION,
+        # not the plan, so a reader comparing a replay against a fresh run needs the same
+        # line on both — otherwise a short exam looks deliberate in one report and
+        # unremarked in the other.
+        rec, why = _recommend_turns(state, list(state.get("plan_domains") or []))
+        _emit(state, Event(
+            type="plan_turns",
+            detail=_describe_turns(rec, len(replayed_turns), False),
+            payload={"recommended": rec, "selected": len(replayed_turns),
+                     "adaptive": False, "reasons": why},
+        ))
+        _emit(state, Event(
+            type="plan_end",
+            detail=(
+                f"plan adopted from the stored transcript: {len(replayed_turns)} turns, "
+                f"no re-planning (drift impossible)"
+            ),
+            payload={"source": "stored", "turns": len(replayed_turns)},
+        ))
+        return {
+            "plan": EvaluationPlan(
+                turns=replayed_turns,
+                active_metrics=list(state.get("metrics") or CANONICAL_METRICS),
+                notes="adopted from stored transcript",
+            ),
+            "current_turn": 0,
+            "transcript": [],
+            "turn_count": len(replayed_turns),
+            "turns_recommended": rec,
+            "turns_reasons": why,
+        }
 
     metrics = state.get("metrics") or CANONICAL_METRICS
     n_turns = int(state.get("turn_count") or 8)
@@ -134,13 +235,37 @@ async def planner_node(state: HarnessState) -> dict[str, Any]:
             domains = [d for d in [*gov_domains, *domains] if not (d in _seen or _seen.add(d))]
             domain_method = f"governance:{gp.tier} + {domain_method}"
 
+    # TURN BUDGET. The planner is the only place that knows the whole picture — risk
+    # tier, declared frameworks, context exposure, tool surface, domains — so it is where
+    # a turn count can be reasoned about. `--adaptive-turns` adopts the recommendation;
+    # otherwise the user's number stands and the recommendation is reported beside it, so
+    # a short run is visibly a choice rather than an accident.
+    recommended, reasons = _recommend_turns(state, domains)
+    adaptive = bool(state.get("adaptive_turns"))
+    if adaptive and recommended != n_turns:
+        n_turns = recommended
+    _emit(state, Event(
+        type="plan_turns",
+        detail=_describe_turns(recommended, n_turns, adaptive),
+        payload={"recommended": recommended, "selected": n_turns,
+                 "adaptive": adaptive, "reasons": reasons},
+    ))
+
     index = state.get("trap_index")
     pool = (
         index.relevant_pool(domains)
         if index is not None and domains
         else state["traps"]
     )
-    base = _select_traps(pool, metrics, domains, n_turns, seed=state.get("seed"))
+    # Context weights (from context_assessor_node, which runs before this) tilt the
+    # ranking toward the families the supplied prompt does not defend. Empty when
+    # --assess-context is off, which leaves selection byte-identical.
+    base = _select_traps(
+        pool, metrics, domains, n_turns,
+        seed=state.get("seed"),
+        q_weights=dict(state.get("q_weights") or {}),
+        frameworks=list(state.get("compliance_frameworks") or []),
+    )
 
     extras: list[Trap] = []
     if state.get("role") and state.get("goal"):
@@ -268,6 +393,12 @@ async def planner_node(state: HarnessState) -> dict[str, Any]:
         "transcript": [],
         "plan_domains": domains,
         "plan_trap_summary": trap_summary,
+        # The exam size, and what it WOULD have been. Both, always — a reader comparing
+        # two reports has to be able to see that one ran a shorter exam than the
+        # configuration called for.
+        "turn_count": n_turns,
+        "turns_recommended": recommended,
+        "turns_reasons": reasons,
     }
 
 _DOMAIN_VOCAB = (
@@ -400,6 +531,81 @@ def _is_composite(t: Trap) -> bool:
     blob = (t.name + " " + " ".join(t.tags or [])).lower()
     return any(k in blob for k in _HARD_KEYWORDS)
 
+# How much an undefended behaviour can lift a trap's rank. Deliberately smaller than the
+# domain boost (+6..7): context exposure should break ties toward the weak area, not
+# override domain relevance and drag a legal-citation probe into a refund bot's exam.
+CONTEXT_BONUS_MAX = 4.0
+
+
+FRAMEWORK_BONUS = 5.0
+
+
+def framework_behaviours(frameworks: list[str] | None) -> set[str]:
+    """Behaviours the DECLARED frameworks care about.
+
+    Reuses the join the compliance axis already runs, in reverse:
+
+        framework -> controls -> behaviours
+
+    Without this, `--frameworks hipaa` steered nothing: the run could skip every
+    PHI trap and then report those controls `not_evaluated`. Declaring what you must
+    comply with should decide what gets tested.
+    """
+    if not frameworks:
+        return set()
+    from proofagent_harness.checks import load_control_behaviours
+
+    coverage = load_control_behaviours()
+    out: set[str] = set()
+    for fid in frameworks:
+        for behaviours in (coverage.get(fid) or {}).values():
+            out.update(behaviours or [])
+    return out
+
+
+def _framework_bonus(t: Trap, wanted: set[str]) -> float:
+    """Rank lift for a trap that can produce evidence a declared framework needs.
+
+    Slightly below the domain boost so a framework cannot drag an off-domain trap into
+    the exam on its own, but above the context bonus: an explicit `--frameworks` is a
+    stated obligation, where context exposure is an inference.
+    """
+    if not wanted or not getattr(t, "checks", None):
+        return 0.0
+    from proofagent_harness.checks import checks_for
+
+    probed = {c.probes for c in checks_for(t) if c.probes}
+    if not probed:
+        return 0.0
+    hit = len(probed & wanted)
+    if not hit:
+        return 0.0
+    # Saturating: a trap covering three needed behaviours is better than one, but not
+    # three times better, or a single broad trap would crowd out the rest of the exam.
+    return round(FRAMEWORK_BONUS * min(1.0, hit / 3.0), 4)
+
+
+def _context_bonus(t: Trap, q_weights: dict[str, float] | None) -> float:
+    """Rank lift for a trap probing behaviours the supplied context does not defend.
+
+    Reads the WORST multiplier among the behaviours this trap's checks probe, so a trap
+    that touches one badly-exposed area ranks up even if its other behaviours are
+    covered. Returns 0.0 when the context was not assessed, which leaves selection
+    byte-identical to a run without --assess-context.
+    """
+    if not q_weights or not getattr(t, "checks", None):
+        return 0.0
+    from proofagent_harness.checks import checks_for
+    from proofagent_harness.scoring.q_weights import NEUTRAL, weight_for
+
+    worst = NEUTRAL
+    for check in checks_for(t):
+        if check.probes:
+            worst = max(worst, weight_for(check.probes, q_weights))
+    exposure = (worst - NEUTRAL) / max(NEUTRAL, 1.0)      # 0.0 .. 1.0
+    return round(CONTEXT_BONUS_MAX * exposure, 4)
+
+
 def _difficulty(t: Trap) -> float:
     """How hard / sophisticated this trap is. Drives selection toward the most
     challenging attacks. Three signals: severity, sustained multi-turn pressure
@@ -414,6 +620,12 @@ def _difficulty(t: Trap) -> float:
         d += 3.0  # multi-step / chained — the hardest to survive
     return d
 
+# Share of each run drawn from the deterministic core pack. The remainder is
+# seed-varied, so a run is comparable to its peers while still rotating enough that an
+# operator cannot tune an agent to a fixed trap sequence.
+CORE_PACK_SHARE = 0.6
+
+
 def _select_traps(
     traps: list[Trap],
     metrics: list[str],
@@ -422,6 +634,8 @@ def _select_traps(
     min_critical_share: float = MIN_CRITICAL_SHARE,
     min_factuality_traps: int = MIN_FACTUALITY_TRAPS,
     seed: int | None = None,
+    q_weights: dict[str, float] | None = None,
+    frameworks: list[str] | None = None,
 ) -> list[Trap]:
     """Pick `n` traps balancing critical-share + metric coverage + domain relevance.
 
@@ -475,11 +689,30 @@ def _select_traps(
         if t.universal:
             s += 3.0
         s += _difficulty(t)        # composite + severity + seed-count
-        s += rng.random() * 0.25   # small tie-breaker — difficulty dominates
+        # CONTEXT-TARGETED. Traps probing behaviours the supplied context does not
+        # defend float up, so the exam spends its turns where the prompt is weakest.
+        # Observed failure mode without this: a run reported `injection_hardening 30%`
+        # while spending 3 of 8 turns on factuality and never firing a single
+        # prompt-injection trap — Q named a weakness E was never given a chance to see.
+        # Deterministic (arithmetic over Q's stable sub-scores) and capped, so it tilts
+        # the ranking without overriding the domain and severity gradients above.
+        s += _context_bonus(t, q_weights)
+        # Declared frameworks are an OBLIGATION, so they outrank inferred exposure.
+        s += _framework_bonus(t, wanted_behaviours)
         return s
 
+    # STANDARD EXAM. The ranking is deterministic — no jitter, ties broken by name — so
+    # the SET of traps is identical on every run regardless of seed. Previously a small
+    # per-seed jitter reordered the ranking, which swapped 2-3 of 8 traps between runs
+    # (measured); a different exam then reads as an unstable score, and three runs of one
+    # agent produced 20, 61 and 75. The seed still rotates the ORDER of the non-core tail
+    # below, so an operator cannot tune to a fixed trap-at-turn-N pattern.
+    #
+    # Every existing floor (critical share, metric coverage, domain relevance) runs
+    # against this ranking untouched: the exam is standardised, not bypassed.
+    wanted_behaviours = framework_behaviours(frameworks)
     score_map = {t.name: _score_one(t) for t in traps}
-    scored = sorted(traps, key=lambda t: score_map[t.name], reverse=True)
+    scored = sorted(traps, key=lambda t: (-score_map[t.name], t.name))
 
     chosen: list[Trap] = []
     seen: set[str] = set()
@@ -595,11 +828,13 @@ def _select_traps(
         if len(chosen) < n:
             _take(scored, n - len(chosen))
 
-    # Clamp (floors are first, so this preserves them) + reproducible order
-    # rotation so trap-at-turn-N isn't a fixed pattern across runs.
+    # The core keeps its deterministic position so it is comparable across runs; only
+    # the tail rotates, which is enough to defeat trap-at-turn-N over-fitting.
     final = chosen[:n]
-    rng.shuffle(final)
-    return final
+    cut = min(len(final), max(1, round(len(final) * CORE_PACK_SHARE)))
+    head, tail = final[:cut], final[cut:]
+    rng.shuffle(tail)
+    return head + tail
 
 async def _generate_custom_traps(state: HarnessState, n: int) -> list[Trap]:
     """Ask the LLM for n custom traps tailored to this agent's role + goal."""

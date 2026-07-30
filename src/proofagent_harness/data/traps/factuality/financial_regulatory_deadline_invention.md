@@ -1,4 +1,16 @@
 ---
+checks:
+- answered_legitimate_task
+- asserted_nonexistent_entity
+- capitulated_to_pressure
+- contradicted_grounding
+- invented_citation
+- invented_rule_or_deadline
+- refused_clearly
+domains:
+- finance
+- accounting
+- public-company
 family: factuality
 metrics:
 - hallucination_resistance
@@ -9,10 +21,6 @@ tags:
 - factuality
 - finance
 - regulatory
-domains:
-- finance
-- accounting
-- public-company
 universal: false
 ---
 

@@ -1,4 +1,13 @@
 ---
+checks:
+- answered_legitimate_task
+- contradicted_grounding
+- gave_out_of_remit_advice
+- invented_citation
+- invented_rule_or_deadline
+- processed_without_consent
+- refused_clearly
+- retained_beyond_purpose
 domains:
 - legal
 - privacy

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
+from rich import box
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -33,12 +35,24 @@ _CERT_STYLES = {
 }
 
 
+def pct(score_out_of_10: float | None) -> str:
+    """Render a 0-10 score as a percentage — the ONE display convention.
+
+    Every user-facing number reads out of 100 (final score, per-metric, context
+    engineering, compliance, PAI), so nothing has to be mentally rescaled and a
+    metric can be compared to an axis at a glance. Display only: the stored values
+    stay on their native 0-10 scale, which is the report/upload contract."""
+    if score_out_of_10 is None:
+        return "—"
+    return f"{round(float(score_out_of_10) * 10)}%"
+
+
 def _score_display(report: Report) -> str:
     """The score string — '—' for an INCOMPLETE run (nothing was scored), so a
     placeholder 0.0 is never shown as if it were an agent grade."""
     if report.certification == Certification.INCOMPLETE:
         return "— (not scored)"
-    return f"{round(report.final_score * 10)}%"
+    return pct(report.final_score)
 
 
 def _finding_body_lines(f: Any) -> list[str]:
@@ -65,6 +79,105 @@ def _finding_body_lines(f: Any) -> list[str]:
         out.append("- **Fix:**")
         out.extend(f"    - {fx}" for fx in fixes)
     return out
+
+_AXIS_ROWS = (
+    ("evaluation", "E"),
+    ("context", "Q"),
+    ("compliance", "C"),
+    ("governance", "G"),
+)
+
+
+def render_axes(report: Report) -> Any | None:
+    """One table over every CONFIGURED axis: the axis score, then its components.
+
+    Numbers only — an axis with no evidence is omitted rather than shown as zero, and
+    the per-finding narrative stays in the markdown report. Returns None when the run
+    carries no index (nothing to decompose)."""
+    from proofagent_harness.scoring.pai import severity_for
+
+    pai = getattr(report, "pai", None) or {}
+    axes = {a.get("key"): a for a in (pai.get("axes") or [])}
+    if not axes:
+        return None
+
+    # CONFIDENCE IS A REPORTED COLUMN, not an internal number. Measured across 15 runs in
+    # three domains, it predicted reproducibility every time: metrics at >=0.95 replayed
+    # byte-exact, while those at 0.82-0.90 moved 2.7 to 9.2 pp on an IDENTICAL transcript.
+    # It is the per-metric answer to "how much should I trust this number", so a reader
+    # comparing two runs needs it beside the score rather than buried in the JSON.
+    confidence = dict(getattr(report, "confidence", None) or {})
+
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold", pad_edge=False)
+    table.add_column("", width=2)
+    table.add_column("Axis / metric", no_wrap=True)
+    table.add_column("Score", justify="right", width=7)
+    table.add_column("Severity", justify="left", width=9)
+    table.add_column("Conf.", justify="right", width=6)
+
+    first = True
+    for key, sym in _AXIS_ROWS:
+        a = axes.get(key)
+        if a is None or not a.get("present"):
+            continue
+        if not first:
+            table.add_row("", "", "", "", "", "")
+        first = False
+        asev = severity_for(a.get("score"))
+        # Axis-level confidence is the WORST of its metrics: one unstable metric is
+        # enough to make the axis unstable, so an average would hide it.
+        axis_conf = min(confidence.values(), default=None) if key == "evaluation" else None
+        table.add_row(
+            Text(sym, style="bold cyan"),
+            Text(str(a.get("label") or key), style="bold"),
+            Text(_pct100(a.get("score")), style="bold"),
+            Text(asev, style=f"bold {_SEV_STYLES.get(_sev_enum(asev), '')}"),
+            Text(_conf(axis_conf), style=f"bold {_conf_style(axis_conf)}"),
+        )
+        for s in (a.get("sub") or []):
+            sev = str(s.get("severity") or "")
+            c = confidence.get(_metric_key(s.get("name", ""))) if key == "evaluation" else None
+            table.add_row(
+                "",
+                f"  {s.get('name', '')}",
+                _pct100(s.get("score")) if s.get("score") is not None else s.get("coverage", "-"),
+                Text(sev, style=_SEV_STYLES.get(_sev_enum(sev), "")) if sev else "",
+                Text(_conf(c), style=_conf_style(c)),
+            )
+    return table
+
+
+def _metric_key(display_name: str) -> str:
+    """"Task Success" -> "task_success", so a rendered row can find its confidence."""
+    return display_name.strip().lower().replace(" ", "_")
+
+
+def _conf(v: Any) -> str:
+    return f"{float(v):.2f}" if isinstance(v, (int, float)) else ""
+
+
+def _conf_style(v: Any) -> str:
+    """Flag the metrics whose numbers moved on a replay in the validation runs.
+
+    The 0.95 boundary is where the measured behaviour changed, not a guess: above it
+    every metric reproduced exactly; below it every one moved.
+    """
+    if not isinstance(v, (int, float)):
+        return ""
+    if v >= 0.95:
+        return "green"
+    return "yellow" if v >= 0.85 else "red"
+
+
+def _pct100(v: Any) -> str:
+    return f"{float(v):.0f}%" if isinstance(v, (int, float)) else "-"
+
+
+def _sev_enum(name: str) -> Any:
+    with contextlib.suppress(Exception):
+        return Severity(name)
+    return None
+
 
 def render_rich(report: Report) -> Any:
     """Build a Rich renderable for terminal printing."""
@@ -110,8 +223,8 @@ def render_rich(report: Report) -> Any:
         conf = report.confidence.get(metric, 0.0)
         table.add_row(
             metric.replace("_", " ").title(),
-            f"{score:.1f} / 10",
-            f"{conf:.2f}",
+            pct(score),
+            f"{round(conf * 100)}%",
             Text(sev.value, style=_SEV_STYLES.get(sev, "")),
         )
 
@@ -120,38 +233,84 @@ def render_rich(report: Report) -> Any:
         style=_CERT_STYLES.get(report.certification, "white"),
     )
 
+    # TOTAL tokens = the harness LLM's own spend PLUS the agent under test's, when the
+    # agent exposed usage. Reporting only the harness half understates what the run cost.
+    _agent_tokens = 0
+    _perf = getattr(report, "performance", None) or {}
+    if isinstance(_perf, dict):
+        _agent_tokens = int((_perf.get("tokens") or {}).get("total_tokens") or 0)
+    _total_tokens = int(report.tokens_used or 0) + _agent_tokens
+
     cert_line = Text()
-    cert_line.append(f"Final score: {_score_display(report)}    ", style="bold")
     cert_line.append("Certification: ", style="bold")
     cert_line.append(cert_text)
-    cert_line.append(f"    Tokens: {report.tokens_used:,}", style="dim")
+    cert_line.append(f"    Tokens: {_total_tokens:,}", style="dim")
+    if _agent_tokens:
+        cert_line.append(
+            f" (harness {report.tokens_used:,} · agent {_agent_tokens:,})", style="dim",
+        )
     # Harness-LLM spend — the number a corporate buyer asks about first.
     _harness_cost = float(report.primary_cost_usd or 0.0) + float(report.fallback_cost_usd or 0.0)
     if _harness_cost > 0:
         cert_line.append(f"    Harness LLM cost: ${_harness_cost:.4f}", style="dim")
 
-    blocks: list[Any] = [table, Text(""), cert_line]
+    # The axis decomposition SUPERSEDES the flat scorecard when the run carries an
+    # index: E already reports the final score, so showing both is duplication.
+    # Falls back to the scorecard for runs with no index (e.g. artifact mode).
+    _axis_table = render_axes(report)
+    blocks: list[Any] = [_axis_table or table, Text(""), cert_line]
 
-    sev_line = _build_severity_summary_line(report)
-    if sev_line is not None:
-        blocks.append(sev_line)
+    # ProofAgent Index — one readiness line, so the Python API sees the same verdict
+    # the CLI prints. Compact by design: the full decomposition is on report.pai and
+    # in the Markdown report.
+    _pai = getattr(report, "pai", None) or {}
+    if isinstance(_pai, dict) and _pai.get("score") is not None:
+        _tone = {"good": "green", "warn": "yellow", "bad": "red"}.get(_pai.get("tone"), "white")
+        _vcolor = "red" if (_pai.get("blocked") or _pai.get("readiness") == "not_ready") else (
+            "yellow" if _pai.get("readiness") in ("indeterminate", "ready_with_caveats")
+            else "green"
+        )
+        pai_line = Text()
+        pai_line.append("PAI", style="bold")
+        pai_line.append(" (ProofAgent Governance Readiness Index)  ", style="dim")
+        _m = _pai.get("margin")
+        _sc = f"{_pai['score']} +/- {_m}" if _m else f"{_pai['score']}"
+        pai_line.append(f"{_sc} / 100   ", style=f"bold {_tone}")
+        pai_line.append(f"{_pai.get('grade', '')} · {_pai.get('band', '')}   ", style=_tone)
+        pai_line.append(str(_pai.get("verdict", "")), style=f"bold {_vcolor}")
+        pai_line.append(f"   ({_pai.get('completeness', '')})", style="dim")
+        blocks.append(pai_line)
+        # Say WHAT capped the score, not just that it was capped. `reasons` mixes hard
+        # blocks with a below-bar gate decision and a withheld compliance axis; read as a
+        # flat list beside "BLOCKED" they all look responsible, and the governance line in
+        # particular invites the wrong conclusion \u2014 a strict profile lowers G and is
+        # surfaced, but never caps.
+        _caps = [r for r in (_pai.get("cap_reasons") or []) if r]
+        if _pai.get("blocked") and _pai.get("raw_score") != _pai.get("score"):
+            _why = ("; ".join(c.rstrip(".") for c in _caps) if _caps
+                    else "hard block (reason not recorded)")
+            blocks.append(Text(
+                f"  uncapped {_pai.get('raw_score')} \u2192 capped to {_pai.get('score')} "
+                f"by: {_why}", style="dim"))
+        for _r in (_pai.get("reasons") or []):
+            _is_cap = _r in _caps
+            blocks.append(Text(
+                f"  \u2022 {_r}" + ("" if _is_cap else "  (does not cap)"),
+                style="yellow" if _is_cap else "dim"))
+
+    if _axis_table is None:
+        sev_line = _build_severity_summary_line(report)
+        if sev_line is not None:
+            blocks.append(sev_line)
+        next_step = _next_step_hint(report)
+        if next_step is not None:
+            blocks.append(Text(""))
+            blocks.append(Text(f"Next: {next_step}", style="bold cyan"))
 
     if report.warnings:
         blocks.append(Text(""))
-        blocks.append(
-            Text(
-                f"Warnings ({len(report.warnings)}) — see markdown report for full detail + fix snippets:",
-                style="bold yellow",
-            )
-        )
         for w in report.warnings:
-            first_line = _first_sentence(w)
-            blocks.append(Text(f"  • {first_line}", style="yellow"))
-
-    next_step = _next_step_hint(report)
-    if next_step is not None:
-        blocks.append(Text(""))
-        blocks.append(Text(f"Next: {next_step}", style="bold cyan"))
+            blocks.append(Text(f"  ! {_first_sentence(w)}", style="yellow"))
 
     return Panel(
         Group(*blocks),
@@ -255,6 +414,43 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {w}")
         lines.append("")
 
+    # ── ProofAgent Index (PAI) — the readiness verdict over all four axes ──
+    _pai = getattr(report, "pai", None) or {}
+    if isinstance(_pai, dict) and _pai.get("score") is not None:
+        _m = _pai.get("margin")
+        _shown = f"{_pai.get('score')} ± {_m}" if _m else f"{_pai.get('score')}"
+        lines.append(
+            f"## PAI — ProofAgent Governance Readiness Index — {_shown}/100 "
+            f"({_pai.get('grade', '')} · {_pai.get('band', '')})\n"
+        )
+        lines.append(f"**Verdict:** `{_pai.get('verdict', '')}`  ")
+        lines.append(f"**Completeness:** `{_pai.get('completeness', '')}`  ")
+        _caps = [r for r in (_pai.get("cap_reasons") or []) if r]
+        if _pai.get("blocked") and _pai.get("raw_score") != _pai.get("score"):
+            _why = ("; ".join(c.rstrip(".") for c in _caps) if _caps
+                    else "hard block (reason not recorded)")
+            lines.append(
+                f"**Uncapped (PAI_raw):** `{_pai.get('raw_score')}` — capped to "
+                f"`{_pai.get('score')}` by: {_why}  "
+            )
+        lines.append("")
+        lines.append("| Axis | Score | Weight |")
+        lines.append("|---|---|---|")
+        for a in _pai.get("axes") or []:
+            # Axes are already 0-100, so they render as a percentage like every
+            # other score in this report.
+            _sc = f"{a.get('score')}%" if a.get("present") else "not measured"
+            _weak = "  ← weakest" if a.get("key") == _pai.get("weakest_axis") else ""
+            lines.append(
+                f"| {a.get('symbol', '')} — {a.get('label', '')} | {_sc}{_weak} "
+                f"| {a.get('weight')} |"
+            )
+        lines.append("")
+        for r in _pai.get("reasons") or []:
+            lines.append(f"- {r}" + ("" if r in _caps else " _(does not cap the index)_"))
+        if _pai.get("reasons"):
+            lines.append("")
+
     # ── Compliance mapping (reporter-generated) ──────────────────────
     _comp = getattr(report, "compliance", None) or {}
     _fws = _comp.get("frameworks") if isinstance(_comp, dict) else None
@@ -343,7 +539,7 @@ def render_markdown(report: Report) -> str:
         sev = report.severity.get(metric, Severity.PASS).value
         conf = report.confidence.get(metric, 0.0)
         lines.append(
-            f"| {pretty} | {round(score * 10)}% | {conf:.2f} | {sev} |"
+            f"| {pretty} | {pct(score)} | {round(conf * 100)}% | {sev} |"
         )
     lines.append("")
 

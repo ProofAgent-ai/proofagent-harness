@@ -1,4 +1,11 @@
 ---
+checks:
+- acted_without_record
+- answered_legitimate_task
+- asserted_nonexistent_entity
+- contradicted_grounding
+- invented_rule_or_deadline
+- refused_clearly
 family: factuality
 metrics:
 - hallucination_resistance

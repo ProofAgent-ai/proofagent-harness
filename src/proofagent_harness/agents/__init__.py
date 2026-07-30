@@ -3,18 +3,22 @@
 from proofagent_harness.agents.compliance_assessor import compliance_assessor_node
 from proofagent_harness.agents.conductor import conductor_node, should_continue_conducting
 from proofagent_harness.agents.consensus import consensus_node, should_revote
+from proofagent_harness.agents.context_assessor import context_assessor_node
 from proofagent_harness.agents.juror import jury_round_one_node, jury_round_two_node
 from proofagent_harness.agents.planner import planner_node
+from proofagent_harness.agents.policy_verifier import verify_actions
 from proofagent_harness.agents.reporter import reporter_node
 
 __all__ = [
     "compliance_assessor_node",
     "conductor_node",
     "consensus_node",
+    "context_assessor_node",
     "jury_round_one_node",
     "jury_round_two_node",
     "planner_node",
     "reporter_node",
     "should_continue_conducting",
     "should_revote",
+    "verify_actions",
 ]

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -641,6 +642,32 @@ def _safe_dict(resp: Any) -> dict[str, Any]:
     except Exception:
         return {}
 
+# Scans escapes in ONE pass: a valid escape (group 1 set) or a bare backslash.
+#
+# The alternation matters. A negative lookahead alone — `\\(?!["\\/bfnrt]|u[0-9a-f]{4})`
+# — mis-handles a correctly escaped backslash: it skips the first `\` of `\\y`, then the
+# scanner resumes on the SECOND `\`, sees `y` after it, and doubles it, turning valid
+# `\\y` into invalid `\\\y`. Matching the whole valid pair consumes both characters so
+# the second can never be re-examined.
+_ESCAPE_SCAN = re.compile(r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\')
+
+
+def _repair_escapes(s: str) -> str:
+    """Double any backslash that would otherwise be an invalid JSON escape.
+
+    Models asked to quote text VERBATIM copy a backslash straight into a JSON string,
+    and a backslash that does not begin a valid escape is fatal to the parser. Measured
+    on a real run: 6 of the first ~36 juror calls died this way, each burning a fallback
+    to a larger, pricier model — which also meant part of the scoring was done by a
+    different model than the rest, quietly undermining run-to-run comparability.
+
+    Deliberately narrow: a correctly escaped payload is returned byte-for-byte
+    unchanged, and a truncated or otherwise malformed reply still fails to parse — a
+    repair that guessed would turn a failed call into a silently wrong result.
+    """
+    return _ESCAPE_SCAN.sub(lambda m: m.group(0) if m.group(1) else "\\\\", s)
+
+
 def _parse_json_loose(text: str) -> dict[str, Any]:
     """Parse JSON from a model reply, tolerating markdown fences and stray prose."""
     s = text.strip()
@@ -656,7 +683,12 @@ def _parse_json_loose(text: str) -> dict[str, Any]:
         end = s.rfind("}")
         if start != -1 and end != -1 and end > start:
             s = s[start : end + 1]
-    return json.loads(s)
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # One repair attempt before giving up. Falling back to another model to fix a
+        # stray backslash costs money and splits the run across two scorers.
+        return json.loads(_repair_escapes(s))
 
 def default_llm() -> LLM:
     """Return a sensible default LLM, picking up provider keys from env."""

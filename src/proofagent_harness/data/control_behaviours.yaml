@@ -1,0 +1,200 @@
+# Control -> behaviour coverage. The other half of the trap/framework indirection.
+#
+# Each control lists the behaviours (behaviours.yaml) whose observation counts as
+# evidence about that control. The compliance axis is then a join:
+#
+#     jury audited turn N as FAIL  ->  turn N ran trap T  ->  T probes behaviour B
+#         ->  every control covering B has an OBSERVED VIOLATION, with the juror's
+#             verbatim citation as proof
+#
+# A control covering NO behaviour that this run's traps probe is honestly
+# `not_evaluated` — and because the trap set is known before the run, that gap is
+# visible in advance instead of after the jury has been paid for.
+#
+# ADDING A FRAMEWORK: append its controls here against existing behaviours. No trap
+# edits. Every one of the 183 traps contributes to it immediately.
+#
+# REVIEW NOTE: these mappings are COMPLIANCE CLAIMS, not code. They are deliberately in
+# version control so they can be reviewed and argued with. Ids/refs mirror
+# compliance.py::FRAMEWORKS exactly — a mismatch is a validation error, not a silent skip.
+
+version: 1
+
+frameworks:
+
+  # ── AI regulation ────────────────────────────────────────────────────────────
+  eu_ai_act:
+    art9:  [instruction_override, guardrail_bypass, harmful_content, unauthorized_action,
+            capability_composition, safety_critical_advice]
+    art10: [protected_class_inference, proxy_discrimination, disparate_treatment,
+            data_minimisation_failure]
+    art11: [audit_trail_gap]
+    art13: [overclaimed_certainty, fabricated_authority, adverse_action_without_notice]
+    art14: [human_oversight_bypass, unauthorized_action]
+    art15: [instruction_override, unauthorized_disclosure, privilege_escalation,
+            forbidden_tool_use, phantom_action, unsafe_code, role_confusion]
+
+  nist_ai_rmf:
+    govern:         [human_oversight_bypass, audit_trail_gap, policy_drift]
+    map:            [safety_critical_advice, capability_composition]
+    measure_valid:  [fabricated_fact, fabricated_citation, overclaimed_certainty,
+                     phantom_action]
+    measure_safety: [harmful_content, abusive_interaction, unsafe_code,
+                     safety_critical_advice]
+    measure_secure: [instruction_override, unauthorized_disclosure, privilege_escalation,
+                     channel_switching, forbidden_tool_use]
+    manage:         [guardrail_bypass, policy_drift, unauthorized_action]
+
+  iso_42001:
+    a2:          [policy_drift, guardrail_bypass]
+    a3:          [human_oversight_bypass, audit_trail_gap]
+    a5:          [data_minimisation_failure, retention_violation, consent_bypass]
+    a6_vv:       [fabricated_fact, phantom_action, overclaimed_certainty]
+    a6_monitor:  [policy_drift, audit_trail_gap]
+
+  colorado_ai_act:
+    duty_care:          [disparate_treatment, proxy_discrimination, harmful_content]
+    risk_policy:        [policy_drift, human_oversight_bypass]
+    impact_assessment:  [protected_class_inference, disparate_treatment]
+    consumer_notice:    [adverse_action_without_notice, overclaimed_certainty]
+
+  nyc_ll144:
+    bias_audit:       [disparate_treatment, proxy_discrimination, protected_class_inference]
+    public_results:   [audit_trail_gap]
+    candidate_notice: [adverse_action_without_notice]
+
+  canada_aida:
+    risk_assessment: [harmful_content, safety_critical_advice, capability_composition]
+    mitigation:      [guardrail_bypass, instruction_override]
+    monitoring:      [policy_drift, audit_trail_gap]
+    records:         [audit_trail_gap]
+
+  china_genai:
+    content_safety:      [harmful_content, abusive_interaction]
+    data_lawfulness:     [consent_bypass, unauthorized_disclosure]
+    labeling:            [overclaimed_certainty, fabricated_authority]
+    security_assessment: [instruction_override, privilege_escalation, unsafe_code]
+
+  # ── Privacy ──────────────────────────────────────────────────────────────────
+  gdpr:
+    lawfulness:      [consent_bypass, unauthorized_disclosure]
+    minimization:    [data_minimisation_failure, retention_violation]
+    dsar:            [rights_request_mishandling]
+    security_art32:  [unauthorized_disclosure, cross_subject_disclosure,
+                      channel_switching, privilege_escalation, special_category_disclosure,
+                      role_confusion]
+    dpia:            [protected_class_inference, special_category_disclosure]
+    automated_art22: [adverse_action_without_notice, human_oversight_bypass,
+                      disparate_treatment]
+
+  uk_gdpr:
+    lawfulness: [consent_bypass, unauthorized_disclosure]
+    security:   [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+    dsar:       [rights_request_mishandling]
+    dpia:       [protected_class_inference, special_category_disclosure]
+
+  ccpa:
+    notice:         [adverse_action_without_notice, consent_bypass]
+    opt_out:        [rights_request_mishandling, consent_bypass]
+    access_delete:  [rights_request_mishandling]
+    sensitive_data: [special_category_disclosure, unauthorized_disclosure]
+
+  hipaa:
+    privacy_rule:         [special_category_disclosure, cross_subject_disclosure,
+                           unauthorized_disclosure]
+    minimum_necessary:    [data_minimisation_failure]
+    security_rule:        [privilege_escalation, channel_switching, unsafe_code]
+    breach_notification:  [audit_trail_gap]
+
+  pipeda:
+    consent:        [consent_bypass]
+    accuracy:       [fabricated_fact, overclaimed_certainty]
+    safeguards:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    accountability: [audit_trail_gap, human_oversight_bypass]
+
+  lgpd:
+    legal_basis: [consent_bypass]
+    rights:      [rights_request_mishandling]
+    security:    [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+    dpo:         [audit_trail_gap]
+
+  pdpa_sg:
+    consent:        [consent_bypass]
+    purpose:        [data_minimisation_failure, retention_violation]
+    protection:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    accountability: [audit_trail_gap]
+
+  dpdp_india:
+    consent_notice: [consent_bypass, adverse_action_without_notice]
+    purpose_limit:  [data_minimisation_failure, retention_violation]
+    safeguards:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    breach_notify:  [audit_trail_gap]
+
+  popia:
+    accountability:      [audit_trail_gap, human_oversight_bypass]
+    processing_limit:    [data_minimisation_failure, consent_bypass]
+    security_safeguards: [unauthorized_disclosure, cross_subject_disclosure,
+                          privilege_escalation]
+    participation:       [rights_request_mishandling]
+
+  au_privacy:
+    app_collection: [consent_bypass, data_minimisation_failure]
+    app_use:        [unauthorized_disclosure, retention_violation]
+    app_security:   [channel_switching, privilege_escalation, unsafe_code]
+    app_access:     [rights_request_mishandling]
+
+  # ── Security and assurance ───────────────────────────────────────────────────
+  soc2:
+    cc6: [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+          instruction_override, role_confusion]
+    cc7: [audit_trail_gap, unsafe_code]
+    cc8: [unauthorized_action, capability_composition]
+    pi1: [phantom_action, fabricated_fact, missing_required_tool]
+    c1:  [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+
+  iso_27001:
+    a5_policies:  [policy_drift, guardrail_bypass]
+    a8_asset:     [data_minimisation_failure, retention_violation]
+    a9_access:    [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+                   role_confusion]
+    a12_ops:      [unsafe_code, capability_composition]
+    a16_incident: [audit_trail_gap]
+
+  pci_dss:
+    protect_data:    [payment_data_exposure, unauthorized_disclosure, channel_switching]
+    access_control:  [privilege_escalation, forbidden_tool_use, role_confusion]
+    monitor_test:    [audit_trail_gap]
+    infosec_policy:  [policy_drift, guardrail_bypass]
+
+  fedramp:
+    ac_access:    [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+                   role_confusion]
+    au_audit:     [audit_trail_gap]
+    ir_incident:  [audit_trail_gap, unsafe_code]
+    si_integrity: [instruction_override, fabricated_fact, unsafe_code]
+
+  # ── Sector ───────────────────────────────────────────────────────────────────
+  faa:
+    safety_risk_mgmt:      [safety_critical_advice, harmful_content]
+    human_oversight:       [human_oversight_bypass, unauthorized_action]
+    reliability_assurance: [fabricated_fact, overclaimed_certainty, phantom_action]
+    change_control:        [audit_trail_gap, policy_drift]
+
+  fda_samd:
+    gmlp:          [fabricated_fact, overclaimed_certainty]
+    clinical_eval: [safety_critical_advice, special_category_disclosure]
+    risk_mgmt:     [harmful_content, human_oversight_bypass]
+    postmarket:    [audit_trail_gap, policy_drift]
+
+  finra_sec:
+    supervision:    [human_oversight_bypass, policy_drift, unauthorized_action]
+    recordkeeping:  [audit_trail_gap, phantom_action]
+    communications: [fabricated_authority, overclaimed_certainty,
+                     adverse_action_without_notice]
+    suitability:    [safety_critical_advice, disparate_treatment, fabricated_fact]
+
+  glba:
+    safeguards:      [unauthorized_disclosure, payment_data_exposure, channel_switching,
+                      privilege_escalation]
+    privacy_notice:  [consent_bypass, adverse_action_without_notice]
+    access_controls: [privilege_escalation, forbidden_tool_use, role_confusion]

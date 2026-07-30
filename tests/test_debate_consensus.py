@@ -125,7 +125,11 @@ def test_debate_runs_configured_number_of_rounds() -> None:
     assert {s.debate_round for s in out["debate_round_scores"]} == {1, 2}
     # Sequential: round-r scores carry score 5+r, proving the round identity
     # threaded all the way through (round 3 → 8.0 final).
-    assert all(s.score == 8.0 for s in out["round_two_scores"])
+    # The score is DERIVED from the per-turn audit, not taken from the number the
+    # juror declared (8.0 here): the stub audits one turn as PASS, so the metric is
+    # 10/10. See juror._score_from_audit — the holistic number was the least stable
+    # thing a juror produced, so it is now only a fallback for an unscorable audit.
+    assert all(s.score == 10.0 for s in out["round_two_scores"])
 
 
 def test_debate_round_count_is_configurable() -> None:
@@ -150,8 +154,11 @@ def test_debate_peer_context_is_prior_round_not_always_round_one() -> None:
     def responder(system: str, user: str) -> dict[str, Any]:
         r = int(system.split("DEBATE ROUND", 1)[1].split("of", 1)[0].strip()) if "DEBATE ROUND" in system else 0
         # Distinct score per round so the peer block reveals which round it came from.
-        return {"per_turn_audit": [{"turn_index": 1, "outcome": "PASS", "citation": "c"}],
-                "score": float(r), "reasoning": f"round {r}"}
+        # The score is DERIVED from the audit now, so the round is encoded there: r of
+        # 10 turns PASS -> a derived score of exactly r.
+        audit = [{"turn_index": i, "outcome": "PASS" if i < r else "FAIL", "citation": "c"}
+                 for i in range(10)]
+        return {"per_turn_audit": audit, "score": float(r), "reasoning": f"round {r}"}
 
     llm = RecordingLLM(responder=responder)
     state = {

@@ -71,6 +71,51 @@ class HarnessState(TypedDict, total=False):
     transcript: Annotated[list[Turn], add]
     current_turn: int
 
+    # ── Check-based scoring (see data/checks.yaml) ──────────────────────
+    # Produced ONCE by the deterministic layer before the jury runs, then read by
+    # every juror call and by consensus. Computed once because it is pure: running
+    # it per juror would burn work to reach the same answer.
+    # ALL MUST BE DECLARED — LangGraph silently drops undeclared keys, which would
+    # leave the jury asking about checks the code had already settled.
+    turn_sentinels: dict[int, dict[str, str]]
+    """turn_index -> {sentinel_type: resolved value} planted for that turn."""
+
+    code_verdicts: list[Any]
+    """CheckVerdict list the code layer decided with no model involvement."""
+
+    pending_checks: list[Any]
+    """deterministic.Pending list — gated checks whose gate fired, awaiting votes."""
+
+    check_verdicts: list[Any]
+    """Final per-(check, turn) CheckVerdict list after consensus pools every vote.
+    This is what metric scores, findings, and the compliance join all read, so all
+    four axes are derived from one settled set of observations."""
+
+    agent_tool_names: list[str]
+    """Tool names the agent under test exposes. Decides applicability for tool-class
+    checks: an agent with no escalation tool is not judged for failing to escalate."""
+
+    adaptive_turns: bool
+    """When True the planner's recommended turn count REPLACES the requested one.
+    Off by default: a turn count changes the bill, so raising it is opt-in.
+    MUST be declared or LangGraph drops it before the planner reads it."""
+
+    turns_recommended: int
+    """What the planner would have run given risk tier, declared frameworks, context
+    exposure, tool surface and domains. Reported next to what actually ran, so a short
+    exam reads as a choice rather than an accident."""
+
+    turns_reasons: list[str]
+    """Why that number — each contribution, so the recommendation is never a bare
+    assertion a user has to take on trust."""
+
+    q_weights: dict[str, float]
+    """behaviour -> multiplier derived from the context assessment's NUMERIC sub-scores
+    (scoring/q_weights.py). A failure in an area the context never defended weighs more,
+    so context quality feeds the behavioural score instead of only being reported beside
+    it. Empty when --assess-context is off, which leaves scoring unchanged.
+    MUST be declared or LangGraph drops it between the assessor and consensus."""
+
     round_one_scores: Annotated[list[JurorScore], _extend_juror_scores]
     round_two_scores: Annotated[list[JurorScore], _extend_juror_scores]
     # v0.6.0 — consensus="debate" only. Every INTERMEDIATE debate round's
@@ -138,6 +183,21 @@ class HarnessState(TypedDict, total=False):
     planner's trap sampler for reproducible trap selection. MUST be declared
     here — an undeclared key is silently dropped by LangGraph, which would
     quietly de-seed the sampler."""
+
+    compliance_passes_run: int
+    """How many assessment passes ACTUALLY ran. The calibrated count is only a plan —
+    escalation raises it, and reporting the plan hid that. MUST be declared."""
+
+    compliance_residual: float | None
+    """Widest disagreement between the compliance assessor's passes, on the 0-100 axis
+    scale. None = fewer than two passes produced a score (unmeasured, not stable).
+    MUST be declared or LangGraph drops it before the report is built."""
+
+    calibration: Any
+    """The run's scoring policy (calibration.Calibration), resolved before the graph
+    starts. The conductor reads it to reuse a stored turn, the jury and the compliance
+    assessor read their pass counts from it. None → single-pass, always generate.
+    MUST be declared or LangGraph drops it."""
     compliance_frameworks: list[str]
     """Framework ids to assess (from --frameworks or governance's
     /compliance/selection). Empty → the default core set. MUST be declared so

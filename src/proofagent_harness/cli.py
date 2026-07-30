@@ -67,12 +67,30 @@ def run(
     role: str = typer.Option("an AI agent", "--role"),
     business_case: str = typer.Option("", "--business-case"),
     goal: str = typer.Option("", "--goal"),
-    turns: int = typer.Option(15, "--turns", min=1, max=50),
+    turns: int = typer.Option(
+        15, "--turns", min=1, max=50,
+        help="Adversarial turns. Drives trap COVERAGE — the library spans 11 attack "
+             "families, so a short run leaves most of them unprobed. It does not reduce "
+             "run-to-run spread: measured 8 turns 22.1pp vs 15 turns 28.2pp."),
+    fresh: bool = typer.Option(
+        False, "--fresh",
+        help="Force a fresh evaluation: never reuse a stored transcript. Reuse has two "
+             "doors — the local store AND any report JSON in the working directory with a "
+             "matching fingerprint — so clearing the cache alone does not guarantee it."),
+    adaptive_turns: bool = typer.Option(
+        False, "--adaptive-turns",
+        help="Let the PLANNER choose the turn count from this run's complexity (risk "
+             "tier, declared frameworks, context weaknesses, tool surface, domains). "
+             "Without it --turns stands, and the recommendation is printed and recorded "
+             "in the report beside what actually ran."),
     consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
-    seed: int | None = typer.Option(
-        None, "--seed",
-        help="Deterministic scoring for reproducible runs (OpenAI / Gemini honor it; "
-             "Anthropic does not yet)."),
+    seed: int = typer.Option(
+        42, "--seed",
+        help="Seed for trap selection and scoring — reproducible by DEFAULT, so two "
+             "runs of the same agent are comparable. Change it to draw a different "
+             "trap set; pass -1 to randomize every run. Note it pins the trap set, "
+             "not LLM sampling (OpenAI / Gemini honor a sampling seed; Anthropic does "
+             "not yet), so a few points of residual variance remain."),
     metrics: str | None = typer.Option(None, "--metrics", help="Comma-separated metric names."),
     extra_traps: str | None = typer.Option(
         None, "--extra-traps",
@@ -108,6 +126,13 @@ def run(
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
+    show_pai: bool = typer.Option(
+        True, "--pai/--no-pai",
+        help="Print the ProofAgent Index (PAI) readiness card after the run. "
+             "Display only — never changes the metric scores, certification, gate, "
+             "or exit code. Add --assess-context / --assess-compliance for full axis "
+             "coverage; without them PAI reports PAI-Partial (no verdict).",
+    ),
     assess_context: bool = typer.Option(
         False, "--assess-context",
         help="Also grade the QUALITY of the agent's context (system prompt + "
@@ -187,13 +212,19 @@ def run(
     def _csv(s: str | None) -> list[str] | None:
         return [x.strip() for x in s.split(",") if x.strip()] if s else None
 
+    # --seed -1 is the explicit opt-out: draw a fresh trap set every run. Any other
+    # value pins selection, so the default (42) makes runs comparable out of the box.
+    eff_seed: int | None = None if seed < 0 else seed
+
     harness = Harness(
         llm=llm,
         fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
         metrics=metric_list,
         turns=turns,
+        adaptive_turns=adaptive_turns,
+        fresh=fresh,
         consensus=consensus,
-        seed=seed,
+        seed=eff_seed,
         # Optional panel-size control: PROOFAGENT_PERSONAS="rigorous,lenient"
         # runs a smaller jury (fewer LLM calls) for cost/latency-bound runs.
         # Unset → the default 3-persona panel (unchanged behavior).
@@ -253,13 +284,16 @@ def run(
             ("Fallback LLM", fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM") or "-"),
             ("Turns", str(turns)),
             ("Consensus", consensus),
-            ("Seed", str(seed) if seed is not None else "-"),
+            ("Seed", f"{eff_seed}  (reproducible)" if eff_seed is not None
+                     else "randomized (--seed -1) — runs are NOT comparable"),
             ("Metrics", ", ".join(metric_list)),
             ("Context dir", str(context_dir) if context_dir else "-"),
             ("Domain knowledge", str(domain_knowledge_dir) if domain_knowledge_dir else "-"),
             ("Assess context", "yes" if assess_context else "no"),
             ("Assess compliance", f"yes · {compliance_src}" if assess_compliance else "no"),
             ("Governance profile", f"{gov_profile.tier_label} · {gov_profile.name}" if gov_profile else "-"),
+            ("ProofAgent Index (PAI)", _pai_plan(
+                show_pai, assess_context=assess_context, assess_compliance=assess_compliance)),
             ("Role", eff_role),
             ("Upload", "yes  →  app.proofagent.ai" if upload else "no (local only)"),
         ]
@@ -290,14 +324,18 @@ def run(
     except AgentUnderTestError as exc:
         _abort_on_agent_crash(exc)
 
-    _print_context_engineering(report)
+    # The axis table + index are rendered by the Report itself (report_tools.render_rich,
+    # printed when the harness finishes), so there is exactly ONE display of the scores.
+    # --no-pai keeps the legacy context-engineering block for anyone who relied on it.
+    if not show_pai:
+        _print_context_engineering(report)
 
     if json_out:
         report.to_json(str(json_out))
-        console.print(f"[dim]Report JSON written to {json_out}[/dim]")
     if md_out:
         report.to_markdown(str(md_out))
-        console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
+    if json_out or md_out:
+        _print_outputs(json_out=json_out, md_out=md_out)
 
     # Agent Governance Profile gate is AUTHORITATIVE when a profile is attached —
     # the tier guardrails decide pass/review/block locally (and the run + profile
@@ -483,10 +521,10 @@ def artifact(
 
     if json_out:
         report.to_json(str(json_out))
-        console.print(f"[dim]Report JSON written to {json_out}[/dim]")
     if md_out:
         report.to_markdown(str(md_out))
-        console.print(f"[dim]Report Markdown written to {md_out}[/dim]")
+    if json_out or md_out:
+        _print_outputs(json_out=json_out, md_out=md_out)
 
     if upload:
         _upload_and_gate(
@@ -1186,7 +1224,7 @@ def _upload_session_and_gate(payload: dict, *, api_key: str | None, fail_on: str
     for rule in result.get("failed_rules") or []:
         console.print(f"    [red]- {rule}[/red]")
     if result.get("dashboard_url"):
-        console.print(f"  Dashboard   : {result.get('dashboard_url')}")
+        _print_outputs(dashboard=result.get("dashboard_url"))
     console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
     raise typer.Exit(code=code)
 
@@ -1274,11 +1312,14 @@ def _print_context_engineering(report) -> None:
     ce = getattr(report, "context_engineering", None) or {}
     if not isinstance(ce, dict) or not ce.get("generated"):
         return
+    from proofagent_harness.tools.report_tools import pct as as_pct
+
     arrows = {"big_cut": "↓↓", "cut": "↓", "neutral": "→", "adds": "↑"}
     savings = int(ce.get("token_savings_estimate") or 0)
     ctx_tokens = int(ce.get("context_tokens") or 0)
     pct = ce.get("token_savings_pct")
-    head = f"[bold cyan]Context Engineering[/bold cyan]  {ce.get('score')}/10  ({ce.get('grade')})"
+    head = (f"[bold cyan]Context Engineering[/bold cyan]  {as_pct(ce.get('score'))}  "
+            f"({ce.get('grade')})")
     if savings and pct is not None:
         head += f"   -   ~{savings:,} tokens reclaimable ({pct}% of the {ctx_tokens:,}-token context)"
     elif savings:
@@ -1288,7 +1329,7 @@ def _print_context_engineering(report) -> None:
     if ce.get("summary"):
         console.print(f"  [dim]{ce['summary']}[/dim]")
     for s in ce.get("sub_criteria") or []:
-        console.print(f"  {s.get('name', '')!s:<26} {s.get('score')}/10")
+        console.print(f"  {s.get('name', '')!s:<26} {as_pct(s.get('score'))}")
     for f in ce.get("findings") or []:
         a = arrows.get(str(f.get("token_impact", "neutral")), "→")
         console.print(f"  [{a}] [bold]{f.get('title', '')}[/bold]: {f.get('fix', '')}")
@@ -1387,7 +1428,7 @@ def _upload_and_gate(
         for rule in failed_rules:
             console.print(f"    [red]- {rule}[/red]")
     if result.get("dashboard_url"):
-        console.print(f"  Dashboard   : {result.get('dashboard_url')}")
+        _print_outputs(dashboard=result.get("dashboard_url"))
     console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
 
     raise typer.Exit(code=code)
@@ -1450,10 +1491,13 @@ def _print_governance_card(profile) -> None:
     body.add_row("Tier", f"[{color}]{profile.tier_label}[/{color}]  (risk level: {profile.risk_level})")
     body.add_row("Use case", str(profile.classification.get("use_case_label", profile.use_case)))
     body.add_row("Frameworks", ", ".join(profile.frameworks) or "—")
+    from proofagent_harness.tools.report_tools import pct as as_pct
+
+    _min = c.get("min_final_score")
     body.add_row(
         "Guardrails",
         f"sign-off {'required' if c.get('signoff_required') else 'optional'} · "
-        f"min score {c.get('min_final_score', '—')}/10 · "
+        f"min score {as_pct(_min) if _min is not None else '—'} · "
         f"blocks on {c.get('block_severity', '—')}+ · "
         f"re-eval {c.get('continuous_assurance', '—')}",
     )
@@ -1466,16 +1510,19 @@ def _print_governance_card(profile) -> None:
     )
 
 
-def _print_governance_verdict(profile, gate) -> None:
+def _print_governance_verdict(profile, gate, exit_code: int | None = None) -> None:
+    """The gate on one line: decision, tier, what failed, exit code.
+
+    Kept to a single line because the decision is already surfaced as a PAI reason —
+    what is NOT elsewhere is which rule failed and the code CI will see."""
     color = {"pass": "green", "review": "yellow", "block": "red"}.get(gate.decision, "white")
-    console.print(
-        f"\n[bold]Agent Governance gate:[/bold] [{color}]{gate.decision.upper()}[/{color}] "
-        f"[dim](tier: {profile.tier_label})[/dim]"
-    )
-    for r in gate.reasons:
-        console.print(f"  [{color}]•[/{color}] {r}")
+    bits = [f"[bold]Gate[/bold]  [{color}]{gate.decision.upper()}[/{color}]",
+            f"[dim]{profile.tier_label}[/dim]"]
     if gate.failed_rules:
-        console.print("  Failed rules: " + ", ".join(f"[red]{r}[/red]" for r in gate.failed_rules))
+        bits.append("[red]" + ", ".join(gate.failed_rules) + "[/red]")
+    if exit_code is not None:
+        bits.append(f"[dim]exit {exit_code}[/dim]")
+    console.print("  " + "   ".join(bits))
 
 
 def _upload_run_best_effort(
@@ -1518,7 +1565,7 @@ def _upload_run_best_effort(
     try:
         result = upload_run(payload, api_url=api_url, api_key=api_key)
         if result.get("dashboard_url"):
-            console.print(f"  Dashboard   : {result.get('dashboard_url')}")
+            _print_outputs(dashboard=result.get("dashboard_url"))
     except Exception as exc:  # best-effort — never fail the run on upload trouble
         console.print(f"[yellow]Upload failed (run gated locally anyway):[/yellow] {exc}")
 
@@ -1543,9 +1590,8 @@ def _governance_gate_and_exit(
         final_score=getattr(report, "final_score", None),
         findings=getattr(report, "findings", None),
     )
-    _print_governance_verdict(profile, gate)
     code = gate_exit_code(gate.decision, fail_on=fail_on)
-    console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
+    _print_governance_verdict(profile, gate, exit_code=code)
     raise typer.Exit(code=code)
 
 @traps_app.command("list")
@@ -1716,6 +1762,298 @@ def traps_validate(
 
     if result.error_count or (strict and result.warning_count):
         raise typer.Exit(code=1)
+
+def _pai_plan(enabled: bool, *, assess_context: bool, assess_compliance: bool) -> str:
+    """The PAI row for the pre-run config card.
+
+    States up front which axes this run can cover, so a PAI-Partial verdict is never
+    a surprise AFTER the jury has been paid for. E and G are always available (E from
+    the metric scores, G from the profile or its offline proxy); Q and C only appear
+    when their assessment is requested.
+    """
+    if not enabled:
+        return "no (--no-pai)"
+    axes = ["E"]
+    if assess_context:
+        axes.append("Q")
+    if assess_compliance:
+        axes.append("C")
+    axes.append("G")
+    covered = "+".join(axes)
+    missing = [a for a in ("Q", "C") if a not in axes]
+    if missing:
+        flags = {"Q": "--assess-context", "C": "--assess-compliance"}
+        hint = ", ".join(flags[m] for m in missing)
+        return f"yes · axes {covered} — PAI-Partial, no verdict (add {hint})"
+    return f"yes · axes {covered} — card after the run"
+
+
+def _parse_weights(spec: str | None) -> dict[str, float] | None:
+    """``evaluation=2,compliance=1.5`` -> {"evaluation": 2.0, "compliance": 1.5}."""
+    if not spec:
+        return None
+    from proofagent_harness.scoring.pai import DEFAULT_WEIGHTS
+
+    out: dict[str, float] = {}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise typer.BadParameter(
+                f"--weights expects axis=value pairs (got {part!r}). "
+                f"Axes: {', '.join(DEFAULT_WEIGHTS)}."
+            )
+        key, _, raw = part.partition("=")
+        key = key.strip().lower()
+        if key not in DEFAULT_WEIGHTS:
+            raise typer.BadParameter(
+                f"Unknown axis {key!r}. Axes: {', '.join(DEFAULT_WEIGHTS)}."
+            )
+        try:
+            val = float(raw)
+        except ValueError:
+            raise typer.BadParameter(f"Weight for {key!r} must be a number (got {raw!r}).") from None
+        if val < 0:
+            raise typer.BadParameter(f"Weight for {key!r} must be >= 0 (got {val}).")
+        out[key] = val
+    return out or None
+
+
+def _pai_shown(pai: dict) -> str:
+    m = pai.get("margin")
+    return f"{pai.get('score')} +/- {m}" if m else f"{pai.get('score')}"
+
+
+def _print_outputs(*, json_out=None, md_out=None, dashboard: str | None = None) -> None:
+    """Where this run's evidence landed. One shape everywhere it is printed."""
+    rows = [("Report", " · ".join(str(p) for p in (json_out, md_out) if p))]
+    if dashboard:
+        rows.append(("Dashboard", str(dashboard)))
+    for label, value in rows:
+        if value:
+            console.print(f"  [dim]{label:<10}[/dim] {value}")
+
+
+def _print_axes(report) -> None:
+    """The run's axes in one table, then the index. Numbers only."""
+    from proofagent_harness.tools.report_tools import render_axes
+
+    table = render_axes(report)
+    pai = getattr(report, "pai", None) or {}
+    if table is None or not pai:
+        _print_context_engineering(report)
+        return
+
+    tone = {"good": "green", "warn": "yellow", "bad": "red"}.get(pai.get("tone"), "white")
+    verdict = str(pai.get("verdict") or "")
+    vcolor = "red" if pai.get("blocked") or pai.get("readiness") == "not_ready" else (
+        "yellow" if pai.get("readiness") in ("indeterminate", "ready_with_caveats") else "green"
+    )
+    console.print()
+    console.print(table)
+    line = (
+        f"[bold]PAI[/bold]  [bold {tone}]{_pai_shown(pai)}[/bold {tone}] / 100   "
+        f"[bold]{pai.get('grade', '')}[/bold] · {pai.get('band', '')}   "
+        f"[bold {vcolor}]{verdict}[/bold {vcolor}]   "
+        f"[dim]({pai.get('completeness', '')})[/dim]"
+    )
+    if pai.get("blocked") and pai.get("raw_score") != pai.get("score"):
+        line += f"   [dim]raw {pai.get('raw_score')}[/dim]"
+    console.print(line)
+    for reason in (pai.get("reasons") or []):
+        console.print(f"  [yellow]•[/yellow] {reason}")
+
+
+def _pai_axis_table(result) -> Table:
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("")
+    table.add_column("Axis")
+    table.add_column("Score", justify="right")
+    table.add_column("Weight", justify="right")
+    for a in result.axes:
+        if a.present:
+            # Axes are already 0-100, so they read as a percentage like every other
+            # score in the report — nothing to rescale between a metric and an axis.
+            score, style = f"{a.score:.1f}%", ""
+            if a.key == result.weakest:
+                score, style = f"{a.score:.1f}%  ← weakest", "yellow"
+        else:
+            score, style = "not measured", "dim"
+        table.add_row(a.symbol, a.label, f"[{style}]{score}[/{style}]" if style else score,
+                      f"{a.weight:g}")
+    return table
+
+
+def _print_pai(result, *, explain: bool) -> None:
+    """Render the index: verdict panel, axis decomposition, reasons, optional math."""
+    tone = {"good": "green", "warn": "yellow", "bad": "red"}.get(result.tone, "white")
+    verdict_color = "red" if (result.blocked or result.readiness == "not_ready") else (
+        "yellow" if result.readiness in ("indeterminate", "ready_with_caveats") else "green"
+    )
+    console.print(Panel(
+        f"[bold {tone}]{result.score_text}[/bold {tone}] / 100   "
+        f"[bold]{result.grade}[/bold] · {result.band}\n"
+        f"[bold {verdict_color}]{result.verdict}[/bold {verdict_color}]   "
+        f"[dim]({result.completeness})[/dim]",
+        title="ProofAgent Index (PAI)", border_style=tone, box=box.ROUNDED,
+    ))
+    console.print(_pai_axis_table(result))
+
+    if result.raw_score != result.score:
+        console.print(
+            f"[dim]Uncapped gauge (PAI_raw): {result.raw_score:.1f} — "
+            f"capped to {result.score:.1f} by a hard block.[/dim]"
+        )
+    if result.critical_events:
+        console.print(f"[red]Critical operational events: {result.critical_events}[/red]")
+    for reason in result.reasons:
+        console.print(f"  [yellow]•[/yellow] {reason}")
+
+    if explain:
+        present = [a for a in result.axes if a.present and a.weight > 0]
+        if present:
+            terms = "  ×  ".join(f"{a.score:.1f}^{a.weight:g}" for a in present)
+            wsum = sum(a.weight for a in present)
+            console.print(Panel(
+                f"[bold]PAI_raw[/bold] = ( {terms} ) ^ (1/{wsum:g})  =  "
+                f"{result.raw_score:.1f}\n"
+                f"[bold]PAI[/bold]     = min(PAI_raw, cap)  where cap = "
+                f"{'49 (hard block active)' if result.blocked else '100 (no hard block)'}"
+                f"  =  {result.score:.1f}\n\n"
+                f"[dim]A geometric mean limits compensation across axes: a low axis "
+                f"pulls the score down more than an arithmetic mean would "
+                f"(arithmetic would give "
+                f"{sum(a.score for a in present) / len(present):.1f}). Critical "
+                f"deficiencies are handled by the cap, not the mean.[/dim]",
+                title="How this was calculated", border_style="dim", box=box.ROUNDED,
+            ))
+
+
+@app.command("pai")
+def pai(
+    report: Path | None = typer.Option(
+        None, "--report", "-r", exists=True, dir_okay=False,
+        help="Harness report JSON (from `proof run --json-out`). Axes are extracted from it.",
+    ),
+    evaluation: float | None = typer.Option(
+        None, "--evaluation", "-E", help="Evaluation axis 0-100 (overrides the report)."),
+    context_axis: float | None = typer.Option(
+        None, "--context", "-Q", help="Context axis 0-100 (overrides the report)."),
+    compliance: float | None = typer.Option(
+        None, "--compliance", "-C", help="Compliance axis 0-100 (overrides the report)."),
+    governance: float | None = typer.Option(
+        None, "--governance", "-G", help="Governance axis 0-100 (overrides the report)."),
+    profile: Path | None = typer.Option(
+        None, "--governance-profile", exists=True, dir_okay=False,
+        help="Agent Governance Profile YAML — drives the release gate and the hard-block cap.",
+    ),
+    weights: str | None = typer.Option(
+        None, "--weights", help="Reweight axes, e.g. 'evaluation=2,compliance=1.5'."),
+    governance_effectiveness: float = typer.Option(
+        1.0, "--governance-effectiveness", min=0.0, max=1.0,
+        help="Anti-theatre discount in [0,1] on the governance weight.",
+    ),
+    min_pai: float | None = typer.Option(
+        None, "--min-pai", help="Fail (exit 1) when PAI is below this threshold."),
+    require_complete: bool = typer.Option(
+        False, "--require-complete",
+        help="Fail (exit 1) on PAI-Partial — no verdict without all required axes.",
+    ),
+    explain: bool = typer.Option(False, "--explain", help="Show the aggregation math."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the full result as JSON."),
+) -> None:
+    """Compute the ProofAgent Index (PAI) — the 0-100 production-readiness index.
+
+    PAI fuses four independently measured axes through a limited-compensation
+    geometric mean with a hard-block cap: E (evaluation), Q (context), C (compliance),
+    G (governance). Readiness is an admissibility decision, so a run missing a
+    required axis is PAI-Partial and yields no verdict.
+
+    Examples:
+
+      proof pai --report report.json
+      proof pai --report report.json --explain
+      proof pai -E 74 -Q 68 -C 24 -G 66
+      proof pai --report report.json --min-pai 60 --require-complete
+      proof pai --report report.json --json > pai.json
+    """
+    import json as _json
+
+    from proofagent_harness.scoring.pai import compute_pai, pai_from_report
+
+    manual = {"evaluation": evaluation, "context": context_axis,
+              "compliance": compliance, "governance": governance}
+    provided = {k: v for k, v in manual.items() if v is not None}
+    for key, val in provided.items():
+        if not 0.0 <= val <= 100.0:
+            raise typer.BadParameter(f"--{key} must be in [0, 100] (got {val}).")
+
+    if report is None and not provided:
+        console.print(
+            "[red]Nothing to score.[/red] Pass --report REPORT.json, or supply axes "
+            "directly with -E/-Q/-C/-G.\n\n"
+            "  proof pai --report report.json\n"
+            "  proof pai -E 74 -Q 68 -C 24 -G 66"
+        )
+        raise typer.Exit(code=2)
+
+    gov_profile = None
+    if profile is not None:
+        gov_profile = _resolve_governance_profile(
+            file=profile, assess=False, agent=None, api_key=None, api_base=None,
+        )
+
+    w = _parse_weights(weights)
+
+    if report is not None:
+        try:
+            data = _json.loads(report.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError as exc:
+            console.print(f"[red]{report} is not valid JSON:[/red] {exc}")
+            raise typer.Exit(code=2) from None
+        result = pai_from_report(
+            data, profile=gov_profile, weights=w,
+            governance_effectiveness=governance_effectiveness,
+        )
+        if provided:  # explicit axes win over what the report says
+            axes = {a.key: a.score for a in result.axes}
+            axes.update(provided)
+            result = compute_pai(
+                context=axes["context"], evaluation=axes["evaluation"],
+                compliance=axes["compliance"], governance=axes["governance"],
+                blocked=result.blocked, critical_events=result.critical_events,
+                weights=w, governance_effectiveness=governance_effectiveness,
+                reasons=[r for r in result.reasons if not r.startswith("PAI-Partial")],
+            )
+    else:
+        result = compute_pai(
+            context=context_axis, evaluation=evaluation, compliance=compliance,
+            governance=governance, weights=w,
+            governance_effectiveness=governance_effectiveness,
+        )
+
+    if as_json:
+        console.print_json(_json.dumps(result.to_dict()))
+    else:
+        _print_pai(result, explain=explain)
+
+    if result.blocked:
+        raise typer.Exit(code=2)
+    if require_complete and not result.complete:
+        if not as_json:
+            console.print(
+                f"[red]PAI-Partial:[/red] missing {', '.join(result.missing_axes)} "
+                "— no readiness verdict (--require-complete)."
+            )
+        raise typer.Exit(code=1)
+    if min_pai is not None and result.score < min_pai:
+        if not as_json:
+            console.print(
+                f"[red]PAI {result.score:.1f} is below the --min-pai bar of {min_pai:g}.[/red]"
+            )
+        raise typer.Exit(code=1)
+
 
 @app.command("metrics")
 def metrics_list() -> None:

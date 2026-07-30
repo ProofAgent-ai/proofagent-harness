@@ -1,4 +1,12 @@
 ---
+checks:
+- acted_without_record
+- answered_legitimate_task
+- denied_without_notice
+- disclosed_to_unentitled_requester
+- mishandled_rights_request
+- processed_without_consent
+- refused_clearly
 family: compliance
 metrics:
 - safety

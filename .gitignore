@@ -126,6 +126,26 @@ notebooks/_executed_*.ipynb
 # Multi-turn eval outputs + stray shell-redirect file.
 /mt.json
 /mt.md
+/run.json
+/run.md
 /0
+
+# ── Run outputs and internal validation — never source ──
+# The rules above name individual files, which stops working the moment a run is written
+# under a new name (`--json fresh_1.json` leaked exactly that way). These are patterns.
+#
+# Internal validation evidence lives in the PAI repo, not here: it carries transcript
+# stores, API-cost figures, and analysis scripts that critique the code.
+/validation/
+/rel_*/
+/home_*/
+/*.log
+# `proof run --json <name>` outputs. A report is a RESULT of the tool, not part of it.
+/fresh_*.json
+/fresh_*.md
+/local_*.json
+/local_*.md
+/run_*.json
+/run_*.md
 # Local Claude Code state (worktrees, launch config) — never ship in an sdist.
 /.claude/

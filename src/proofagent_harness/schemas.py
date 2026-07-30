@@ -300,6 +300,29 @@ class Trap(BaseModel):
     """If True, this trap is always selected regardless of domain (e.g.,
     prompt injection always applies)."""
 
+    checks: list[str] = Field(default_factory=list)
+    """Check ids from `data/checks.yaml` that apply to this trap.
+
+    This is the trap's scoring map. It fixes the DENOMINATOR for every metric the
+    trap touches, so the set of things being judged cannot drift between runs.
+
+    Everything else derives from it and is deliberately NOT declared here:
+      * the sentinel types to plant  = the `sentinel` of each listed check
+      * the behaviours evidenced     = the `probes` of each check that FAILED
+    Deriving behaviours from failures rather than from the trap means a trap the
+    agent handled correctly produces no compliance evidence against it — which is
+    the honest reading, and impossible if the trap asserted its own behaviours.
+
+    Empty = fall back to the pre-check holistic juror path for this trap."""
+
+    paired: dict[str, Any] | None = None
+    """Two scenario variants identical but for one protected attribute.
+
+    Only meaningful alongside the `paired_outcome_diverged` check (bias family).
+    Shape: ``{"a": {...facts...}, "b": {...facts...}}`` where the two dicts differ
+    in exactly one key. Divergent outcomes are then disparate treatment by
+    construction, with no judgment about intent."""
+
     composite: bool = False
     """Author-declared multi-step / chained / compound attack — the hardest
     class. Set in frontmatter for traps whose NAME doesn't reveal the chain
@@ -376,6 +399,83 @@ class TurnAuditEntry(BaseModel):
     outcome: str
     citation: str = ""
 
+class CheckDef(BaseModel):
+    """One binary observation, loaded from `data/checks.yaml`.
+
+    The unit the jury votes on and the unit every axis is scored from. See that
+    file's header for why scoring moved from a holistic number to these.
+    """
+
+    id: str
+    ask: str | None = None
+    decide: Literal["code", "gated", "llm"]
+    polarity: Literal["negative", "positive"] = "negative"
+    gate: str | None = None
+    sentinel: str | None = None
+    probes: str | None = None
+    metrics: list[str] = Field(default_factory=list)
+    families: list[str] = Field(default_factory=list)
+
+    def credit(self, observed: bool) -> float:
+        """Credit in [0, 1] for an observation of this check.
+
+        A negative check earns credit by being ABSENT; a positive check by being
+        PRESENT. Keeping the polarity flip here means no caller has to remember it.
+        """
+        if self.polarity == "positive":
+            return 1.0 if observed else 0.0
+        return 0.0 if observed else 1.0
+
+class SentinelDef(BaseModel):
+    """One planted-marker type, loaded from `data/sentinels.yaml`."""
+
+    id: str
+    summary: str = ""
+    proves: str = ""
+    placement: str = ""
+    detect: str = ""
+    note: str = ""
+    values: dict[str, str] = Field(default_factory=dict)
+
+    def template(self, domain: str | None) -> str:
+        """Value template for a domain, falling back to `generic`."""
+        if domain and domain in self.values:
+            return self.values[domain]
+        return self.values.get("generic", "")
+
+class CheckVerdict(BaseModel):
+    """One check evaluated against one turn.
+
+    `observed is None` means NOT APPLICABLE — the precondition was absent (no
+    sentinel planted, no paired block, a gate that did not fire). Not-applicable
+    verdicts leave the denominator entirely rather than counting as passes, so a
+    trap cannot inflate a score by declaring checks that never get exercised.
+    """
+
+    check_id: str
+    turn_index: int
+    observed: bool | None = None
+    decided_by: Literal["code", "gated", "llm"] = "llm"
+    quote: str = ""
+    votes_observed: int = 0
+    votes_total: int = 0
+    """Vote tally for llm/gated verdicts. Both 0 for code verdicts — a string
+    comparison has no electorate, and reporting a 1-0 vote there would misdescribe
+    where the confidence comes from."""
+
+    @property
+    def applicable(self) -> bool:
+        return self.observed is not None
+
+    @property
+    def unanimous(self) -> bool:
+        """True when every vote agreed, or when code decided it."""
+        if self.decided_by == "code":
+            return True
+        if self.votes_total <= 1:
+            return True
+        return self.votes_observed in (0, self.votes_total)
+
 class JurorScore(BaseModel):
     """A single juror's score for a single metric in a single round."""
 
@@ -386,6 +486,10 @@ class JurorScore(BaseModel):
     round: int = 1
     evaluated: bool = True
     per_turn_audit: list[TurnAuditEntry] = Field(default_factory=list)
+    check_votes: list[CheckVerdict] = Field(default_factory=list)
+    """This juror's binary votes, when check scoring is active. One entry per
+    (check, turn) the juror was asked about. `score` is then derived from the
+    consensus of these across the panel, not from anything this juror asserted."""
     # v0.6.0 — debate sub-round index within Round 2 (consensus="debate" only).
     # 0 for Round-1 / delphi scores; 1..debate_rounds for each sequential debate
     # pass so the audit trail preserves every intermediate adversarial round.
@@ -768,6 +872,18 @@ class Report(BaseModel):
     # "token_impact": "big_cut|cut|neutral|adds"}], "token_savings_estimate":
     # int, "summary", "model", "generated"}.
     context_engineering: dict[str, Any] = Field(default_factory=dict)
+    # PROOFAGENT INDEX (PAI) — the 0-100 production-readiness index over the four
+    # axes E (evaluation) / Q (context) / C (compliance) / G (governance), fused by a
+    # limited-compensation geometric mean with a hard-block cap. DERIVED, never an
+    # input: it reads final_score / context_engineering / compliance / the governance
+    # profile, and NEVER enters per_metric, final_score, certification, or the release
+    # gate. Populated on every run so each report carries its own readiness verdict;
+    # empty {} only if scoring was unavailable. Shape mirrors PAIResult.to_dict():
+    # {"score", "raw_score", "grade", "band", "readiness", "verdict", "blocked",
+    #  "complete", "completeness", "missing_axes", "weakest_axis", "coverage",
+    #  "critical_events", "reasons", "axes": [{"key","symbol","label","score",
+    #  "weight","present"}]}. See scoring/pai.py and docs/pai.md.
+    pai: dict[str, Any] = Field(default_factory=dict)
     # PERFORMANCE block — MEASURED (not harness-LLM-scored) operational metrics for the AGENT
     # UNDER TEST: latency, tokens, cost, efficiency. Provider- and framework-agnostic
     # (populated from a normalized per-call usage record via OTel / a framework adapter
@@ -880,6 +996,9 @@ class Event(BaseModel):
 
     type: Literal[
         "setup_start", "setup_done",
+        # Pre-graph calibration phase. Emitted so the progress bar advances while the
+        # scoring policy is resolved — without these the UI sits idle through it.
+        "calibrate_start", "calibrate_end",
         "plan_start", "plan_end",
         # v0.5.0 (client report B2): trap-selection visibility — payload carries
         # loaded / selected / not-selected counts + names + pinned/missing.
@@ -889,6 +1008,11 @@ class Event(BaseModel):
         "juror_scored",
         "consensus_check",
         "report_start", "report_end",
+        # Reporter graceful-degradation events: emitted when a synthesis LLM call
+        # fails so the reporter continues WITHOUT the narrated Problem/Proof/Fix.
+        # Must be declared here or constructing the Event raises and the whole run
+        # dies at reporting instead of degrading.
+        "finding_synthesis_skipped", "executive_synthesis_skipped",
         "context_truncated",
         # v0.4.2: emitted when Harness LLM's fallback_llm rescues a failed
         # primary call (empty content, JSON parse error, or exception).
@@ -908,6 +1032,19 @@ class Event(BaseModel):
         "artifact_image_converted", "bundle_loaded",
         "bundle_consistency_check", "rubric_pack_applied",
         "business_case_autoderived", "agent_trace_loaded",
+        # Degradation the run RECOVERED from — a discarded unquoted juror vote, a juror
+        # that fell back to holistic scoring. Distinct from "error", which means
+        # something was lost. Consumers switching only on "error" are unaffected.
+        "warning",
+        # Compliance axis settled. payload={derivation, frameworks} — `derivation`
+        # distinguishes the derived join ("checks", no LLM) from the assessor pass.
+        "compliance_assessed",
+        # Context graded ahead of the planner. payload={score, weights} — `weights` are
+        # the per-behaviour multipliers the context exposure puts on behavioural
+        # evidence, so a reader can see why a metric was marked down harder.
+        "context_assessed",
+        # Turn budget resolved. payload={recommended, selected, adaptive, reasons}.
+        "plan_turns",
         "done", "error",
     ]
     turn: int | None = None

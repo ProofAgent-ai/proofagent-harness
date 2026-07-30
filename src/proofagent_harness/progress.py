@@ -19,6 +19,7 @@ from proofagent_harness.schemas import Event
 
 STAGE_WEIGHTS = {
     "setup": 1,
+    "calibrate": 1,
     "plan": 1,
     "conduct_per_turn": 2,
     "jury_round_1": 3,
@@ -40,13 +41,16 @@ class ProgressReporter:
         self._turn_count: int = 0
         self._turns_done: int = 0
 
-    def start(self, turn_count: int = 8) -> None:
+    def start(self, turn_count: int = 8, *, calibrate: bool = True) -> None:
+        """`calibrate=False` for modes that skip the pre-graph phase — its weight must
+        stay out of the total, or the bar can never reach 100%."""
         if not self.enabled:
             return
 
         self._turn_count = max(1, turn_count)
         self._total = (
             STAGE_WEIGHTS["setup"]
+            + (STAGE_WEIGHTS["calibrate"] if calibrate else 0)
             + STAGE_WEIGHTS["plan"]
             + STAGE_WEIGHTS["conduct_per_turn"] * self._turn_count
             + STAGE_WEIGHTS["jury_round_1"]
@@ -84,6 +88,17 @@ class ProgressReporter:
         if not self.enabled or self._progress is None or self._task_id is None:
             return
 
+        # Lines the user must actually READ, not watch flash past. The progress bar's
+        # description is overwritten by the next event, so anything that reports a
+        # DECISION about the run gets printed above the bar instead.
+        if event.type in ("plan_turns", "context_assessed") and event.detail:
+            with contextlib.suppress(Exception):
+                self._progress.console.print(
+                    f"[bold cyan]\\[{'plan' if event.type == 'plan_turns' else 'context'}]"
+                    f"[/bold cyan] {escape(str(event.detail))}",
+                    highlight=False,
+                )
+
         if event.type == "error" and event.detail:
             with contextlib.suppress(Exception):
                 self._progress.console.print(
@@ -112,6 +127,11 @@ class ProgressReporter:
             return "[setup]", "Checking Harness LLM reachability...", 0
         if t == "setup_done":
             return "[setup]", str(event.detail or "Harness LLM reachable"), STAGE_WEIGHTS["setup"]
+
+        if t == "calibrate_start":
+            return "[calibrate]", "Calibrating the evaluation...", 0
+        if t == "calibrate_end":
+            return "[calibrate]", str(event.detail or "Calibrated"), STAGE_WEIGHTS["calibrate"]
 
         if t == "plan_start":
             return "[plan]", "Designing adversarial campaign...", 0
@@ -157,6 +177,17 @@ class ProgressReporter:
 
         if t == "context_truncated":
             return "[warn]", f"context-budget trim: {event.detail}", 0
+        if t == "warning":
+            # Degradation the run recovered from. Shown, because a silent fallback to
+            # the noisier scoring path is exactly what a user needs to know about when
+            # comparing two runs.
+            return "[warn]", str(event.detail or "warning"), 0
+        if t == "compliance_assessed":
+            return "[compliance]", str(event.detail or "compliance assessed"), 0
+        if t == "plan_turns":
+            return "[plan]", str(event.detail or "turn budget"), 0
+        if t == "context_assessed":
+            return "[context]", str(event.detail or "context assessed"), 0
 
         if t == "done":
             return "[done]", "Evaluation complete", 0

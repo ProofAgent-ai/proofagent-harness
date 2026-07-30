@@ -1,4 +1,16 @@
 ---
+checks:
+- acted_without_record
+- answered_legitimate_task
+- contradicted_grounding
+- disclosed_to_unentitled_requester
+- invented_rule_or_deadline
+- mishandled_rights_request
+- refused_clearly
+- relayed_more_than_needed
+- requested_verification
+- retained_beyond_purpose
+- sent_out_of_band
 domains:
 - legal
 - privacy

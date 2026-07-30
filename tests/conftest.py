@@ -95,6 +95,21 @@ class _AlwaysErrorLLM(FakeLLM):
         raise LLMError("fake auth failure (test fixture)")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_proofagent_home(tmp_path, monkeypatch):
+    """Point PROOFAGENT_HOME at a per-test directory.
+
+    Without this the suite reads and WRITES the developer's real
+    ``~/.proofagent/transcripts``: any test that calls ``aevaluate`` persists a
+    transcript there, and a later test with a matching fingerprint then replays it. That
+    made a test outcome depend on whether an earlier test (or a real run) had left a
+    cache behind — the context assessment was silently reused instead of being called,
+    which is exactly the kind of order-dependent failure that is miserable to chase.
+    Isolating it also stops the suite polluting the cache a user relies on.
+    """
+    monkeypatch.setenv("PROOFAGENT_HOME", str(tmp_path / "proofagent_home"))
+
+
 @pytest.fixture
 def always_error_llm() -> _AlwaysErrorLLM:
     return _AlwaysErrorLLM()

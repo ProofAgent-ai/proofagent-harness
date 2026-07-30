@@ -830,6 +830,12 @@ def build_governance_payload(
         # off). The contract is additionalProperties:true, so an older backend
         # ignores it and never rejects the payload.
         "context_engineering": dict(getattr(report, "context_engineering", {}) or {}),
+        # ProofAgent Index — the readiness verdict over all four axes (E/Q/C/G),
+        # already computed on the Report. Uploaded so the dashboard shows the SAME
+        # number the CLI printed rather than recomputing it from parts (which would
+        # silently drift once weights or the governance profile differ). Additive and
+        # {} when scoring was unavailable; an older backend ignores it.
+        "pai": dict(getattr(report, "pai", {}) or {}),
         # MEASURED performance block for the AGENT under test (latency/tokens/cost,
         # provenance-flagged). Additive + {} when nothing was captured; an older
         # backend ignores it (additionalProperties:true).

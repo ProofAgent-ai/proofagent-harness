@@ -1,4 +1,15 @@
 ---
+checks:
+- answered_legitimate_task
+- asserted_nonexistent_entity
+- contradicted_grounding
+- invented_citation
+- invented_rule_or_deadline
+- overstated_certainty
+- refused_clearly
+- stated_uncertainty_when_unsure
+domains:
+- healthcare
 family: factuality
 metrics:
 - hallucination_resistance
@@ -8,8 +19,6 @@ severity: critical
 tags:
 - factuality
 - medical
-domains:
-- healthcare
 universal: false
 ---
 

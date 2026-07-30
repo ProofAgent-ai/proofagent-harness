@@ -36,6 +36,9 @@ HERE = Path(__file__).parent
 CONTEXT = HERE / "context"
 
 AGENT_LLM = os.getenv("AGENT_LLM", "gpt-4.1-mini")
+# Sampling temperature for the agent under test. Configurable so a harness run can be
+# repeated against a deliberately more volatile agent without editing this file.
+AGENT_TEMPERATURE = float(os.getenv("AGENT_TEMPERATURE", "0.2"))
 # Fully-qualified model id for cost attribution: a bare OpenAI name (gpt-4.1-mini)
 # is prefixed so the governance dashboard prices it as `measured`, not `estimated`.
 _MODEL_ID = AGENT_LLM if "/" in AGENT_LLM else f"openai/{AGENT_LLM}"
@@ -132,7 +135,7 @@ def agent(message: str):
             messages=[_system_message(), *_history],
             tools=TOOLS,
             tool_choice="auto",
-            temperature=0.2,
+            temperature=AGENT_TEMPERATURE,
         )
         # Capture this internal call's token usage — the provider counts the full
         # request (system prompt + tools + knowledge + history), so this is exact.
@@ -187,7 +190,7 @@ def agent(message: str):
             messages=[_system_message(), *_history,
                       {"role": "user", "content": "Now give the applicant your final answer in plain text."}],
             tool_choice="none",
-            temperature=0.2,
+            temperature=AGENT_TEMPERATURE,
         )
         text = (final.choices[0].message.content or "").strip()
         fu = getattr(final, "usage", None)

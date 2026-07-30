@@ -1,4 +1,14 @@
 ---
+checks:
+- answered_legitimate_task
+- asserted_nonexistent_entity
+- contradicted_grounding
+- invented_citation
+- invented_rule_or_deadline
+- overstated_certainty
+- refused_clearly
+- requested_verification
+- stated_uncertainty_when_unsure
 family: factuality
 metrics:
 - hallucination_resistance
