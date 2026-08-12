@@ -951,7 +951,7 @@ Runnable recipes, each self contained, each printing a scorecard. Full argument 
 
 ## Citation
 
-ProofAgent Harness implements the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of AI agents. If you build on it, please cite both the paradigm and the tool:
+ProofAgent Harness implements the **Human-on-the-Bridge (HOB)** paradigm for scalable evaluation of AI agents. If you build on it, please cite the paradigm and the tool. Two further papers set out the arguments behind specific axes: **readiness is not capability** (the PAI index) and **context fails before the agent does** (the Q axis).
 
 ```bibtex
 @misc{bousetouane2026humanonthebridge,
@@ -971,7 +971,32 @@ ProofAgent Harness implements the **Human-on-the-Bridge (HOB)** paradigm for sca
       primaryClass={cs.MA},
       url={https://arxiv.org/abs/2605.24134},
 }
+
+@misc{bousetouane2026stopshippingaiagentsonfaith,
+      title={Stop Shipping AI Agents on Faith: Capability Is Not Production Readiness},
+      author={Fouad Bousetouane},
+      year={2026},
+      eprint={2607.27677},
+      archivePrefix={arXiv},
+      primaryClass={cs.MA},
+      url={https://arxiv.org/abs/2607.27677},
+}
+
+@misc{bousetouane2026aiagentsdonotfailalone,
+      title={AI Agents Do Not Fail Alone: The Context Fails First},
+      author={Fouad Bousetouane},
+      year={2026},
+      eprint={2607.14275},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2607.14275},
+}
 ```
+
+| Paper | What it underpins here |
+|---|---|
+| [Stop Shipping AI Agents on Faith](https://arxiv.org/abs/2607.27677) (arXiv:2607.27677) | Why capability signals are not release evidence — the argument behind **PAI**, its completeness rule, and the hard-block cap. |
+| [AI Agents Do Not Fail Alone: The Context Fails First](https://arxiv.org/abs/2607.14275) (arXiv:2607.14275) | Why the context is the first thing to measure — the argument behind the **Q axis** and its criteria. |
 
 ## Contributing · Security · License
 
