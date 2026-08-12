@@ -11,6 +11,9 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+# Re-exported so existing call sites keep working; the definition has no dependencies
+# and lives in `formatting` so the audit layer can use it without importing rich.
+from proofagent_harness.formatting import pct
 from proofagent_harness.schemas import (
     ARTIFACT_METRIC_DESCRIPTIONS,
     METRIC_DESCRIPTIONS,
@@ -33,18 +36,6 @@ _CERT_STYLES = {
     Certification.NOT_READY: "bold red",
     Certification.INCOMPLETE: "bold white on grey37",
 }
-
-
-def pct(score_out_of_10: float | None) -> str:
-    """Render a 0-10 score as a percentage — the ONE display convention.
-
-    Every user-facing number reads out of 100 (final score, per-metric, context
-    engineering, compliance, PAI), so nothing has to be mentally rescaled and a
-    metric can be compared to an axis at a glance. Display only: the stored values
-    stay on their native 0-10 scale, which is the report/upload contract."""
-    if score_out_of_10 is None:
-        return "—"
-    return f"{round(float(score_out_of_10) * 10)}%"
 
 
 def _score_display(report: Report) -> str:
@@ -250,9 +241,11 @@ def render_rich(report: Report) -> Any:
             f" (harness {report.tokens_used:,} · agent {_agent_tokens:,})", style="dim",
         )
     # Harness-LLM spend — the number a corporate buyer asks about first.
-    _harness_cost = float(report.primary_cost_usd or 0.0) + float(report.fallback_cost_usd or 0.0)
-    if _harness_cost > 0:
-        cert_line.append(f"    Harness LLM cost: ${_harness_cost:.4f}", style="dim")
+    # NO COST FIGURE. litellm prices against its own table, which has no entry for a local
+    # or self-hosted model — so this line asserted dollars for runs whose `performance`
+    # block simultaneously recorded `cost_provenance: unavailable`. Tokens are measured and
+    # actionable; the dollar figure was not, and two contradicting numbers in one report
+    # are worse than one missing one.
 
     # The axis decomposition SUPERSEDES the flat scorecard when the run carries an
     # index: E already reports the final score, so showing both is duplication.
@@ -389,6 +382,31 @@ def _next_step_hint(report: Report) -> str | None:
 
     return None
 
+def _pai_section(report: Any) -> str:
+    """The readiness index as markdown, or a stated reason there is none.
+
+    NEVER VANISHES SILENTLY. `_pai_block` swallows any scoring exception and returns `{}`,
+    and this section used to disappear with it — leaving a report whose Decision band
+    quoted a readiness verdict that appeared nowhere else. "I do not see the PAI" was a
+    reachable state, not a misreading.
+    """
+    _pai = getattr(report, "pai", None) or {}
+    if not (isinstance(_pai, dict) and _pai.get("score") is not None):
+        return ("## PAI — unavailable\n\n"
+                "No readiness index was computed for this run, so there is no cross-axis "
+                "verdict to report. The per-axis sections are unaffected. This is a "
+                "scoring or reporting failure, not a finding about the agent.")
+    try:
+        from proofagent_harness.audit import pai_explanation
+
+        return "\n".join(pai_explanation(report)).rstrip()
+    except Exception as _exc:
+        return (f"## PAI — {_pai.get('score')}/100 ({_pai.get('grade', '')})\n\n"
+                f"The index was computed but its explanation could not be rendered: "
+                f"`{type(_exc).__name__}: {_exc}`. This is a reporting defect, not a "
+                "finding about the agent.")
+
+
 def render_markdown(report: Report) -> str:
     """Render a Markdown report — good for PR comments and docs."""
     lines: list[str] = []
@@ -401,12 +419,12 @@ def render_markdown(report: Report) -> str:
     lines.append(f"**Certification:** `{report.certification.value}`  ")
     lines.append(f"**Mode:** `{report.mode}`  ")
     lines.append(f"**Tokens used:** `{report.tokens_used}`  ")
-    _harness_cost = float(report.primary_cost_usd or 0.0) + float(report.fallback_cost_usd or 0.0)
-    if _harness_cost > 0:
-        lines.append(f"**Harness LLM cost:** `${_harness_cost:.4f}`  ")
+    # No cost line — see the note in the console renderer above.
     lines.append(f"**Duration:** `{report.duration_seconds:.1f}s`\n")
 
-    lines.append(f"> {report.summary}\n")
+    lines.append(f"> **Behavioural axis only:** {report.summary} _The cross-axis "
+                 f"readiness verdict is in **Decision** below, and can differ: this line "
+                 f"reads the behavioural score and its severities, nothing else._\n")
 
     if report.warnings:
         lines.append("## Warnings\n")
@@ -414,42 +432,34 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {w}")
         lines.append("")
 
-    # ── ProofAgent Index (PAI) — the readiness verdict over all four axes ──
-    _pai = getattr(report, "pai", None) or {}
-    if isinstance(_pai, dict) and _pai.get("score") is not None:
-        _m = _pai.get("margin")
-        _shown = f"{_pai.get('score')} ± {_m}" if _m else f"{_pai.get('score')}"
+    # ── ONE actionable table across all four axes ────────────────────────────
+    # Placed before the axis sections on purpose: a reader who stops after the first
+    # screen should still leave knowing what is wrong, which control it touches, and
+    # where the proof lives. The per-axis sections below are the detail behind it.
+    # The readiness index is built in its own try/except and then handed to the audit
+    # renderer for placement, so it lands next to the summary that quotes it without the
+    # two sections sharing a failure: an audit that raises must not take the index with
+    # it, and vice versa.
+    _pai_md = _pai_section(report)
+    try:
+        from proofagent_harness.audit import audit_markdown
+
+        _audit = audit_markdown(report, after_summary=_pai_md)
+        if _audit:
+            lines.append(_audit)
+        elif _pai_md:
+            lines.append(_pai_md)
+    except Exception as _exc:
+        # A rendering helper must never cost someone their report — but it must not fail
+        # INVISIBLY either. A `pass` here meant one None axis score produced a report with
+        # no Summary and no axis tables, and nothing anywhere said so; the section simply
+        # was not there. Say it in the report, where the reader is.
         lines.append(
-            f"## PAI — ProofAgent Governance Readiness Index — {_shown}/100 "
-            f"({_pai.get('grade', '')} · {_pai.get('band', '')})\n"
+            "## Audit — unavailable\n\n"
+            f"The cross-axis tables could not be rendered: "
+            f"`{type(_exc).__name__}: {_exc}`. The per-axis sections below are "
+            "unaffected. This is a reporting defect, not a finding about the agent.\n"
         )
-        lines.append(f"**Verdict:** `{_pai.get('verdict', '')}`  ")
-        lines.append(f"**Completeness:** `{_pai.get('completeness', '')}`  ")
-        _caps = [r for r in (_pai.get("cap_reasons") or []) if r]
-        if _pai.get("blocked") and _pai.get("raw_score") != _pai.get("score"):
-            _why = ("; ".join(c.rstrip(".") for c in _caps) if _caps
-                    else "hard block (reason not recorded)")
-            lines.append(
-                f"**Uncapped (PAI_raw):** `{_pai.get('raw_score')}` — capped to "
-                f"`{_pai.get('score')}` by: {_why}  "
-            )
-        lines.append("")
-        lines.append("| Axis | Score | Weight |")
-        lines.append("|---|---|---|")
-        for a in _pai.get("axes") or []:
-            # Axes are already 0-100, so they render as a percentage like every
-            # other score in this report.
-            _sc = f"{a.get('score')}%" if a.get("present") else "not measured"
-            _weak = "  ← weakest" if a.get("key") == _pai.get("weakest_axis") else ""
-            lines.append(
-                f"| {a.get('symbol', '')} — {a.get('label', '')} | {_sc}{_weak} "
-                f"| {a.get('weight')} |"
-            )
-        lines.append("")
-        for r in _pai.get("reasons") or []:
-            lines.append(f"- {r}" + ("" if r in _caps else " _(does not cap the index)_"))
-        if _pai.get("reasons"):
-            lines.append("")
 
     # ── Compliance mapping (reporter-generated) ──────────────────────
     _comp = getattr(report, "compliance", None) or {}
@@ -457,7 +467,8 @@ def render_markdown(report: Report) -> str:
     if _fws:
         lines.append("## Compliance\n")
         for fw in _fws:
-            lines.append(f"### {fw.get('name', '')} — {fw.get('score', '?')}% coverage")
+            lines.append(
+                f"### {fw.get('name', '')} — {fw.get('score', '?')}% control credit")
             if fw.get("summary"):
                 lines.append(f"_{fw['summary']}_\n")
             lines.append("| Control | Status | Rationale |")
@@ -536,7 +547,15 @@ def render_markdown(report: Report) -> str:
             lines.append(f"| {pretty} | N/A | — | not evaluated |")
             continue
         score = report.per_metric.get(metric, 0.0)
-        sev = report.severity.get(metric, Severity.PASS).value
+        # THE CLOSED VOCABULARY HERE TOO. `Severity` carries `fail` / `warn` / `pass`, which
+        # mixes an outcome and a presentation state into a severity column — the same
+        # conflation the record separates. Mapped through the one adapter so the table and
+        # the record cannot name the same thing differently.
+        from proofagent_harness.ontology import default_outcome_of, severity_of
+
+        _raw = report.severity.get(metric, Severity.PASS).value
+        _sev, _outcome = severity_of(_raw), default_outcome_of(_raw)
+        sev = _sev if _outcome in ("FAIL", "PASS") else f"{_sev} · {_outcome}"
         conf = report.confidence.get(metric, 0.0)
         lines.append(
             f"| {pretty} | {pct(score)} | {round(conf * 100)}% | {sev} |"

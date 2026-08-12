@@ -192,10 +192,17 @@ class AgentContext(BaseModel):
 
         kwargs: dict[str, Any] = {}
 
+        # PROVENANCE. Which file each piece of context came from, so a finding about
+        # the prompt can cite the file an engineer has to open. Without it a Q finding
+        # reads "your prompt says X" and leaves the reader guessing which of several
+        # files that is.
+        sources: dict[str, str] = {}
+
         for sp_name in ("system_prompt.md", "system_prompt.txt", "system.md", "system.txt"):
             sp = root / sp_name
             if sp.exists():
                 kwargs["system_prompt"] = sp.read_text()
+                sources["system_prompt"] = str(sp)
                 break
 
         # Domain knowledge (optional, for backward compatibility): a `knowledge/`
@@ -207,15 +214,18 @@ class AgentContext(BaseModel):
             kb_dir = root / kb_name
             if kb_dir.is_dir():
                 kwargs["knowledge"] = str(kb_dir)
+                sources["knowledge"] = str(kb_dir)
                 break
         else:
             kb_file = root / "knowledge.md"
             if kb_file.exists():
                 kwargs["knowledge"] = str(kb_file)
+                sources["knowledge"] = str(kb_file)
 
         tools_p = root / "tools.json"
         if tools_p.exists():
             kwargs["tools"] = json.loads(tools_p.read_text())
+            sources["tools"] = str(tools_p)
 
         mem_p = root / "memory.jsonl"
         if mem_p.exists():
@@ -251,6 +261,10 @@ class AgentContext(BaseModel):
                 if isinstance(data.get("metadata"), dict):
                     kwargs["metadata"] = {**data["metadata"], **kwargs.get("metadata", {})}
             break
+
+        if sources:
+            # Under a reserved key so it cannot collide with a user's metadata.json.
+            kwargs["metadata"] = {**kwargs.get("metadata", {}), "_sources": sources}
 
         return cls(**kwargs)
 
@@ -415,6 +429,15 @@ class CheckDef(BaseModel):
     probes: str | None = None
     metrics: list[str] = Field(default_factory=list)
     families: list[str] = Field(default_factory=list)
+    # HOW THE FAILURE READS IN A REPORT. The check id names the BEHAVIOUR the juror looks
+    # for, which for a positive check is the safeguard that should have fired — so a failing
+    # `refused_clearly` produced a finding titled "refused clearly", reading as a success in
+    # an executive summary. `failure_type` is the normalized failure this check's failure
+    # constitutes; `title` is how that failure is named to a reader. Both authored here, at
+    # the registry, so the raw observation (`expected: refused_clearly, observed: false`)
+    # stays untouched.
+    failure_type: str | None = None
+    title: str | None = None
 
     def credit(self, observed: bool) -> float:
         """Credit in [0, 1] for an observation of this check.
@@ -795,6 +818,19 @@ class Report(BaseModel):
     severity: dict[str, Severity] = Field(default_factory=dict)
     transcript: list[Turn] = Field(default_factory=list)
     consensus_log: dict[str, ConsensusResult] = Field(default_factory=dict)
+    check_verdicts: list[CheckVerdict] = Field(default_factory=list)
+    """The POOLED verdicts the metric scores were counted from — code-decided ones
+    included, with their vote counts.
+
+    Without this the report could not explain its own E scores. `consensus_log` carries
+    each juror's RAW ballot, which has no pool count and no code verdicts at all, so a
+    reader saw `safety 93%` with every persisted observation at full credit and no way
+    to find the missing 7%. It lives in the deduction: a split panel earns fractional
+    credit (`credit_for`), and `votes_observed / votes_total` is the arithmetic.
+
+    This is the audit trail for the behavioural axis. Everything else about a run can be
+    re-derived; a verdict that was computed, used to decide, and then dropped cannot.
+    """
     findings: list[Finding] = Field(default_factory=list)
     technical_issues: list[Finding] = Field(default_factory=list)
     """v0.5.0 — Operational / behavioral anomalies observed DURING the eval,
@@ -932,6 +968,10 @@ class Report(BaseModel):
             Path(path).write_text(text)
         return text
 
+    # `to_per` / `to_per_json` were removed when the RECORD moved to the governance platform.
+    # The archive is what the harness produces and what `--upload` sends; the record is derived
+    # server-side from it, so the platform can attest to what it stores rather than trusting a
+    # client-built blob. `to_json` below is still the full archive and is unchanged.
     def to_markdown(self, path: str | None = None) -> str:
         """Render a readable Markdown report (and optionally write to disk)."""
         from proofagent_harness.tools.report_tools import render_markdown

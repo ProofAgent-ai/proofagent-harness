@@ -43,6 +43,10 @@ class HarnessState(TypedDict, total=False):
     turn_count: int
     metrics: list[str]
     knowledge_text: str
+    #: The knowledge input AS GIVEN (path / dir / dict / list), kept beside the concatenated
+    #: text so the context assessment can read the corpus FILE BY FILE. A proof has to name the
+    #: file it was quoted from, and a single concatenated blob cannot say which file that was.
+    knowledge_source: Any
     context: AgentContext
 
     agent_callable: Callable[..., Any]

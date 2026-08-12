@@ -28,6 +28,7 @@ Design notes:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -51,6 +52,12 @@ CRITERIA: list[tuple[str, str]] = [
 
 _VALID_IMPACT = {"big_cut", "cut", "neutral", "adds"}
 
+#: The labelled sections a proof may be quoted from — mirrors the prompt's own headings.
+_PROOF_SOURCES = {"system_prompt", "tool_schemas", "knowledge"}
+
+# Every criterion id, for validating the `criterion` a finding claims to belong to.
+_ALL_CRITERIA: frozenset[str] = frozenset(cid for cid, _ in CRITERIA)
+
 # Criteria EXCLUDED from the headline Q score, though still assessed and reported.
 #
 # Both IMPROVE as the artifact shrinks: a near-empty prompt has nothing to contradict
@@ -72,23 +79,43 @@ agent's supplied context (system prompt, tool schemas, and whether a knowledge \
 corpus was provided). Grade the QUALITY of that context.
 
 Score EACH criterion 0-10 (10 = excellent), grounded ONLY in what is provided. \
-Then list concrete findings: each names a problem in the context, PROOF (an \
-exact short quote from the system prompt or tool schema that demonstrates the \
-problem — never paraphrase), a fix, and a token verdict — does fixing it CUT \
+Then list concrete findings: each names a problem in the context, PROOF (see the \
+PROOF RULES below), a fix, and a token verdict — does fixing it CUT \
 tokens (big_cut / cut), add a few worthwhile tokens (adds), or stay neutral. \
 Estimate the total tokens reclaimable from the cut / big_cut findings; the \
 estimate must be grounded in the quoted passages (roughly chars/4) and can \
 never exceed the size of the supplied context.
 
+# PROOF RULES
+A proof is a quote the reader can find in THEIR OWN files and edit. So:
+1. Quote ONLY from `## system_prompt`, `## tool_schemas`, or a `### <filename>` under
+   `## knowledge_corpus`.
+   The `# GOVERNANCE` block is OUR input to you, not the customer's context. Never
+   quote `risk_tier`, `use_case`, `frameworks_in_scope` or `obligations` as proof —
+   the reader did not write those lines and cannot fix them.
+2. YOU CANNOT QUOTE AN ABSENCE. When the problem is that something is MISSING — no
+   PII rule, no injection instruction, no oversight mandate — there is no passage
+   to quote. Set `"proof": ""` and make `problem` name exactly what is absent and
+   which file it should live in. An empty proof is the correct, honest answer here;
+   a quote of nearby unrelated text to satisfy the field is a fabrication.
+3. Never paraphrase. A proof is verbatim or it is empty.
+4. Name the SECTION your quote came from in `source`. The reader is told which file to open,
+   and a quote from the tool schemas reported as the system prompt sends them to the wrong
+   file to look for text that is not in it.
+
 # AGENT CONTEXT
 mode: {mode}
 has_knowledge_corpus: {has_knowledge}
+files_supplied: {file_list}
 {governance}
 ## system_prompt
 {system_prompt}
 
 ## tool_schemas (JSON)
 {tools}
+
+## knowledge_corpus (the agent's reference knowledge, file by file)
+{knowledge}
 
 # CRITERIA (score each 0-10)
 {criteria}
@@ -99,8 +126,10 @@ Return STRICT JSON only:
   "criteria": [{{"id": "<criterion_id>", "score": <0-10>}}],
   "findings": [
     {{"title": "short problem name",
+      "criterion": "<the criterion_id this finding belongs to, from the list above>",
       "problem": "what is wrong + where, one sentence",
-      "proof": "exact quote (<=25 words) from the system prompt / tool schema showing it",
+      "proof": "exact quote (<=25 words) from the context, or \\"\\" if the problem is an absence — see PROOF RULES",
+      "source": "system_prompt | tool_schemas | knowledge — which section the proof was quoted from; omit when proof is empty",
       "fix": "the concrete fix, one sentence",
       "token_impact": "big_cut|cut|neutral|adds"}}
   ],
@@ -147,8 +176,152 @@ def _governance_block(governance: Any) -> str:
         "tier + these frameworks DEMAND — e.g. explicit fair-lending / adverse-action rules "
         "for credit, PII/PHI handling, human-oversight and transparency instructions. A "
         "higher-risk agent whose context lacks the controls its frameworks require is a "
-        "guardrail gap; cite the missing control specifically.\n"
+        "guardrail gap. NAME the missing control in `problem` and leave `proof` empty — a "
+        "gap has no passage to quote, and this block is not the customer's context.\n"
     )
+
+
+
+# ── proof provenance ────────────────────────────────────────────────────────────
+#
+# HIGH-FIDELITY TRACEABILITY: the file is RESOLVED, not reported.
+#
+# A user can hand the harness ten context files. When the assessor quotes one of them, the reader
+# has to be told which file to open — and the only trustworthy way to know is to look. The
+# assessment has every source in memory at this point, so each proof is matched back against the
+# actual file contents and the file that literally contains the passage is the answer.
+#
+# Resolving instead of asking has three consequences worth stating:
+#   * it cannot be wrong the way a self-report can. Measured before this existed: a proof quoted
+#     from `tools.json` was labelled `system_prompt.md`, because ONE path was stamped on every
+#     finding regardless of origin.
+#   * it VERIFIES the proof. A quote that appears in no supplied file is not evidence about the
+#     context at all — that is how the harness's own injected `risk_tier: High risk` line ended up
+#     presented as the customer's prompt. Unresolvable proofs are marked, not silently attributed.
+#   * it needs no model cooperation, so it holds even when the model ignores the instruction.
+
+
+
+#: Cap on the corpus block in the prompt. Matches the system prompt's own cap: a knowledge base can
+#: be arbitrarily large, and the assessment is ONE cheap call by design. Truncation is announced in
+#: the prompt so the model does not read a cut-off file as a complete one — and the resolver still
+#: searches the FULL file, so a proof quoted from the visible part still resolves.
+_KNOWLEDGE_PROMPT_CAP = 12000
+
+
+
+def _prompt_file_names(context: Any) -> set[str]:
+    """The filenames already shown under their own prompt headings, so they are not repeated."""
+    from pathlib import Path as _Path
+
+    paths = (getattr(context, "metadata", None) or {}).get("_sources") or {}
+    out: set[str] = set()
+    for key, default in (("system_prompt", "system prompt"), ("tools", "tools.json")):
+        raw = paths.get(key)
+        out.add(_Path(str(raw)).name if raw else default)
+    return out
+
+
+def _knowledge_block(sources: dict[str, str], prompt_names: set[str]) -> str:
+    """The corpus in the prompt, one `### <filename>` per file.
+
+    Per file rather than concatenated: the model is asked to name the file its proof came from, and a
+    single blob gives it nothing to name. Files are taken shortest-first so a large one cannot starve
+    the rest out of the budget.
+    """
+    corpus = {k: v for k, v in sources.items() if k not in prompt_names}
+    if not corpus:
+        return "(none provided)"
+    out: list[str] = []
+    used = 0
+    for name in sorted(corpus, key=lambda k: len(corpus[k])):
+        text = corpus[name]
+        room = _KNOWLEDGE_PROMPT_CAP - used
+        if room <= 200:
+            out.append(f"### {name}\n(omitted — corpus budget exhausted)")
+            continue
+        body = text[:room]
+        if len(body) < len(text):
+            body += f"\n… (truncated at {room} of {len(text)} chars)"
+        out.append(f"### {name}\n{body}")
+        used += len(body)
+    return "\n\n".join(out)
+
+
+def _named_sources(context: Any, knowledge_source: Any = None) -> dict[str, str]:
+    """`{display name: content}` for every file this assessment can see.
+
+    Names are what an engineer would recognise: the real filename where the loader recorded a path
+    (`system_prompt.md`, `tools.json`), and the per-file labels `load_knowledge` writes for a corpus
+    directory. Keyed by name rather than path so the same map serves matching and display.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    if context is None:
+        return {}
+    out: dict[str, str] = {}
+    paths = (getattr(context, "metadata", None) or {}).get("_sources") or {}
+
+    sp = getattr(context, "system_prompt", None)
+    if sp:
+        raw = paths.get("system_prompt") or "system prompt"
+        out[_Path(str(raw)).name] = str(sp)
+
+    tools = getattr(context, "tools", None)
+    if tools:
+        raw = paths.get("tools") or "tools.json"
+        with contextlib.suppress(Exception):
+            out[_Path(str(raw)).name] = _json.dumps(tools, indent=2)
+
+    # THE CORPUS, FILE BY FILE. A directory collapsed to one name would put the reader back where
+    # they started: "it is somewhere in domain_knowledge/".
+    # The corpus supplied SEPARATELY (`--domain-knowledge-dir` / `evaluate(knowledge=...)`)
+    # takes precedence: it is the recommended input and never lands on the context object.
+    kb = knowledge_source if knowledge_source is not None else getattr(context, "knowledge", None)
+    if isinstance(kb, dict):
+        for label, text in kb.items():
+            out[str(label)] = str(text)
+    elif isinstance(kb, str) and kb:
+        with contextlib.suppress(Exception):
+            kp = _Path(kb)
+            if kp.is_dir():
+                for f in sorted(kp.rglob("*")):
+                    if f.is_file() and f.suffix.lower() in {".md", ".txt", ".rst"}:
+                        out[f.name] = f.read_text(errors="ignore")
+            elif kp.is_file():
+                out[kp.name] = kp.read_text(errors="ignore")
+            elif kb.strip():
+                out["inline knowledge"] = kb
+    elif isinstance(kb, list):
+        for item in kb:
+            with contextlib.suppress(Exception):
+                f = _Path(str(item))
+                if f.is_file():
+                    out[f.name] = f.read_text(errors="ignore")
+    return out
+
+
+def _norm_for_match(text: str) -> str:
+    """Whitespace-insensitive, case-insensitive. A model re-wraps a quote it copied faithfully, and
+    a proof that differs only in line breaks is still the same passage."""
+    import re as _re
+    return _re.sub(r"\s+", " ", text or "").strip().lower()
+
+
+def _resolve_proof_file(proof: str, sources: dict[str, str]) -> str:
+    """The file whose content contains `proof`, or "" when no supplied file does.
+
+    "" is meaningful: either the finding is an absence (no proof by design) or the quote did not come
+    from the context, and both must read as unattributed rather than pinned to a plausible file.
+    """
+    needle = _norm_for_match(proof)
+    if not needle:
+        return ""
+    for name, content in sources.items():
+        if needle in _norm_for_match(content):
+            return name
+    return ""
 
 
 def assess_context_engineering(
@@ -158,6 +331,7 @@ def assess_context_engineering(
     model: str = "gpt-4.1-mini",
     api_base: str | None = None,
     has_knowledge: bool = False,
+    knowledge_source: Any = None,
     max_findings: int = 12,
     governance: Any = None,
 ) -> dict[str, Any]:
@@ -178,6 +352,10 @@ def assess_context_engineering(
     if not (system_prompt or tools):
         return {}
 
+    # EVERY FILE THIS ASSESSMENT CAN SEE, by the name an engineer would recognise. Built once and
+    # used to resolve each proof back to the file it was quoted from — see `_resolve_proof_file`.
+    sources = _named_sources(context, knowledge_source)
+
     try:
         import litellm
     except Exception:
@@ -193,6 +371,13 @@ def assess_context_engineering(
     prompt = _PROMPT.format(
         mode=mode,
         has_knowledge=str(bool(has_kn)).lower(),
+        # NAMED, so a proof can be traced to a file rather than to "the context". The resolver
+        # verifies the attribution afterwards regardless, but a model that can see the filenames
+        # writes quotes that are easier to place.
+        file_list=(", ".join(sorted(sources)) or "(none named)"),
+        # The prompt already prints the system prompt and tool schemas under their own headings;
+        # pass their NAMES so the corpus block does not repeat them.
+        knowledge=_knowledge_block(sources, _prompt_file_names(context)),
         governance=_governance_block(governance),
         system_prompt=(str(system_prompt)[:12000] if system_prompt else "(none provided)"),
         tools=tools_text,
@@ -265,10 +450,35 @@ def assess_context_engineering(
         impact = str(f.get("token_impact", "neutral")).lower()
         if impact not in _VALID_IMPACT:
             impact = "neutral"
+        # WHICH CRITERION THIS BELONGS TO, from the assessor rather than guessed.
+        # The titles it writes and the criterion names share no vocabulary ("Lack of
+        # explicit fair lending constraints" vs "Guardrail Coverage"), so downstream
+        # keyword-matching was the only option and it mislabels. The assessor scores every
+        # criterion, so it already knows; validated against the known ids so a
+        # hallucinated criterion is dropped rather than shown.
+        crit = str(f.get("criterion", "")).strip().lower().replace(" ", "_")
+        # WHICH FILE THE QUOTE IS IN. Validated against the three sections the prompt actually
+        # labels, so a hallucinated source is dropped to "" rather than sending the reader to a
+        # file that does not contain the passage. Empty means "we do not know", and the audit
+        # then says "the supplied context" instead of naming a file it cannot vouch for.
+        # WHICH FILE, RESOLVED FROM THE FILES THEMSELVES. The model's own `source` is kept only as
+        # a hint for the unresolvable case; `_resolve_proof_file` is the authority because it
+        # looked. `source_file` is "" when no supplied file contains the quote, which means either
+        # an absence finding or a proof that did not come from the context — see `_resolve_proof_file`.
+        proof_text = str(f.get("proof", ""))[:300]
+        src_section = str(f.get("source", "")).strip().lower().replace(" ", "_")
+        resolved = _resolve_proof_file(proof_text, sources)
         findings.append({
+            "criterion": crit if crit in _ALL_CRITERIA else "",
+            "source": src_section if src_section in _PROOF_SOURCES else "",
+            "source_file": resolved,
+            # A quote we could not find in any supplied file is not evidence about the context.
+            # Said explicitly so the record and the dashboard can label it rather than imply a
+            # provenance neither of them checked.
+            "proof_verified": bool(resolved),
             "title": str(f.get("title", ""))[:160],
             "problem": str(f.get("problem", ""))[:400],
-            "proof": str(f.get("proof", ""))[:300],
+            "proof": proof_text,
             "fix": str(f.get("fix", ""))[:400],
             "token_impact": impact,
         })
@@ -283,6 +493,9 @@ def assess_context_engineering(
     return {
         "score": overall,
         "grade": _grade(overall),
+        # THE INVENTORY. A reader who supplied ten files needs to know all ten were read — and a
+        # finding's `source_file` is only meaningful against the list it was resolved from.
+        "sources": sorted(sources),
         "sub_criteria": sub_criteria,
         "findings": findings,
         "token_savings_estimate": savings,

@@ -70,6 +70,18 @@ def load_control_behaviours() -> dict[str, dict[str, list[str]]]:
 
 
 @lru_cache(maxsize=1)
+def control_map_version() -> str:
+    """The crosswalk's own version, for citing alongside a rendered mapping.
+
+    A control mapping without its registry version cannot be argued with: a reader looking
+    at "ASI01" in a six-month-old report has no way to tell whether the crosswalk has since
+    been revised. The file carries `version:` for exactly this reason and nothing was
+    reading it.
+    """
+    return str(_data("control_behaviours.yaml").get("version") or "unversioned")
+
+
+@lru_cache(maxsize=1)
 def _behaviour_index() -> dict[str, tuple[tuple[str, str], ...]]:
     """behaviour -> ((framework, control), ...). Inverted once, read many."""
     idx: dict[str, list[tuple[str, str]]] = {}

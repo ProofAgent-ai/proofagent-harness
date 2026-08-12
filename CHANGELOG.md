@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — unreleased
+
+**Context-engineering (Q) scores move, and PAI moves with them.** The context assessment now reads
+the domain-knowledge corpus instead of being told only that one exists, so it grades grounding on
+evidence it can see. Measured on one unchanged context: Q sat in a 52–66 band across four runs while
+the corpus was invisible and scored 80 once it was visible — the band is the assessor's own
+run-to-run spread, so read this as a shift, not a precise delta. Re-baseline before gating on a
+version-to-version difference.
+
+### Added
+- **The domain-knowledge corpus is assessed.** `--domain-knowledge-dir` / `evaluate(knowledge=…)`
+  now reaches the context assessment file by file, each under its own `### <filename>` heading
+  (capped, shortest-first, truncation announced). Grounding was previously graded from the system
+  prompt plus a boolean.
+- **Every context finding names the file its proof came from.** `context_engineering.findings[]`
+  gains `source_file` and `proof_verified`, and `context_engineering.sources` lists every file the
+  assessment read. The file is **resolved by searching the supplied files for the quote**, not taken
+  from the model's word — so an attribution is verified, and a quote no file contains is marked
+  unverified rather than pinned to a plausible one.
+- **One top risk per axis.** `pai.axis_top_risks` (and `top_risk` on each axis) names the worst
+  component on E, Q, C and G, ordered by severity so a `critical` on a strong axis is not buried
+  beneath a `warn` on a weak one.
+
+### Changed
+- **The verdict states no overall score.** The executive summary explains why an agent is or is not
+  ready — the failure, the exposure, the next action — and no longer quotes a percentage. It is
+  written from the behavioural axis while the reader sees the four-axis index above it, so a figure
+  here contradicted the headline it sat under.
+- **A context proof may be empty, and that is the honest answer.** An absence — no PII rule, no
+  injection instruction — has no passage to quote. The assessor is told to leave `proof` empty and
+  name what is missing in `problem` instead of quoting nearby text to fill a mandatory field.
+- The assessor may no longer quote the harness's own injected risk-context block as evidence about
+  the customer's context.
+
+### Fixed
+- **The pre-run banner reported the wrong upload destination.** It printed the hosted endpoint
+  unconditionally, so a run pointed at an on-prem backend with `PROOFAGENT_API_BASE_URL` was told on
+  screen that its evidence was going to the vendor's cloud. It now reads the same variable the
+  uploader does.
+- A context finding's file reference was a single path stamped on every finding, so a proof quoted
+  from the tool schemas was reported as living in the system prompt.
+
 ## [0.11.0] — 2026-07-30
 
 **Scores are not comparable with 0.10.x and earlier** — re-baseline before gating on a

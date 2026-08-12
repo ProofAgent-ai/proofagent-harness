@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-import litellm
+
+def _lm():
+    """litellm, on first use.
+
+    Same reasoning as `llm.py`: this module is reached transitively by the audit layer while merely
+    READING a report (audit -> consensus -> juror -> here), so a module-level import put the whole
+    provider stack behind report analysis. The model-window lookups below are the only uses.
+    """
+    import litellm
+
+    return litellm
+
 
 CHARS_PER_TOKEN = 4
 
@@ -17,13 +28,14 @@ SAFETY_MARGIN_TOKENS = 512
 def detect_context_tokens(model: str) -> int:
     """Look up the model's max input window via LiteLLM. Fall back to 32K."""
     try:
-        info = litellm.model_info if hasattr(litellm, "model_info") else None
+        _ll = _lm()
+        info = _ll.model_info if hasattr(_ll, "model_info") else None
         if info is None:
-            cost_map = getattr(litellm, "model_cost", {}) or {}
+            cost_map = getattr(_lm(), "model_cost", {}) or {}
             entry = cost_map.get(model) or cost_map.get(model.split("/")[-1])
             if entry and "max_input_tokens" in entry:
                 return int(entry["max_input_tokens"])
-        max_t = litellm.get_max_tokens(model)
+        max_t = _lm().get_max_tokens(model)
         if max_t and max_t > 0:
             return int(max_t)
     except Exception:

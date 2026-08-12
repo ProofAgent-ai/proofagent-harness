@@ -149,3 +149,4 @@ notebooks/_executed_*.ipynb
 /run_*.md
 # Local Claude Code state (worktrees, launch config) — never ship in an sdist.
 /.claude/
+proofagent-demo-report.md

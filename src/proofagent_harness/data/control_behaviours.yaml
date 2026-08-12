@@ -198,3 +198,127 @@ frameworks:
                       privilege_escalation]
     privacy_notice:  [consent_bypass, adverse_action_without_notice]
     access_controls: [privilege_escalation, forbidden_tool_use, role_confusion]
+
+  # ── Agent security crosswalk ─────────────────────────────────────────────────
+  #
+  # PROVENANCE. Every id and title below was read from the primary document, not
+  # from a vendor mapping page or a blog:
+  #
+  #   owasp_asi      Top 10 for Agentic Applications, Version 2026 (Dec 2025)
+  #                  https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
+  #   owasp_threats  Agentic AI - Threats and Mitigations, Version 1.1 (Dec 2025)
+  #                  https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/
+  #   owasp_llm      Top 10 for LLM Applications 2025 (published 17 Nov 2024)
+  #                  https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/
+  #   aiuc_1         AIUC-1, 15 July 2026 release  https://www.aiuc-1.com/
+  #   nist_800_53    SP 800-53 Rev. 5, from the official OSCAL catalog
+  #                  https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+  #
+  # TWO CORRECTIONS WORTH KNOWING, since most published mappings get them wrong:
+  #   * The OWASP threat taxonomy is T1..T17 as of v1.1. T16 (Insecure Inter-Agent
+  #     Protocol Abuse) and T17 (Supply Chain Compromise) were added after v1.0.
+  #     Anything still citing "T1-T15" is mapping a superseded version.
+  #   * owasp_asi and owasp_threats are SEPARATE publications with SEPARATE
+  #     numbering. The Top 10 cross-references the taxonomy (ASI01 corresponds to
+  #     T06 and T07), so the two must not be conflated or deduplicated.
+  #
+  # WHAT IS MISSING, AND WHY. A control appears here only if an adversarial
+  # transcript can produce evidence about it. Controls that need artefacts this
+  # harness never sees are omitted rather than listed and left empty:
+  #
+  #   owasp_asi      omits ASI04 (agentic supply chain) and ASI07 (insecure
+  #                  inter-agent communication)      -> 8 of 10
+  #   owasp_threats  omits T4 (resource overload), T12, T13, T14 (multi-agent),
+  #                  T16 (MCP/A2A protocol), T17 (supply chain)  -> 11 of 17
+  #   owasp_llm      omits LLM03 (supply chain), LLM04 (training-data poisoning),
+  #                  LLM10 (unbounded consumption)   -> 7 of 10
+  #   aiuc_1         21 of 51 active requirements. The remainder are process and
+  #                  organisational controls (vendor due diligence, quality
+  #                  management, incident plans) that a behavioural run cannot
+  #                  speak to, plus A007 (IP violations).
+  #   nist_800_53    11 controls, not the catalog. Chosen because an agent
+  #                  transcript is direct evidence for them; the surrounding
+  #                  programme controls (CA-7, AU-11, retention, review cadence)
+  #                  are the organisation's to evidence, not the agent's.
+  #
+  # Read a framework's coverage as "what a transcript proves", never as
+  # certification against the standard.
+
+  owasp_asi:
+    asi01: [instruction_override, guardrail_bypass, policy_drift, role_confusion]
+    asi02: [forbidden_tool_use, unauthorized_action, capability_composition,
+            missing_required_tool]
+    asi03: [privilege_escalation, role_confusion, unauthorized_disclosure,
+            cross_subject_disclosure]
+    asi05: [unsafe_code, capability_composition]
+    asi06: [instruction_override, policy_drift]
+    asi08: [fabricated_fact, phantom_action, fabricated_citation]
+    asi09: [overclaimed_certainty, fabricated_authority, phantom_action,
+            abusive_interaction]
+    asi10: [unauthorized_action, policy_drift, human_oversight_bypass,
+            privilege_escalation]
+
+  owasp_threats:
+    t1:  [instruction_override, policy_drift]
+    t2:  [forbidden_tool_use, unauthorized_action, missing_required_tool]
+    t3:  [privilege_escalation, role_confusion, unauthorized_disclosure]
+    t5:  [fabricated_fact, fabricated_citation, fabricated_authority]
+    t6:  [instruction_override, guardrail_bypass, policy_drift]
+    t7:  [phantom_action, unauthorized_action, overclaimed_certainty]
+    t8:  [audit_trail_gap, phantom_action]
+    t9:  [role_confusion]
+    t10: [human_oversight_bypass]
+    t11: [unsafe_code, capability_composition]
+    t15: [harmful_content, fabricated_authority, abusive_interaction]
+
+  owasp_llm:
+    llm01: [instruction_override, guardrail_bypass, role_confusion]
+    llm02: [unauthorized_disclosure, cross_subject_disclosure, payment_data_exposure,
+            special_category_disclosure, data_minimisation_failure]
+    llm05: [unsafe_code]
+    llm06: [forbidden_tool_use, unauthorized_action, privilege_escalation,
+            capability_composition, human_oversight_bypass]
+    llm07: [unauthorized_disclosure]
+    llm08: [cross_subject_disclosure, fabricated_fact]
+    llm09: [fabricated_fact, fabricated_citation, fabricated_authority,
+            overclaimed_certainty, phantom_action]
+
+  aiuc_1:
+    a001: [consent_bypass]
+    a002: [data_minimisation_failure, channel_switching]
+    a003: [unauthorized_disclosure, cross_subject_disclosure]
+    a005: [cross_subject_disclosure]
+    a006: [special_category_disclosure, payment_data_exposure,
+           data_minimisation_failure]
+    a008: [unauthorized_disclosure]
+    b002: [instruction_override]
+    b006: [unauthorized_action, forbidden_tool_use, privilege_escalation]
+    b007: [role_confusion, unauthorized_disclosure]
+    b009: [data_minimisation_failure]
+    b010: [unsafe_code]
+    c003: [harmful_content, abusive_interaction]
+    c004: [safety_critical_advice, policy_drift]
+    c005: [unauthorized_action, capability_composition, privilege_escalation]
+    c006: [unsafe_code]
+    c007: [human_oversight_bypass]
+    d001: [fabricated_fact, fabricated_citation, fabricated_authority,
+           overclaimed_certainty]
+    d003: [forbidden_tool_use, capability_composition, missing_required_tool]
+    e015: [audit_trail_gap]
+    e016: [adverse_action_without_notice]
+    f001: [unsafe_code, capability_composition]
+
+  nist_800_53:
+    ac_3:    [unauthorized_disclosure, cross_subject_disclosure, unauthorized_action,
+              forbidden_tool_use]
+    ac_4:    [channel_switching, data_minimisation_failure, unauthorized_disclosure,
+              cross_subject_disclosure]
+    ac_6:    [privilege_escalation, forbidden_tool_use, capability_composition]
+    ac_6_9:  [audit_trail_gap]
+    ac_6_10: [privilege_escalation, role_confusion]
+    au_2:    [audit_trail_gap]
+    au_3:    [audit_trail_gap]
+    au_10:   [audit_trail_gap, phantom_action]
+    au_12:   [audit_trail_gap, phantom_action]
+    si_4:    [instruction_override, guardrail_bypass, unauthorized_action]
+    si_10:   [instruction_override, role_confusion]

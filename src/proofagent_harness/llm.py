@@ -12,11 +12,29 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import litellm
+# LITELLM IS IMPORTED ON FIRST USE, not at module scope.
+#
+# `LLM` is a type annotation on the pipeline state, and pydantic resolves that annotation at class
+# creation — so importing this module was unavoidable for anything that touched the state, and
+# importing litellm (a large dependency tree) came with it. That put the whole orchestration stack
+# behind every consumer that only wants to READ a report: a CI script, a report renderer, the
+# governance platform deriving a record from an uploaded archive.
+#
+# Nothing here needs litellm until a completion is actually requested, so it is resolved then and
+# cached. The module-level settings move with it — they only matter once litellm exists.
+_litellm: Any = None
 
-litellm.suppress_debug_info = True
 
-litellm.drop_params = True
+def _lm() -> Any:
+    """litellm, imported and configured on first use."""
+    global _litellm
+    if _litellm is None:
+        import litellm as _mod
+
+        _mod.suppress_debug_info = True
+        _mod.drop_params = True
+        _litellm = _mod
+    return _litellm
 
 # litellm's background logging worker leaks an un-awaited coroutine warning at
 # interpreter shutdown ("coroutine 'Logging.async_success_handler' was never
@@ -266,7 +284,7 @@ class LLM:
         call_kwargs = _strip_deprecated_params(self.model, call_kwargs)
 
         try:
-            resp = await litellm.acompletion(
+            resp = await _lm().acompletion(
                 model=self.model,
                 messages=msgs,
                 **call_kwargs,
@@ -280,7 +298,7 @@ class LLM:
                 call_kwargs.pop(offender, None)
                 _DEPRECATED_PARAMS_BY_MODEL.setdefault(self.model, set()).add(offender)
                 try:
-                    resp = await litellm.acompletion(
+                    resp = await _lm().acompletion(
                         model=self.model,
                         messages=msgs,
                         **call_kwargs,
@@ -621,12 +639,12 @@ def _estimate_cost(
     """Use LiteLLM's cost lookup; fall back to a rough estimate or 0."""
     if resp is not None:
         try:
-            return float(litellm.completion_cost(completion_response=resp))
+            return float(_lm().completion_cost(completion_response=resp))
         except Exception:
             pass
     try:
         return float(
-            litellm.completion_cost(
+            _lm().completion_cost(
                 model=model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,

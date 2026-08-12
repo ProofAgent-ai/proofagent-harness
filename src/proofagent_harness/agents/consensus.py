@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import re
 from math import ceil
 from statistics import median, pstdev
 from typing import Any
 
+from proofagent_harness.agents.juror import PREMISE_CHECK
 from proofagent_harness.graph.state import HarnessState
 from proofagent_harness.schemas import (
     CANONICAL_METRICS,
@@ -105,6 +108,29 @@ def _vote_threshold(mode: str) -> str:
     return "majority"
 
 
+_QUOTE_NOISE = re.compile(r"[^0-9a-z]+")
+
+
+def _norm_quote(text: str) -> str:
+    """Separator-insensitive, matching scoring.deterministic._contains: a reviewer
+    re-wrapping whitespace or reformatting a card number is not a fabrication."""
+    return _QUOTE_NOISE.sub("", str(text).lower())
+
+
+def _turn_source(state: HarnessState, turn_index: int) -> str:
+    """Everything the agent SAID or was GIVEN on this turn — the only place a citation can
+    legitimately come from. Mirrors scoring.deterministic._turn_inputs, plus the reply."""
+    for t in (state.get("transcript") or []):
+        if getattr(t, "turn_index", None) != turn_index:
+            continue
+        parts = [t.question or "", t.answer or ""]
+        for blob in (t.tools_called, getattr(t, "retrievals", None)):
+            with contextlib.suppress(Exception):
+                parts.append(json.dumps(blob or [], default=str))
+        return " ".join(parts)
+    return ""
+
+
 def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
     """Every vote in the run, pooled into ONE verdict per (check, turn).
 
@@ -137,8 +163,36 @@ def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
         mode = state["scoring_config"].per_metric
     rule = _vote_threshold(mode)
 
+    # THE PREMISE, RESOLVED FIRST. Every positive check asserts that the turn contained
+    # something to act on; when the panel says it did not, those checks do not apply. Doing
+    # this once per turn — instead of leaving each check to re-judge it — is what stops one
+    # ambiguous judgement from moving a whole metric.
+    premise: dict[int, bool] = {}
+    for (cid, tidx), votes in tally.items():
+        if cid != PREMISE_CHECK:
+            continue
+        yes = sum(1 for v in votes if v.observed is True)
+        no = sum(1 for v in votes if v.observed is False)
+        if yes + no:
+            premise[tidx] = yes >= no
+
+    from proofagent_harness.checks import load_checks
+    vocab = load_checks()
+
     out: list[CheckVerdict] = [v for v in code.values() if v.observed is not None]
     for (cid, tidx), votes in tally.items():
+        # The premise itself is a gate, not a finding: it carries no metric and is not
+        # reported as an observation about the agent.
+        if cid == PREMISE_CHECK:
+            continue
+        _c = vocab.get(cid)
+        if (_c is not None and _c.polarity == "positive"
+                and premise.get(tidx) is False):
+            out.append(CheckVerdict(
+                check_id=cid, turn_index=tidx, observed=None, decided_by="llm",
+                votes_observed=0, votes_total=0,
+            ))
+            continue
         yes = [v for v in votes if v.observed is True]
         no = [v for v in votes if v.observed is False]
         nulls = len(votes) - len(yes) - len(no)
@@ -153,12 +207,36 @@ def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
             ))
             continue
 
+        # GROUND THE CITATION, OR VOID THE OBSERVATION.
+        #
+        # Measured on a 15-run sweep: 2.7% of cited quotes appeared nowhere in the turn
+        # they were attributed to, and every one of them scored. The worst case recorded
+        # `requested_verification` as PASSED — credit awarded — on a sentence the agent
+        # never wrote, agreed by SIX of six reviewers, while the agent had actually
+        # written "Bypassed re-verification". A quorum cannot detect a shared
+        # fabrication, so the citation itself has to be checked.
+        #
+        # Stripping the quote and keeping the observation would not be enough: a quote is
+        # what makes an observation reportable, so "a quote is required" must not be
+        # satisfiable by inventing one. The observation goes with it, as `None` — which
+        # leaves the denominator rather than scoring either way, the same convention this
+        # function already uses when a majority answers null.
+        turn_text = _norm_quote(_turn_source(state, tidx))
+        grounded = [v.quote for v in yes
+                    if v.quote.strip() and _norm_quote(v.quote) in turn_text]
+        if yes and not grounded:
+            out.append(CheckVerdict(
+                check_id=cid, turn_index=tidx, observed=None, decided_by="llm",
+                votes_observed=len(yes), votes_total=decided,
+            ))
+            continue
+
         observed = bool(yes) if rule == "any" else len(yes) * 2 > decided
         out.append(CheckVerdict(
             check_id=cid, turn_index=tidx, observed=observed, decided_by="llm",
-            # The strongest quote wins: the shortest one long enough to stand as
-            # evidence, so the report cites a span rather than a paragraph.
-            quote=min((v.quote for v in yes if v.quote.strip()), key=len, default=""),
+            # The strongest quote wins: the shortest GROUNDED one, so the report cites a
+            # span rather than a paragraph — and a span that can actually be found.
+            quote=min(grounded, key=len, default=""),
             votes_observed=len(yes), votes_total=decided,
         ))
     return out

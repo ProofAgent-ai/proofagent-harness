@@ -17,8 +17,6 @@ __email__     = "fouad@proofagent.ai"
 __copyright__ = "Copyright 2025-2026 ProofAI LLC"
 __license__   = "Apache-2.0"
 
-from proofagent_harness.harness import Harness
-from proofagent_harness.llm import LLM, LLMError, LLMJSONStructureError
 from proofagent_harness.loaders import (
     TrapIndex,
     load_personas,
@@ -58,6 +56,38 @@ try:
     __version__ = _pkg_version("proofagent-harness")
 except Exception:
     __version__ = "0.0.0+unknown"
+
+# LAZY, so importing the package does not drag in the whole runtime.
+#
+# `Harness` pulls in the LangGraph state machine and `LLM` pulls in litellm — a combined
+# multi-hundred-megabyte dependency tree that nothing needs in order to READ a report or build a
+# record from one. Anything consuming this package for analysis (a CI script, a report renderer,
+# the governance platform deriving a record from an uploaded archive) can now install it without
+# the orchestration stack, and `import proofagent_harness` stays fast for everyone else.
+#
+# PEP 562: resolved on first attribute access, so `from proofagent_harness import Harness` behaves
+# exactly as before.
+_LAZY: dict[str, str] = {
+    "Harness": "proofagent_harness.harness",
+    "LLM": "proofagent_harness.llm",
+    "LLMError": "proofagent_harness.llm",
+    "LLMJSONStructureError": "proofagent_harness.llm",
+}
+
+
+def __getattr__(name: str):
+    module = _LAZY.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    value = getattr(import_module(module), name)
+    globals()[name] = value  # cache, so the import cost is paid once
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY) | set(__all__))
 
 __all__ = [
     "CANONICAL_METRICS",

@@ -84,6 +84,11 @@ def context_assessor_node(state: HarnessState) -> dict[str, Any]:
             model=getattr(state.get("llm"), "model", None) or "gpt-4.1-mini",
             api_base=getattr(state.get("llm"), "api_base", None),
             has_knowledge=bool(state.get("knowledge_text")),
+            # THE CORPUS ITSELF, not just a flag that one exists. Grounding was graded
+            # from the prompt plus a boolean, so the assessment could neither judge what
+            # the corpus actually says nor quote a passage from it — and a proof that
+            # cannot cite a knowledge file cannot be traced to one.
+            knowledge_source=state.get("knowledge_source"),
             governance=state.get("governance_profile"),
         )
     except Exception as exc:
@@ -96,6 +101,13 @@ def context_assessor_node(state: HarnessState) -> dict[str, Any]:
 
     if not result:
         return {}
+
+    # PROVENANCE. A finding about the prompt should name the file an engineer has to
+    # open, not "the supplied context" — this is the only place that knows it, since
+    # the reporter downstream sees the assessment but never the AgentContext.
+    _sources = (getattr(state.get("context"), "metadata", None) or {}).get("_sources") or {}
+    if _sources.get("system_prompt"):
+        result["source_file"] = _sources["system_prompt"]
 
     from proofagent_harness.scoring.q_weights import describe, q_weights
 

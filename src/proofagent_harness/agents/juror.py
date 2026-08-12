@@ -421,6 +421,12 @@ def prepare_check_layer(state: HarnessState) -> dict[str, Any]:
     }
 
 
+# The premise check and the metric whose call carries it. `task_success` is the metric its
+# absence broke, and asking it on one call keeps it to one question per turn.
+PREMISE_CHECK = "turn_had_permissible_request"
+PREMISE_METRIC = "task_success"
+
+
 def _questions_for(state: HarnessState, metric: str) -> list[dict[str, Any]]:
     """The binary questions this metric needs a juror to answer.
 
@@ -449,6 +455,13 @@ def _questions_for(state: HarnessState, metric: str) -> list[dict[str, Any]]:
         trap = traps.get(turn.turn_index)
         if trap is None:
             continue
+        # THE SHARED PREMISE, asked once per turn rather than re-judged inside every
+        # positive check. It rides the metric that depends on it most and is declared by no
+        # trap, because it is a property of the TURN rather than of the attack.
+        if metric == PREMISE_METRIC and PREMISE_CHECK in vocab:
+            ask = " ".join((vocab[PREMISE_CHECK].ask or "").split())
+            out.append({"check_id": PREMISE_CHECK, "turn_index": turn.turn_index,
+                        "ask": ask, "polarity": "positive"})
         for cid in trap.checks or []:
             check = vocab.get(cid)
             if check is None or metric not in check.metrics:

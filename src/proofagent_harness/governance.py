@@ -759,6 +759,29 @@ def _build_artifact_section(report: Report) -> dict[str, Any]:
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _build_archive_block(report: Report) -> dict[str, Any]:
+    """The full evaluation ARCHIVE, for the platform to derive the record from.
+
+    WHY THE ARCHIVE AND NOT A DERIVED RECORD. This used to send a locally-built record, which the
+    backend stored verbatim and never checked — so the record was the client's assertion and a
+    modified harness could upload any verdict it liked. Sending the evidence instead lets the
+    platform derive the record itself, hash what it was derived from, and sign both. That is
+    the difference between a report and attested evidence.
+
+    Size is roughly a wash: the record it replaces was ~35% of the payload, and the archive
+    overlaps it heavily (the same consensus log and transcript, already uploaded in normalized
+    form).
+
+    Defensive like everything else on this path: if serialization fails the upload still goes,
+    and `{}` is unambiguous — the backend can tell "no archive" from "an empty one", and will
+    fall back to whatever the normalized fields can express.
+    """
+    try:
+        return report.model_dump(mode="json")
+    except Exception:
+        return {}
+
+
 def build_governance_payload(
     report: Report,
     *,
@@ -815,6 +838,20 @@ def build_governance_payload(
         "metric_scores": _build_metric_scores(report),
         "token_usage": _build_token_usage(report),
         "findings": _build_findings(report),
+        # ── THE EVIDENCE THE PLATFORM DERIVES FROM ────────────────────
+        # The flat keys below this line are the legacy contract: a findings list with no
+        # stable ids, severities in a vocabulary that mixes outcomes in, and no root cause,
+        # remediation category, verification plan or control assurance. The dashboard was
+        # rendering detail from them, so it could only show what that shape can express.
+        #
+        # `per` carries the whole record — findings with stable ids and fingerprints, risk
+        # groups spanning axes, primary/secondary control mappings with rationale, the
+        # decisive-versus-contributing split, coverage, and the limitations the run
+        # declares. Added rather than substituted because the contract's required keys are
+        # validated server-side and older backends must keep working; a backend that reads
+        # `per` gets the record, one that does not keeps exactly what it had.
+        # THE EVIDENCE, not a record derived from it. See `_build_archive_block`.
+        "archive": _build_archive_block(report),
         # ── Full-fidelity enrichment (all additive; the run-upload contract is
         # additionalProperties:true, so older backends ignore unknown keys and
         # the enriched backend reads them by these exact names). ──

@@ -1043,6 +1043,7 @@ class Harness:
             "adaptive_turns": bool(self.adaptive_turns),
             "metrics": list(self.metrics),
             "knowledge_text": knowledge_text,
+            "knowledge_source": knowledge_source,
             "context": ctx,
             "assess_context": bool(assess_context),
             "assess_compliance": bool(assess_compliance),
@@ -1116,6 +1117,10 @@ class Harness:
             severity={m: (severity.get(m) or Severity.WARN) for m in (state.get("per_metric") or {})},
             transcript=list(state.get("transcript") or []),
             consensus_log=consensus,
+            # The pooled verdicts the scores were counted from. Carried onto the report
+            # so the behavioural axis can be audited after the run instead of only
+            # during it — see Report.check_verdicts.
+            check_verdicts=list(state.get("check_verdicts") or []),
             findings=list(state.get("findings") or []),
             technical_issues=list(state.get("technical_issues") or []),
             warnings=[*(state.get("warnings") or []),
@@ -1183,6 +1188,17 @@ class Harness:
                 "turns_recommended": state.get("turns_recommended"),
                 "turns_reasons": list(state.get("turns_reasons") or []),
                 "turns_mode": "adaptive" if state.get("adaptive_turns") else "fixed",
+                # WHICH POLICY JUDGED THIS RUN. A readiness index is meaningless without
+                # it, and the profile can arrive two ways — a local YAML committed beside
+                # the agent, or one pulled from the governance platform. Two runs of the
+                # same agent can legitimately reach different verdicts under different
+                # policies, so the report records which applied.
+                "governance_profile_source": getattr(
+                    state.get("governance_profile"), "source", None),
+                "governance_profile_name": getattr(
+                    state.get("governance_profile"), "name", None),
+                "governance_tier": getattr(
+                    state.get("governance_profile"), "tier_label", None),
                 **_calibration_metadata(state.get("calibration")),
             },
         )
