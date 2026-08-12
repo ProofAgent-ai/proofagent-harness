@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.12.0] — unreleased
+## [0.12.0] — 2026-08-12
 
 **Context-engineering (Q) scores move, and PAI moves with them.** The context assessment now reads
 the domain-knowledge corpus instead of being told only that one exists, so it grades grounding on
