@@ -73,6 +73,64 @@ NON_SCORING_CRITERIA: frozenset[str] = frozenset({
     "token_efficiency",
 })
 
+#: Criterion id → what it measures. The derived explanation's only source of substance, so a reader
+#: is told what was actually being judged rather than given a restated percentage.
+_CRITERION_DESC: dict[str, str] = dict(CRITERIA)
+
+
+def _derived_finding(
+    cid: str, score: float, sources: list[str], *, non_scoring: bool
+) -> dict[str, Any]:
+    """A reason for a deduction the assessor left unexplained — derived, and labelled as derived.
+
+    Carries no `proof` by construction: nothing was quoted, and a fabricated quote is worse than an
+    acknowledged absence. A non-scoring criterion gets a different account because it did not cost
+    anything — calling it a deduction would be its own small lie.
+    """
+    name = cid.replace("_", " ").title()
+    pct = round(score * 10)
+    desc = _CRITERION_DESC.get(cid, "")
+    where = ", ".join(sources) if sources else "the supplied context"
+
+    if non_scoring:
+        problem = (
+            f"{name} scored {pct}%, and the assessor cited no passage. This criterion is reported "
+            f"as a diagnostic and excluded from the context score, because it improves as the "
+            f"context gets emptier — so the missing points cost nothing."
+        )
+        fix = (
+            f"No action is required: this criterion does not affect the score. To improve it on "
+            f"its own terms, check in {where} that {desc[:1].lower()}{desc[1:]}."
+        )
+    else:
+        problem = (
+            f"{name} scored {pct}%, losing {100 - pct} points against what this criterion "
+            f"measures — {desc[:1].lower()}{desc[1:]}. The assessor marked it down without quoting "
+            f"a passage, so the specific weakness is unevidenced and this reason is derived from "
+            f"the score rather than observed."
+        )
+        fix = (
+            f"Review {where} against this criterion: {desc[:1].lower()}{desc[1:]}. "
+            f"Re-run with --assess-context afterwards to confirm the score moves."
+        )
+
+    return {
+        "criterion": cid,
+        # Not one of the labelled prompt sections: nothing was quoted from one.
+        "source": "",
+        "source_file": "",
+        "proof_verified": False,
+        "title": f"{name}: {pct}% with no cited passage",
+        "problem": problem[:400],
+        # A proof is verbatim or empty. There is no quote here, so it stays empty.
+        "proof": "",
+        "fix": fix[:400],
+        "token_impact": "neutral",
+        # THE PROVENANCE MARKER. Without it this reads exactly like an assessor observation.
+        "derived": True,
+    }
+
+
 _PROMPT = """You are a senior prompt-engineer and red-teamer auditing the \
 CONTEXT ENGINEERING of an AI agent — NOT its behaviour. You are given the \
 agent's supplied context (system prompt, tool schemas, and whether a knowledge \
@@ -136,7 +194,14 @@ Return STRICT JSON only:
   "token_savings_estimate": <int, estimated tokens reclaimable>,
   "summary": "one-sentence overall verdict on the context engineering"
 }}
-Cover every criterion id listed. Output JSON, nothing else."""
+Cover every criterion id listed.
+
+EVERY DEDUCTION NEEDS A REASON. If you score a criterion below 10, you MUST return at least one
+finding whose `criterion` is that id, saying what is wrong and how to fix it. A criterion at 7/10
+with no finding tells the reader they lost 30 points and nothing about why — that is not a review,
+it is a number. Score 10 only when you have nothing to report.
+
+Output JSON, nothing else."""
 
 
 def _criteria_block() -> str:
@@ -482,6 +547,40 @@ def assess_context_engineering(
             "fix": str(f.get("fix", ""))[:400],
             "token_impact": impact,
         })
+
+    # EVERY DEDUCTION MUST CARRY A REASON, AND WE CHECK RATHER THAN ASK.
+    #
+    # The prompt requires a finding for any criterion scored below 10, but an instruction the model
+    # can ignore is not a guarantee — measured on a real run, `injection_hardening` came back at 70%
+    # with no finding at all, so a reader was told they had lost 30 points on a security criterion
+    # and nothing about why. A score without a reason is a number, not a review.
+    #
+    # Flagging the gap was the first answer and it was not enough: "Role Clarity 90%" with
+    # `explained: false` beside it still leaves a developer with nothing to change, and a number
+    # accompanied by a shrug costs more confidence than the missing points do. So where the assessor
+    # marked a criterion down and said nothing, we state what the criterion measures, that no passage
+    # was cited, and what to review — every part of it derived from the fixed catalog above, the
+    # score, and the files actually read.
+    #
+    # What we never do is write a `proof`. A proof is a verbatim quote or it is empty; a plausible
+    # invented passage is indistinguishable from a real one and is the precise fabrication the proof
+    # rules exist to prevent. `derived: True` marks the provenance so neither the record nor a reader
+    # can mistake this for something the assessor observed.
+    cited = {f["criterion"] for f in findings if f.get("criterion")}
+    for sc in sub_criteria:
+        if sc["score"] >= 10.0 or sc["id"] in cited:
+            continue
+        findings.append(_derived_finding(sc["id"], float(sc["score"]), sorted(sources),
+                                         non_scoring=sc["id"] in NON_SCORING_CRITERIA))
+
+    explained = {f["criterion"] for f in findings if f.get("criterion")}
+    for sc in sub_criteria:
+        sc["explained"] = sc["score"] >= 10.0 or sc["id"] in explained
+        # WHO explained it. A derived reason is honest but weaker than an observed one, and a
+        # dashboard that renders them identically overstates what was actually found.
+        sc["explained_by"] = (
+            "n/a" if sc["score"] >= 10.0 else ("assessor" if sc["id"] in cited else "derived")
+        )
 
     try:
         savings = int(data.get("token_savings_estimate", 0) or 0)

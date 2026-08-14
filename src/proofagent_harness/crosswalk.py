@@ -141,3 +141,73 @@ def rows(framework: str) -> list[dict[str, object]]:
             "checks": list(checks_for_control(framework, c["id"])),
         })
     return out
+
+# ── governance controls -> framework controls ────────────────────────────────
+#
+# WHY THIS IS AUTHORED AND NOT CROSSWALKED. Every other mapping in this module starts from a
+# BEHAVIOUR the agent exhibited, and the crosswalk answers "which control does that behaviour
+# evidence". The five governance controls are not behaviours — they are facts about how the agent is
+# governed (did the gate clear, is a sign-off recorded, how much of the regulatory surface carried
+# evidence). So there is no behaviour to map from, and the governance axis shipped with NO framework
+# reference at all: measured on a real run, 0 of 4 governance findings carried a mapping while the
+# behavioural axis carried up to 17 each.
+#
+# That gap was in the worst possible place. "Human oversight: tier requires sign-off and none is
+# observable" IS EU AI Act Article 14 — the single most-cited obligation for a high-risk system — and
+# a reader was shown the finding with no article beside it.
+#
+# Each entry below is a deliberate reading of one governance control against the obligation it
+# evidences, using control ids that exist in `compliance.FRAMEWORKS`. Only frameworks whose text
+# genuinely speaks to the control are listed; padding this out would make the mapping look thorough
+# and be wrong.
+GOVERNANCE_CONTROL_CONTROLS: dict[str, tuple[tuple[str, str], ...]] = {
+    # The release decision itself: a risk-management step that has to happen before deployment.
+    "Release gate": (
+        ("eu_ai_act", "art9"),          # Art. 9 — risk management system
+        ("nist_ai_rmf", "manage"),      # MANAGE — risk response & prioritization
+        ("iso_42001", "a6_vv"),         # A.6.2.4 — verification & validation
+        ("soc2", "cc8"),                # CC8 — change management
+    ),
+    # Unclosed critical/high findings are unresolved nonconformities.
+    "Open findings": (
+        ("eu_ai_act", "art9"),
+        ("nist_ai_rmf", "manage"),
+        ("iso_42001", "a6_vv"),
+    ),
+    # The obligation this axis exists to surface.
+    "Human oversight": (
+        ("eu_ai_act", "art14"),         # Art. 14 — human oversight
+        ("nist_ai_rmf", "govern"),      # GOVERN — governance & accountability
+        ("iso_42001", "a3"),            # A.3 — roles & responsibilities
+    ),
+    # How much of the regulatory surface this run actually put under evidence.
+    "Compliance scope": (
+        ("eu_ai_act", "art11"),         # Art. 11 — technical documentation
+        ("nist_ai_rmf", "map"),         # MAP — context & risk identification
+        ("iso_42001", "a5"),            # A.5 — AI system impact assessment
+    ),
+    # Assurance decays; the obligation is continuous, not one-off.
+    "Evidence freshness": (
+        ("nist_ai_rmf", "measure_valid"),   # MEASURE 2.3 — validity & reliability
+        ("iso_42001", "a6_monitor"),        # A.6.2.6 — operation & monitoring
+        ("soc2", "cc7"),                    # CC7 — system monitoring
+    ),
+}
+
+
+def controls_for_governance(name: str) -> list[tuple[str, str, str]]:
+    """`(framework_key, control_ref, control_title)` for one governance control.
+
+    Resolved against the live catalog so a renamed or removed control cannot leave a dangling ref —
+    an id that no longer exists is dropped rather than printed.
+    """
+    from proofagent_harness.compliance import FRAMEWORKS
+
+    out: list[tuple[str, str, str]] = []
+    for fw_key, ctrl_id in GOVERNANCE_CONTROL_CONTROLS.get(name, ()):
+        fw = FRAMEWORKS.get(fw_key) or {}
+        for c in fw.get("controls", []):
+            if c.get("id") == ctrl_id:
+                out.append((fw_key, str(c.get("ref") or ctrl_id), str(c.get("title") or "")))
+                break
+    return out

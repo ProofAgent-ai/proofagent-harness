@@ -1134,6 +1134,7 @@ class Harness:
             production_ready=str(state.get("production_ready") or ""),
             top_risk=str(state.get("top_risk") or ""),
             compliance=dict(state.get("compliance") or {}),
+            metric_explanations=self._metric_explanations(state),
             context_engineering=dict(state.get("context_engineering") or {}),
             duration_seconds=round(duration, 2),
             tokens_used=int(self.llm.total_tokens),
@@ -1226,6 +1227,21 @@ class Harness:
             ).to_dict()
         except Exception:  # pragma: no cover - defensive
             return {}
+
+
+    def _metric_explanations(self, state: Any) -> dict[str, Any]:
+        """Why every sub-full-marks metric lost its points. Guarded: an explanation must never cost
+        a completed evaluation, so a failure here yields {} and the rest of the report stands."""
+        try:
+            from proofagent_harness.deductions import metric_deductions
+
+            return metric_deductions({
+                "per_metric": state.get("per_metric") or {},
+                "check_verdicts": state.get("check_verdicts") or [],
+            })
+        except Exception:  # pragma: no cover - defensive
+            return {}
+
 
     def _estimate_required_tokens(self) -> int:
         """Conservative estimate of the worst-case juror prompt size in tokens."""

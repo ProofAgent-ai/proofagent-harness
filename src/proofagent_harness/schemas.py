@@ -907,6 +907,16 @@ class Report(BaseModel):
     # [{"id","name","score"}], "findings": [{"title","problem","fix",
     # "token_impact": "big_cut|cut|neutral|adds"}], "token_savings_estimate":
     # int, "summary", "model", "generated"}.
+    metric_explanations: dict[str, Any] = Field(default_factory=dict)
+    """Why each behavioural metric scored below full marks — derived, never invented.
+
+    R1: a score under 100% always carries a reason. A metric can lose points with no check failing
+    outright (a split panel earns partial credit), so the per-check findings do not always explain the
+    number a reader is looking at. Keyed by metric, each entry carries the statement, the quote that
+    supports it, the checks it came from, and the controls those checks evidence. A metric with no
+    attributable observation says so specifically rather than showing a bare number.
+    """
+
     context_engineering: dict[str, Any] = Field(default_factory=dict)
     # PROOFAGENT INDEX (PAI) — the 0-100 production-readiness index over the four
     # axes E (evaluation) / Q (context) / C (compliance) / G (governance), fused by a

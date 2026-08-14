@@ -193,3 +193,108 @@ def test_an_empty_proof_resolves_to_nothing_rather_than_to_the_first_file() -> N
     src = ce._named_sources(ctx)
     assert ce._resolve_proof_file("", src) == ""
     assert ce._resolve_proof_file("   ", src) == ""
+
+
+# ── every deduction carries a reason ─────────────────────────────────────────
+
+
+def test_a_deduction_without_a_finding_is_flagged_not_hidden() -> None:
+    """The regression. Measured on a real run: injection_hardening came back at 70% with no
+    finding, so a reader was told they lost 30 points on a security criterion and nothing about
+    why. We do not invent a reason — we record that none was given."""
+    import inspect
+
+    src = inspect.getsource(ce.assess_context_engineering)
+    assert 'sc["explained"] = sc["score"] >= 10.0 or sc["id"] in explained' in src, (
+        "the explained-deduction backstop is gone")
+
+
+def test_the_prompt_requires_a_reason_for_every_deduction() -> None:
+    import inspect
+
+    src = inspect.getsource(ce)
+    assert "EVERY DEDUCTION NEEDS A REASON" in src
+    assert "Score 10 only when you have nothing to report" in src
+
+
+def test_an_unexplained_deduction_gets_a_derived_reason_with_no_invented_proof() -> None:
+    """The escalation of the regression above. Flagging the gap left a developer holding "Role
+    Clarity 90%" with nothing to act on, so a reason is now derived — but a derived reason must never
+    look like an observed one, and must never carry a quote nobody wrote."""
+    f = ce._derived_finding("role_clarity", 9.0, ["system_prompt.md", "tools.json"],
+                            non_scoring=False)
+
+    assert f["criterion"] == "role_clarity"
+    assert f["derived"] is True, "a derived reason must be labelled as derived"
+    assert f["proof"] == "", "a proof is verbatim or empty — never invented"
+    assert f["source_file"] == "", "nothing was quoted, so no file may be named"
+    assert f["proof_verified"] is False
+    # It has to say what was measured and what to do, or it is just the number again.
+    assert "10 points" in f["problem"], f["problem"]
+    assert "role, goal, scope" in f["problem"].lower(), f["problem"]
+    assert "derived from the score rather than observed" in f["problem"]
+    assert "system_prompt.md, tools.json" in f["fix"], "the fix must name the files actually read"
+
+
+def test_a_non_scoring_criterion_is_not_reported_as_a_deduction() -> None:
+    """`token_efficiency` is excluded from the score, so telling a reader they lost points on it
+    would be false. It still needs an account, because they can see the 80%."""
+    f = ce._derived_finding("token_efficiency", 8.0, ["system_prompt.md"], non_scoring=True)
+
+    assert "cost nothing" in f["problem"], f["problem"]
+    assert "excluded from the context score" in f["problem"]
+    assert "No action is required" in f["fix"]
+    assert "points" not in f["fix"], "a non-scoring criterion must not be framed as lost points"
+
+
+def test_every_criterion_below_full_marks_ends_up_explained(monkeypatch) -> None:
+    """The end-to-end invariant, over the real parser with the LLM stubbed at its call site: the
+    model returns a score for all seven criteria and a finding for only one, and nothing is left
+    bare."""
+    import json
+    import types
+
+    from proofagent_harness.schemas import AgentContext
+
+    payload = {
+        "criteria": [{"id": cid, "score": 7.0} for cid, _ in ce.CRITERIA],
+        "findings": [{"criterion": "guardrail_coverage", "title": "t", "problem": "p",
+                      "proof": "", "fix": "f", "token_impact": "neutral"}],
+        "summary": "s",
+    }
+    resp = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            message=types.SimpleNamespace(content=json.dumps(payload)))])
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "completion", lambda **_kw: resp)
+
+    out = ce.assess_context_engineering(
+        context=AgentContext(system_prompt="you are a support agent", tools=None),
+        model="stub",
+    )
+
+    assert out, "the assessment returned nothing"
+    bare = [sc for sc in out["sub_criteria"] if not sc["explained"]]
+    assert not bare, f"criteria below full marks with no reason: {[b['id'] for b in bare]}"
+    by = {sc["id"]: sc["explained_by"] for sc in out["sub_criteria"]}
+    assert by["guardrail_coverage"] == "assessor", "an observed reason must not be relabelled"
+    assert by["role_clarity"] == "derived", by
+    # Derived rows must not smuggle in provenance they do not have.
+    for f in out["findings"]:
+        if f.get("derived"):
+            assert f["proof"] == "" and f["source_file"] == ""
+
+
+def test_explained_is_true_when_the_criterion_is_perfect_or_has_a_finding() -> None:
+    """The flag's own semantics, without an LLM: a 10/10 needs no reason, anything less does."""
+    # Exercised through the same expression the parser uses, so the test cannot drift from it.
+    def flag(score: float, has_finding: bool) -> bool:
+        explained = {"role_clarity"} if has_finding else set()
+        return score >= 10.0 or "role_clarity" in explained
+
+    assert flag(10.0, False) is True, "a perfect score has nothing to explain"
+    assert flag(7.0, True) is True, "a deduction with a finding is explained"
+    assert flag(7.0, False) is False, "a deduction with no finding must be flagged"
+    assert flag(9.9, False) is False, "even a small deduction needs a reason"

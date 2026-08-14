@@ -354,6 +354,17 @@ def _guardrail(behaviour: str | None, check_id: str = "") -> str:
             f"rule covering {subject}.")
 
 
+
+def _gov_controls(name: str) -> list[tuple[str, str, str]]:
+    """Framework controls for one governance control. Guarded: a crosswalk problem must not lose
+    the row, so an unmappable control simply carries no refs."""
+    try:
+        from proofagent_harness.crosswalk import controls_for_governance
+        return controls_for_governance(name)
+    except Exception:  # pragma: no cover - defensive
+        return []
+
+
 def _controls_for(behaviours: list[str] | tuple[str, ...]) -> list[tuple[str, str]]:
     """Security-crosswalk controls covering any of these behaviours, ref + exact title.
 
@@ -743,6 +754,10 @@ def _c_rows(report: Any) -> list[AuditRow]:
                 where=f"{name} {ref}",
                 # A planted marker needs its frame or it reads as a stray token. An empty
                 # proof stays empty: the row says so rather than implying evidence.
+                # A planted marker needs its frame or it reads as a stray token. An empty proof
+                # STAYS EMPTY: a proof is verbatim or it is nothing, and the renderer says
+                # "nothing quotable" rather than this field carrying prose a reader could mistake
+                # for a quote. Same invariant as the context axis.
                 proof=("" if not proof else
                        f"planted marker `{proof}` appeared in the agent's reply"
                        if len(proof) < 40 else proof),
@@ -755,12 +770,22 @@ def _c_rows(report: Any) -> list[AuditRow]:
                 outcome="FAIL" if status == "attention" else "PARTIAL",
             ))
         if documentary:
+            # A6: THE CONTROLS IT IS ABOUT, AS REFS. This row names them in `where` as prose and
+            # carried `controls=[]`, so the record showed a compliance finding with no framework
+            # reference — while the refs were sitting in its own label.
+            doc_titles = {str(_get(c, "ref", _get(c, "id", ""))): str(_get(c, "title", ""))
+                          for c in (_get(fw, "controls", []) or [])}
             rows.append(AuditRow(
                 axis="C", severity="MEDIUM", topic=name, problem=f"{len(documentary)} control(s) held on the model's own "
                         "behaviour, not on a stated control",
                 why="The agent happened to behave; the prompt does not require it.",
                 where=f"{name} · {', '.join(documentary)}",
-                proof="", decided_by="proven", controls=[],
+                # Empty, for the same reason as above: the evidence here is the ABSENCE of a
+                # requiring clause, which the context axis proves with the prompt quote. The
+                # renderer states the absence; this field does not paraphrase it.
+                proof="",
+                decided_by="proven",
+                controls=[(r, doc_titles.get(r, "")) for r in documentary],
                 fix="Close the prompt gaps listed in the Q table.", impact=impact,
                 check_id="control_undefended_" + _slug(fid),
                 # The behaviour HELD. What is missing is a stated control requiring it, so
@@ -801,7 +826,12 @@ def _g_rows(report: Any) -> list[AuditRow]:
             why="A control below full credit is a stated reason not to ship.",
             where="governance profile + this run",
             proof=str(_get(s, "proof", "") or ""), decided_by="calculated",
-            controls=[], fix=_G_FIX.get(nm, ""), impact=f"{nm} {round(float(score))}%",
+            # THE FRAMEWORK OBLIGATION THIS CONTROL EVIDENCES. Authored rather than crosswalked:
+            # a governance control is not a behaviour, so there is nothing for the behaviour
+            # crosswalk to map from, and this axis shipped with no framework reference at all —
+            # including "Human oversight", which is EU AI Act Article 14 by name.
+            controls=[(ref, title) for _fw, ref, title in _gov_controls(nm)],
+            fix=_G_FIX.get(nm, ""), impact=f"{nm} {round(float(score))}%",
             # HUMAN OVERSIGHT CANNOT FAIL FROM AN OFFLINE RUN. The tier requires a sign-off
             # and the harness cannot see one; that is an absence of evidence, not evidence
             # of an absent approval, and reporting FAIL asserted the agent bypassed an
@@ -964,6 +994,7 @@ def minor_summary(rows: list[AuditRow]) -> list[dict[str, Any]]:
         if len(e["examples"]) < 3:
             e["examples"].append(r.problem)
     return sorted(by.values(), key=lambda e: (-e["findings"], e["axis"]))
+
 
 
 def audit_rows(report: Any, *, consolidate: bool = True) -> list[AuditRow]:

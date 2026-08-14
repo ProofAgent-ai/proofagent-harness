@@ -90,6 +90,10 @@ REPORT = {
                 {"name": "Open findings", "score": 85.0, "severity": "pass",
                  "detail": "no critical or high findings open",
                  "proof": "open_findings = 17/20 points"},
+                # The obligation the governance axis exists to surface: EU AI Act Art. 14.
+                {"name": "Human oversight", "score": 40.0, "severity": "fail",
+                 "detail": "tier requires sign-off and none is observable in an offline run",
+                 "proof": "human_oversight = 8/20 points"},
                 {"name": "Evidence freshness", "score": 100.0, "severity": "pass",
                  "detail": "freshest possible", "proof": "20/20"},
             ]},
@@ -188,9 +192,30 @@ def test_reader_facing_text_never_names_internal_components() -> None:
     assert {r.decided_by for r in audit_rows(REPORT)} <= {"proven", "assessed", "calculated"}
 
 
-def test_governance_claims_no_control() -> None:
-    """G is process. OWASP describes techniques. A label would be fake precision."""
-    assert all(r.control_text == "" for r in _rows("G"))
+def test_governance_maps_to_process_frameworks_and_never_to_owasp() -> None:
+    """G is process, so OWASP would be fake precision — but a governance obligation is still an
+    obligation, and this axis shipped with NO framework reference at all.
+
+    "Human oversight: tier requires sign-off and none is observable" IS EU AI Act Article 14, the
+    most-cited obligation for a high-risk system, and a reader was shown it with no article beside
+    it. So G now carries the frameworks whose text genuinely speaks to process — EU AI Act,
+    ISO/IEC 42001, NIST AI RMF, SOC 2 — and still no OWASP, because a technique taxonomy does not
+    describe whether a human signed off.
+    """
+    rows = _rows("G")
+    refs = {ref for r in rows for ref, _title in r.controls}
+    assert refs, "the governance axis carries no control reference at all"
+
+    # The original reasoning, kept: OWASP describes attacks, not governance process.
+    owasp = {r for r in refs if r.upper().startswith(("ASI", "LLM", "T1", "T2", "T3"))}
+    assert not owasp, f"governance must not claim OWASP controls: {sorted(owasp)}"
+
+
+def test_human_oversight_cites_the_article_it_evidences() -> None:
+    """The specific case worth pinning by name."""
+    row = next(r for r in _rows("G") if "Human oversight" in r.topic)
+    refs = {ref for ref, _t in row.controls}
+    assert "Art. 14" in refs, f"human oversight must cite EU AI Act Art. 14, got {sorted(refs)}"
 
 
 # ── Q ───────────────────────────────────────────────────────────────────────

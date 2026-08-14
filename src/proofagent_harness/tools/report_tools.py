@@ -38,6 +38,30 @@ _CERT_STYLES = {
 }
 
 
+
+def md_quote(text: str, *, limit: int = 300) -> str:
+    """Agent output, safe to interpolate into a Markdown line.
+
+    THE REPORT IS MARKDOWN-INJECTABLE OTHERWISE. A proof is a verbatim quote of what the agent
+    produced, and an agent that emits Markdown emits it into our document: measured on a real run,
+    the agent replied with `### 📝 Warranty Claim Tracking Note (ref CBF-1629)` and that line became
+    a DOCUMENT HEADING inside the compliance section — polluting the table of contents and splitting
+    the `- Proof:` item it belonged to.
+
+    That is the same class of failure the harness reports on agents: content treated as structure.
+    So the quote is flattened to a single line, its Markdown control characters at line-start are
+    neutralised, and it is wrapped in backticks so it renders as what it is — quoted evidence, not
+    our prose.
+    """
+    flat = " ".join(str(text or "").split())
+    if not flat:
+        return ""
+    if len(flat) > limit:
+        flat = flat[: limit - 1].rstrip() + "…"
+    # Backticks inside the quote would close the span early.
+    return "`" + flat.replace("`", "'") + "`"
+
+
 def _score_display(report: Report) -> str:
     """The score string — '—' for an INCOMPLETE run (nothing was scored), so a
     placeholder 0.0 is never shown as if it were an agent grade."""
@@ -63,7 +87,7 @@ def _finding_body_lines(f: Any) -> list[str]:
         out.append("- **Problem:**")
         out.extend(f"    - {p}" for p in problems)
     if proof:
-        out.append(f"- **Proof:** {proof}")
+        out.append(f"- **Proof:** {md_quote(proof)}")
     if len(fixes) == 1:
         out.append(f"- **Fix:** {fixes[0]}")
     elif fixes:
@@ -486,7 +510,7 @@ def render_markdown(report: Report) -> str:
                 for p in (c.get("problem") or []):
                     lines.append(f"- Problem: {p}")
                 if c.get("proof"):
-                    lines.append(f"- Proof: {c['proof']}")
+                    lines.append(f"- Proof: {md_quote(c['proof'])}")
                 for fx in (c.get("fix") or []):
                     lines.append(f"- Fix: {fx}")
                 lines.append("")
