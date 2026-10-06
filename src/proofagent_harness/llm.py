@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import re
+import time
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -106,6 +107,8 @@ class CompletionResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0
+    # wall time of this one provider call, in ms (None when not timed)
+    duration_ms: float | None = None
 
 @dataclass
 class LLM:
@@ -195,6 +198,10 @@ class LLM:
     fallback_prompt_tokens: int = 0
     fallback_completion_tokens: int = 0
     fallback_cost_usd: float = 0.0
+    # Additive usage telemetry (read only by exports): the duration of every tracked call, in ms, and how many
+    # times each primary-failure reason sent a call to the fallback model.
+    call_durations_ms: list[float] = field(default_factory=list)
+    fallback_reasons: dict[str, int] = field(default_factory=dict)
 
     async def complete(
         self,
@@ -243,6 +250,7 @@ class LLM:
         for providers that lack it (litellm ``drop_params``). This is what
         keeps a weaker primary from burning the expensive fallback on
         malformed-JSON juror replies."""
+        t0 = time.perf_counter()
         msgs = list(messages)
         if system:
             if _is_anthropic_family(self.model):
@@ -322,6 +330,7 @@ class LLM:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             cost_usd=cost,
+            duration_ms=round((time.perf_counter() - t0) * 1000, 1),
         )
 
     # ── Per-source accounting ────────────────────────────────────────────
@@ -337,6 +346,8 @@ class LLM:
         self.primary_prompt_tokens += r.prompt_tokens
         self.primary_completion_tokens += r.completion_tokens
         self.primary_cost_usd += r.cost_usd
+        if r.duration_ms is not None:
+            self.call_durations_ms.append(r.duration_ms)
 
     def _track_fallback(self, r: CompletionResult) -> None:
         self.call_count += 1
@@ -346,10 +357,13 @@ class LLM:
         self.fallback_prompt_tokens += r.prompt_tokens
         self.fallback_completion_tokens += r.completion_tokens
         self.fallback_cost_usd += r.cost_usd
+        if r.duration_ms is not None:
+            self.call_durations_ms.append(r.duration_ms)
 
     def _notify_fallback(self, *, stage: str, reason: str, detail: str = "") -> None:
         """Fire on_fallback callback (if any) AND print a short progress
         line to stdout so users always see fallback activity in their logs."""
+        self.fallback_reasons[reason] = self.fallback_reasons.get(reason, 0) + 1
         primary = self.model
         fb = getattr(self.fallback_llm, "model", "?") if self.fallback_llm else "?"
         # stdout progress line — visible regardless of on_event subscriber.

@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-10-06
+
+**Export any report as a PER (Portable Evaluation Record), the open EIO-Agents format.** Additive: scoring,
+metrics, PAI and the gate are unchanged; the export only reads the finished report.
+
+### Added
+- `proof run --per PATH` and `proof per REPORT_JSON -o OUT` write the report as a PER 2.1 record through
+  [EIO-Agents](https://pypi.org/project/eio-agents/), now a core dependency (`eio-agents==0.8.5`). `proof per` also
+  takes `--system-prompt`, `--governance-profile` and `--bundle` (the local EIO bundle, for `eio-agents verify`).
+- `proofagent_harness.per_export.export_per()` for the same export from Python.
+- A fixed crosswalk maps 42 checks onto 41 EIO predicates; checks with no EIO equivalent and not-applicable verdicts
+  are left out and counted, never treated as passes.
+- Jury verdicts keep each juror's ballot and quote (`CheckVerdict.ballots`), so a finding can be PROVEN under the
+  standard's jury-consensus rule (PER 2.1.1).
+- `telemetry.evaluator_usage` (PER 2.1.2): the harness's own LLM calls, input/output tokens, latency p50/p95/max,
+  errors, retries and wall clock, following the OpenTelemetry GenAI conventions. No cost fields. The report now
+  records per-call durations (`llm_call_durations_ms`) and fallback reasons (`llm_fallback_reasons`).
+- `--frameworks` and the governance profile's intake set the record's frameworks in scope and the agent's scope facts.
+
+### Notes
+- An export failure never fails the run: the report is still written and the reason is printed.
+- The README has a new "Export to a Portable Evaluation Record (PER)" section.
+
 ## [0.12.1] — 2026-08-14
 
 Reporting and attribution fixes. Additive: `report.metric_explanations` is new; no existing field

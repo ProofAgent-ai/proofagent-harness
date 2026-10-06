@@ -148,7 +148,8 @@ def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
     }
 
     tally: dict[tuple[str, int], list[CheckVerdict]] = {}
-    for pool in ("round_one_scores", "round_two_scores"):
+    ballots: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for rnd, pool in enumerate(("round_one_scores", "round_two_scores"), 1):
         for js in (state.get(pool) or []):
             if not js.evaluated:
                 continue
@@ -157,6 +158,9 @@ def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
                 if key in code and code[key].observed is not None:
                     continue
                 tally.setdefault(key, []).append(v)
+                ballots.setdefault(key, []).append({
+                    "persona": js.persona, "round": rnd, "observed": v.observed,
+                    "quote": (v.quote or "").strip()})
 
     mode = "strict"
     with contextlib.suppress(Exception):
@@ -239,6 +243,9 @@ def pool_check_votes(state: HarnessState) -> list[CheckVerdict]:
             quote=min(grounded, key=len, default=""),
             votes_observed=len(yes), votes_total=decided,
         ))
+    for v in out:
+        if v.decided_by != "code" and (v.check_id, v.turn_index) in ballots:
+            v.ballots = list(ballots.get((v.check_id, v.turn_index), []))
     return out
 
 

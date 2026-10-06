@@ -739,6 +739,104 @@ Both paths end in the same local release gate; add `--upload` to either to also 
 
 With neither `--governance-profile` nor `--assess-governance`, nothing changes — the evaluation runs exactly as before. Ready-made profiles live in [`examples/governance_profiles/`](examples/governance_profiles/) — a High risk credit agent, a High risk healthcare scheduler, and a prohibited social scoring profile that demonstrates the hard block. Web reference: [`harness/docs#governance-profile`](https://www.proofagent.ai/harness/docs#governance-profile).
 
+## Export to a Portable Evaluation Record (PER)
+
+Every report can also be written as a **PER**: the open, versioned record format of the
+[EIO-Agents standard](https://www.proofagent.ai/eio-agents) (Evaluation Intelligence Ontology for AI Agents). A PER
+carries the same evaluation in a form any EIO-aware tool, dashboard or auditor can read, validate and check, without
+running the harness. [EIO-Agents](https://pypi.org/project/eio-agents/) (`eio-agents==0.8.5`) is a core dependency
+and is installed with the harness.
+
+```bash
+# during a run: write the report and its PER side by side
+proof run agent.py --context-dir ./agent --json report.json --per report.per.json
+
+# afterwards, from any saved report JSON
+proof per report.json -o report.per.json \
+  --system-prompt agent/system_prompt.md --governance-profile governance.yaml --bundle report.bundle.json
+
+# check the record with the standard's own tool (installed with the harness)
+eio-agents validate report.per.json
+eio-agents verify report.per.json --bundle report.bundle.json   # also re-checks every quote against the transcript
+eio-agents explain report.per.json readiness
+```
+
+```python
+from proofagent_harness.per_export import export_per
+
+record = export_per("report.json", "report.per.json", agent_name="credit-bot", agent_version="1.4.0")
+print(record["header"]["per_version"], record["release_recommendation"]["state"])
+```
+
+**How the export works.** The open-source harness is an *export converter*: it never changes how the run is
+evaluated or scored. After the run it reads the finished report, maps each check verdict to an EIO predicate through
+a fixed crosswalk (42 checks onto 41 predicates), attaches the agent's own words as the quoted evidence, builds an
+EIO bundle with `eio_agents.build_bundle()` and converts it with `eio_agents.convert()`.
+
+- **Checks with no EIO equivalent and not-applicable verdicts are left out**, never counted as passes. The run
+  prints how many were left out.
+- **Jury verdicts keep each juror's ballot and quote.** A finding becomes PROVEN only under the standard's own
+  jury-consensus rule: at least 2 of 3 jurors state the failure and their quotes are located in the transcript.
+- **Scope comes from your inputs:** `--frameworks` sets the frameworks in scope, and the governance profile's intake
+  (actions, oversight, data) sets the agent's scope facts.
+- **Missing inputs are withheld, never guessed.** A value EIO cannot support from the evidence shows as WITHHELD.
+- **Export never breaks a run.** If conversion fails, the report is still written and the reason is printed.
+
+**What a PER contains.** Fourteen top-level sections: `header` and `provenance` (versions, source identity, hashes),
+`subject` and `scope` (the agent and its context), `evidence`, `claims` and `coverage` (what was observed and
+tested), `findings`, `controls` and `reliability` (derived views), `scores` and `release_recommendation` (readiness
+and the PASS / REVIEW / BLOCK state) and `limitations` and `telemetry`. The full conversation stays in the local
+bundle; the record holds only cited quotes and fingerprints, so it is safe to share. See the
+[PER guide](https://www.proofagent.ai/eio-agents/per).
+
+**Versions.** The record version follows its content; each one is a strict superset of the one before.
+
+| Record | When it is issued | JSON Schema |
+|---|---|---|
+| PER 2.1.0 | Default | [per/2.1.0](https://www.proofagent.ai/eio-agents/schema/per/2.1.0/per.schema.json) |
+| PER 2.1.1 | A finding is PROVEN by jury consensus | [per/2.1.1](https://www.proofagent.ai/eio-agents/schema/per/2.1.1/per.schema.json) |
+| PER 2.1.2 | The record carries evaluator usage telemetry (every export with EIO-Agents 0.8.5) | [per/2.1.2](https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json) |
+
+Every schema is also bundled in the `eio-agents` package, so validation works offline:
+`check-jsonschema --schemafile https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json report.per.json`.
+
+**Telemetry.** `telemetry.evaluator_usage` records the harness's **own** LLM usage, since a client agent's internal
+token use is usually unknown. It follows the
+[OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) and has no cost
+fields:
+
+```json
+"evaluator_usage": {
+  "conventions": "otel-gen-ai",
+  "provenance": "MEASURED",
+  "wall_clock_seconds": 191.69,
+  "llm_calls": 37,
+  "tokens": { "input": 1167569, "output": 67659 },
+  "duration_ms": { "p50": 21013, "p95": 36867, "max": 42559 },
+  "errors": { "count": 0, "types": [] },
+  "retries": 0,
+  "by_role": [ { "role": "other", "model": "openai/gpt-4.1-mini", "llm_calls": 37, "...": "..." } ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `provenance` | `MEASURED`, `PARTIAL` (some calls reported no token usage) or `UNAVAILABLE` |
+| `wall_clock_seconds` | Elapsed time of the evaluation |
+| `llm_calls` | Harness model calls, fallback calls included |
+| `tokens.input` / `tokens.output` | Harness input and output tokens |
+| `duration_ms` | Per-call latency p50 / p95 / max, whole milliseconds |
+| `errors` | Failed calls and their types (`timeout`, `rate_limit`, `provider_error`, `invalid_output`) |
+| `retries` | Calls that went to `--fallback-llm` |
+| `by_role[]` | The same measures per role. The open-source report keeps no per-stage split, so all calls are one `other` row |
+
+`telemetry.agent_under_test` stays empty (UNAVAILABLE) on an export: the harness calls your agent as a black box.
+
+**Open-source export vs. native EIO.** The open-source harness converts a finished report. ProofAgent Harness
+Enterprise is a *native producer*: it records EIO evidence during the run, so it adds per-role telemetry (planner,
+jury, re-tests, assessors), jury proof confirmed by re-tests, and governance rules cited as evidence. Both write the
+same open PER format, and the same `eio-agents` tools read either.
+
 ## CLI reference
 
 Every flag for the two evaluation commands and the two observability commands, with its default. All share the same governance / upload group (below). For the full **parameter reference** (each flag *and* its Python API equivalent, with guidance on when to reach for it) see the **[documentation](https://www.proofagent.ai/harness/docs#parameters)**.
@@ -777,6 +875,7 @@ proof run AGENT_FILE [OPTIONS]   # AGENT_FILE = a .py exposing a callable named 
 | `--pai` / `--no-pai` | **on** | Print the ProofAgent Index readiness card after the run. Display only; the index is carried on every report either way. Add `--assess-context` / `--assess-compliance` for full axis coverage, or PAI reports PAI-Partial |
 | `--json` |  | Write the report JSON to this path |
 | `--markdown` |  | Write the report Markdown to this path |
+| `--per` |  | Also write the report as a PER (Portable Evaluation Record) to this path, via EIO-Agents. See [Export to a PER](#export-to-a-portable-evaluation-record-per) |
 | `--quiet` | off | Suppress the config summary + live progress UI |
 | *governance / upload group* | | *(see below)* |
 
@@ -897,6 +996,22 @@ proof crosswalk [OPTIONS]
 | `--markdown` | off | Emit a Markdown table for a security review |
 | `--json` | off | Emit as JSON |
 
+### `proof per`: export a saved report as a PER
+
+```bash
+proof per REPORT_JSON -o OUT [OPTIONS]
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `REPORT_JSON` | *(required)* | A report JSON written by `--json` |
+| `-o`, `--out` | *(required)* | Where to write the PER record |
+| `--agent` |  | Agent name for the record |
+| `--agent-version` | `unversioned` | Agent version for the record |
+| `--system-prompt` |  | The agent's system prompt, to include the context ratings (kept in the local bundle, not the record) |
+| `--governance-profile` |  | The run's governance profile: its intake (actions, oversight, data) sets the agent's scope facts |
+| `--bundle` |  | Also write the EIO bundle (full conversation: keep it local) for `eio-agents verify` |
+
 ### Governance / upload group (all commands)
 
 Add `--upload` to push the finished report to the Governance API and gate on the returned decision.
@@ -939,6 +1054,7 @@ This README is the essentials. The **[full documentation](https://www.proofagent
 | **Governance & CI gate**: flags, exit codes, GitHub Actions | [`#governance`](https://www.proofagent.ai/harness/docs#governance) · [`#ci-integration`](https://www.proofagent.ai/harness/docs#ci-integration) |
 | **Authoring traps**: the single file `.md` trap spec | [`#trap-manifest`](https://www.proofagent.ai/harness/docs#trap-manifest) |
 | **Coding-agent observability**: `proof watch` / `proof session`, supported agents, live risk screening | [`#observability`](https://www.proofagent.ai/harness/docs#observability) |
+| **PER export (EIO-Agents)**: `--per`, `proof per`, record versions, telemetry | [Export to a PER](#export-to-a-portable-evaluation-record-per) · [PER guide](https://www.proofagent.ai/eio-agents/per) |
 | **FAQ / troubleshooting** | [`#faq`](https://www.proofagent.ai/harness/docs#faq) |
 
 Methodology & benchmarks: [the paper · arXiv:2605.24134](https://arxiv.org/abs/2605.24134).

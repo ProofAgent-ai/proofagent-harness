@@ -1151,6 +1151,8 @@ class Harness:
             fallback_cost_usd=float(self.llm.fallback_cost_usd),
             fallback_rate=round(fb_rate, 4),
             token_split=token_split,
+            llm_call_durations_ms=list(self.llm.call_durations_ms),
+            llm_fallback_reasons=dict(self.llm.fallback_reasons),
             metadata={
                 "model": self.llm.model,
                 "fallback_model": self.fallback_llm.model if self.fallback_llm else None,

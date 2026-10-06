@@ -126,6 +126,10 @@ def run(
     ),
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
+    per_out: Path | None = typer.Option(
+        None, "--per",
+        help='Also export the report as a PER 2.1 record (Portable Evaluation Record) to this path.',
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Suppress live progress UI."),
     show_pai: bool = typer.Option(
         True, "--pai/--no-pai",
@@ -337,6 +341,10 @@ def run(
         report.to_markdown(str(md_out))
     if json_out or md_out:
         _print_outputs(json_out=json_out, md_out=md_out)
+    if per_out:
+        _export_per(report, per_out, agent_name=agent or eff_role, agent_version=agent_version,
+                    system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
+                    intake=gov_profile.intake if gov_profile else None)
 
     # Agent Governance Profile gate is AUTHORITATIVE when a profile is attached —
     # the tier guardrails decide pass/review/block locally (and the run + profile
@@ -1950,6 +1958,65 @@ def _print_pai(result, *, explain: bool) -> None:
                 f"deficiencies are handled by the cap, not the mean.[/dim]",
                 title="How this was calculated", border_style="dim", box=box.ROUNDED,
             ))
+
+
+def _export_per(report, out: Path, *, agent_name: str | None = None, agent_version: str | None = None,
+                system_prompt: str | None = None, bundle_out: Path | None = None,
+                intake: dict | None = None) -> None:
+    """Write a finished report as a PER 2.1 record; a failure is reported, never fatal to the run."""
+    from proofagent_harness.per_export import PerExportError, export_per
+
+    try:
+        record = export_per(report, out, bundle_out=bundle_out, agent_name=agent_name,
+                            agent_version=agent_version or "unversioned", system_prompt=system_prompt,
+                            intake=intake)
+    except Exception as exc:  # PerExportError, or EIO's own ConversionError
+        kind = "" if isinstance(exc, PerExportError) else f"{type(exc).__name__}: "
+        console.print(f"[yellow]PER export skipped:[/yellow] {kind}{exc}")
+        return
+    readiness = record["scores"]["readiness"].get("value")
+    console.print(
+        f"[green]PER {record['header']['per_version']}[/green] → {out} · "
+        f"readiness {readiness if readiness is not None else 'withheld'} · "
+        f"{record['release_recommendation']['state']}"
+    )
+    skipped = getattr(export_per, "skipped", [])
+    if skipped:
+        console.print(f"[dim]{len(skipped)} check(s) left out: EIO could not cite their evidence.[/dim]")
+
+
+@app.command("per")
+def per(
+    report_path: Path = typer.Argument(..., exists=True, dir_okay=False, help="A report JSON written by --json."),
+    out: Path = typer.Option(..., "-o", "--out", help="Where to write the PER record."),
+    agent_name: str | None = typer.Option(None, "--agent", help="Agent name for the record."),
+    agent_version: str | None = typer.Option(None, "--agent-version"),
+    system_prompt: Path | None = typer.Option(
+        None, "--system-prompt", exists=True, dir_okay=False,
+        help="The agent's system prompt, to include the context ratings (kept in the local bundle, not the record).",
+    ),
+    bundle_out: Path | None = typer.Option(
+        None, "--bundle", help="Also write the EIO bundle (full conversation: keep it local) for `eio-agents verify`.",
+    ),
+    governance_profile: Path | None = typer.Option(
+        None, "--governance-profile", exists=True, dir_okay=False,
+        help="The run's governance profile YAML: its intake (actions, oversight, data) sets the agent's scope facts.",
+    ),
+) -> None:
+    """Convert a saved report into a PER 2.1 record (Portable Evaluation Record).
+
+    Examples:
+
+      proof per report.json -o report.per.json
+      proof per report.json -o report.per.json --system-prompt agent/system_prompt.md --bundle report.bundle.json
+    """
+    intake = None
+    if governance_profile:
+        from proofagent_harness.governance_profile import load_profile
+
+        intake = load_profile(str(governance_profile)).intake
+    _export_per(report_path, out, agent_name=agent_name, agent_version=agent_version, bundle_out=bundle_out,
+                system_prompt=system_prompt.read_text(encoding="utf-8") if system_prompt else None, intake=intake)
 
 
 @app.command("pai")

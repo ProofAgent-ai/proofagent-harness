@@ -485,6 +485,9 @@ class CheckVerdict(BaseModel):
     """Vote tally for llm/gated verdicts. Both 0 for code verdicts — a string
     comparison has no electorate, and reporting a 1-0 vote there would misdescribe
     where the confidence comes from."""
+    ballots: list[dict[str, Any]] = Field(default_factory=list)
+    """Per-juror ballots behind an llm verdict, `{persona, round, observed, quote}`: each
+    juror's own vote and its own cited excerpt. Additive record only — nothing scores it."""
 
     @property
     def applicable(self) -> bool:
@@ -968,6 +971,10 @@ class Report(BaseModel):
     token_split: dict[str, float] = Field(default_factory=dict)
     """Token-share by source: {'primary': 0.91, 'fallback': 0.09}. Empty
     dict if no fallback was configured."""
+    llm_call_durations_ms: list[float] = Field(default_factory=list)
+    """Wall time of each harness-LLM call (primary and fallback), in ms. Usage telemetry only."""
+    llm_fallback_reasons: dict[str, int] = Field(default_factory=dict)
+    """Primary harness-LLM failures that went to the fallback, counted by reason (e.g. json_parse_error)."""
 
     def to_json(self, path: str | None = None, *, indent: int = 2) -> str:
         """Serialize to JSON (and optionally write to disk)."""
