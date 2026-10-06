@@ -11,12 +11,46 @@ Four things a deployment decision depends on, measured in one command: how the a
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml)
 [![arXiv](https://img.shields.io/badge/arXiv-2605.24134-b31b1b.svg)](https://arxiv.org/abs/2605.24134)
+[![EIO-Agents](https://img.shields.io/badge/EIO--Agents-0.8.5-0e7c86.svg)](https://www.proofagent.ai/eio-agents)
+[![PER](https://img.shields.io/badge/PER-2.1.2-0e7c86.svg)](https://www.proofagent.ai/eio-agents/per)
 
 <img src="docs/architecture.png" alt="ProofAgent Harness evaluation pipeline" width="720" />
 
-[The four parts](#the-four-parts) · [Install](#install) · [Quickstart](#quickstart) · [Modes: multi-turn & artifact](#evaluation-modes) · [Reading a score](#reading-a-score) · [PAI](#pai--proofagent-governance-readiness-index) · [Coding-agent observability](#observe-the-coding-agents-you-use) · [CLI reference](#cli-reference) · [Docs](https://www.proofagent.ai/harness/docs)
+</div>
 
-**📖 Full docs:** [proofagent.ai/harness/docs](https://www.proofagent.ai/harness/docs) · **📄 Paper:** [arXiv:2605.24134](https://arxiv.org/abs/2605.24134)
+## What's new in 0.13.0: export to the PER standard
+
+Every evaluation can now be written as a **PER (Portable Evaluation Record)**, the open record format of
+**[EIO-Agents](https://www.proofagent.ai/eio-agents)**, the Evaluation Intelligence Ontology for AI Agents. A PER
+carries the run's evidence, findings, scores and release decision in a versioned, verifiable form that any
+EIO-aware tool, dashboard or auditor can read without running the harness.
+
+```bash
+proof run agent.py --context-dir ./agent --json report.json --per report.per.json   # during a run
+proof per report.json -o report.per.json                                           # from any saved report
+eio-agents validate report.per.json                                                # check it with the standard's tool
+```
+
+- **Installed automatically:** [`eio-agents`](https://pypi.org/project/eio-agents/) (0.8.5) is a core dependency.
+- **Nothing about scoring changes:** the export reads the finished report and maps its checks to EIO predicates.
+- **Jury proof:** juror ballots and quotes carry over, so a finding can be PROVEN under the standard's
+  2-of-3 jury-consensus rule.
+- **Telemetry:** the harness's own LLM calls, tokens and latency p50/p95/max, following the OpenTelemetry GenAI
+  conventions (no cost fields).
+- **Versioned schemas:** [PER 2.1.0](https://www.proofagent.ai/eio-agents/schema/per/2.1.0/per.schema.json) ·
+  [2.1.1](https://www.proofagent.ai/eio-agents/schema/per/2.1.1/per.schema.json) ·
+  [2.1.2](https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json), also bundled for offline validation.
+
+Details: [Export to a PER](#export-to-a-portable-evaluation-record-per) · [PER guide](https://www.proofagent.ai/eio-agents/per) ·
+[EIO-Agents on GitHub](https://github.com/ProofAgent-ai/eio-agents) · [CHANGELOG](CHANGELOG.md)
+
+---
+
+<div align="center">
+
+[The four parts](#the-four-parts) · [Install](#install) · [Quickstart](#quickstart) · [Modes: multi-turn & artifact](#evaluation-modes) · [Reading a score](#reading-a-score) · [PAI](#pai--proofagent-governance-readiness-index) · [Coding-agent observability](#observe-the-coding-agents-you-use) · [PER export](#export-to-a-portable-evaluation-record-per) · [CLI reference](#cli-reference) · [Docs](https://www.proofagent.ai/harness/docs)
+
+**📖 Full docs:** [proofagent.ai/harness/docs](https://www.proofagent.ai/harness/docs) · **📄 Paper:** [arXiv:2605.24134](https://arxiv.org/abs/2605.24134) · **🧩 Standard:** [EIO-Agents](https://www.proofagent.ai/eio-agents)
 
 </div>
 
