@@ -123,6 +123,14 @@ def _turns(rep: dict[str, Any]) -> list[dict[str, Any]]:
 _CONTEXT = ("role_clarity", "grounding_sufficiency")
 
 
+def tool_schema_rating(rep: dict[str, Any]) -> dict[str, int]:
+    """The harness's tool-schema-quality score (0..10 -> 0..100), for the tool schema artifact when it is attached."""
+    for c in (rep.get("context_engineering") or {}).get("sub_criteria") or []:
+        if c.get("id") == "tool_schema_quality" and isinstance(c.get("score"), (int, float)):
+            return {"tool-schema-quality": round(max(0.0, min(10.0, float(c["score"]))) * 10)}
+    return {}
+
+
 def _context_ratings(rep: dict[str, Any]) -> dict[str, int] | None:
     ratings = {}
     for c in (rep.get("context_engineering") or {}).get("sub_criteria") or []:
@@ -235,7 +243,7 @@ def to_bundle(report: Any, *, agent_name: str | None = None, agent_version: str 
     return _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake)[0]
 
 
-def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=None):
+def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=None, frameworks=None):
     """The bundle, plus the checks EIO could not cite as evidence (left out, with the reason)."""
     eio = _eio()
     rep = _load(report)
@@ -255,7 +263,7 @@ def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=N
     while True:
         try:
             bundle = _build(eio, rep, meta, turns, checks, start, done, model, agent_name, agent_version, system_prompt,
-                            intake, tel)
+                            intake, tel, frameworks)
             break
         except eio.ConversionError as exc:
             if getattr(exc, "code", "") == "BUILD_PERSONAL_DATA" and "telemetry holds" in str(exc) and tel:
@@ -303,14 +311,17 @@ def scope_facts(rep: dict[str, Any], intake: dict[str, Any] | None = None) -> di
     return facts
 
 
-def frameworks_in_scope(rep: dict[str, Any], eio: Any) -> list[str] | None:
-    """The EIO frameworks the report's compliance assessment covered (registry ids mapped to EIO ids)."""
+def frameworks_in_scope(rep: dict[str, Any], eio: Any, extra: list[str] | None = None) -> list[str] | None:
+    """The EIO frameworks in scope: those the report's compliance assessment covered, then those the policy names
+    (`extra`), registry ids mapped to EIO ids. EIO keeps their controls that target a checked predicate; without
+    any it uses its defaults (OWASP agentic threats, AIUC-1)."""
     from eio_agents.ontology import load
 
     onto = load()
     ids: list[str] = []
-    for fw in (rep.get("compliance") or {}).get("frameworks") or []:
-        fid = onto.fw_of_registry.get(str(fw.get("id")))
+    names = [str(fw.get("id")) for fw in (rep.get("compliance") or {}).get("frameworks") or []] + list(extra or [])
+    for name in names:
+        fid = onto.fw_of_registry.get(name) or (name if name in onto.frameworks else None)
         if fid and fid not in ids:
             ids.append(fid)
     return ids or None
@@ -425,7 +436,7 @@ def telemetry(rep: dict[str, Any], eio: Any) -> dict[str, Any]:
 
 
 def _build(eio, rep, meta, turns, checks, start, done, model, agent_name, agent_version, system_prompt,
-           intake=None, tel=None):
+           intake=None, tel=None, extra_frameworks=None):
     return eio.build_bundle(
         run_id=_run_id(rep),
         # a git checkout's local version label (`+g<sha>.d<date>`) reads as an identifier to EIO's privacy rule: the
@@ -437,18 +448,71 @@ def _build(eio, rep, meta, turns, checks, start, done, model, agent_name, agent_
         system_prompt=system_prompt,
         turns=turns, checks=checks, jury_model=model, seed=meta.get("seed"),
         context_ratings=_context_ratings(rep) if system_prompt else None,
-        scope_facts=scope_facts(rep, intake) or None, frameworks=frameworks_in_scope(rep, eio),
+        scope_facts=scope_facts(rep, intake) or None, frameworks=frameworks_in_scope(rep, eio, extra_frameworks),
         telemetry=tel,
     )
 
 
+_ARTIFACT_KINDS = {"tools": "eio.artifact.tool-schema", "knowledge": "eio.artifact.knowledge-source"}
+
+
+def _add_artifacts(bundle: dict[str, Any], artifacts: list[dict[str, str]]) -> None:
+    """The agent's tool schema and knowledge files as embedded, model-confidential context artifacts, next to the
+    system prompt (EIO keeps their text in the source bundle; the record carries their digests). Without them EIO
+    caps the metrics that depend on them (its context ceilings: no tool schema -> manipulation resistance <= 40,
+    no knowledge -> hallucination resistance <= 55)."""
+    import hashlib
+
+    src = bundle["sources"]
+    inputs = bundle["provenance"]["record"]["inputs"]
+    for a in artifacts:
+        text, name = a["text"], a["name"]
+        if not text or name in src["context_texts"]:
+            continue
+        row = {"artifact_kind": _ARTIFACT_KINDS[a["kind"]], "name": name,
+               "sha256": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(), "code_points": len(text),
+               "embedded": True, "data_class": "eio.data.model-confidential"}
+        src["context_artifacts"].append(row)
+        src["context_texts"][name] = text
+        inputs["context_artifacts"].append(dict(row))
+        # an assessor rating of this artifact (tool-schema quality rates the tool schema), as build_bundle records one
+        ratings = bundle["native_scoring"]["context_ratings"]
+        assessor = ratings[0]["assessor_id"] if ratings else bundle["provenance"]["producer"]["name"]
+        for crit, value in (a.get("ratings") or {}).items():
+            ratings.append({"criterion_id": f"eio.context.{crit}", "artifact_name": name, "artifact_sha256": row["sha256"],
+                            "assessor_id": assessor, "rating": value})
+
+
 def export_per(report: Any, out: str | Path, *, bundle_out: str | Path | None = None,
                agent_name: str | None = None, agent_version: str = "unversioned",
-               system_prompt: str | None = None, intake: dict[str, Any] | None = None) -> dict[str, Any]:
+               system_prompt: str | None = None, intake: dict[str, Any] | None = None,
+               policy: dict[str, Any] | None = None, frameworks: list[str] | None = None,
+               artifacts: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """Write the report as a validated PER 2.1 record to `out`; returns the record. `intake` is the governance
-    profile's intake (actions, oversight, data), which sets the agent's scope facts."""
+    profile's intake (actions, oversight, data), which sets the agent's scope facts. `policy` is the declared
+    policy (``governance_profile.eio_policy``): the release rules the record is held to and its governance axis
+    scored against; without one the record says no policy was declared. `frameworks` are the regulations the
+    policy names (registry ids), added to those the compliance assessment covered."""
     eio = _eio()
-    bundle, skipped = _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake)
+    bundle, skipped = _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake, frameworks)
+    # the turns the harness's planner recommended for this agent (EIO's build_bundle leaves the field null)
+    rec = (_load(report).get("metadata") or {}).get("turns_recommended")
+    recommended = rec if isinstance(rec, int) and not isinstance(rec, bool) and rec > 0 else None
+    if policy or artifacts or recommended:
+        # EIO's build_bundle takes no policy, no context artifact beyond the system prompt and no recommended turn
+        # count: declare them on
+        # the built bundle, then re-seal the stage records with EIO's own digest, so the bundle is the one EIO would
+        # have built with them.
+        from eio_agents.per.bundle import stage_digest
+
+        if policy:
+            bundle["scope"]["policy"] = policy
+        if artifacts:
+            _add_artifacts(bundle, artifacts)
+        if recommended:
+            bundle["provenance"]["record"]["run"]["turns"]["recommended"] = recommended
+        for r in bundle["stage_records"]:
+            r["output_sha256"] = stage_digest(bundle, r["sections"])
     if bundle_out:
         Path(bundle_out).write_text(json.dumps(bundle, indent=1, ensure_ascii=False), encoding="utf-8")
     record = eio.convert(bundle)

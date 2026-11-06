@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import importlib.util
 import os
 import re
@@ -166,6 +167,11 @@ def run(
              "the returned decision (exit 0 pass · 2 block; review exits 1 "
              "only with --fail-on review, else 0).",
     ),
+    upload_transcript: bool = typer.Option(
+        False, "--upload-transcript",
+        help="With --upload, also send the agent's replies unmasked so the dashboard shows the full conversation. "
+             "Off by default: a reply can carry real data the agent read from its tools. The attacker's messages "
+             "(the harness's own synthetic data) are always sent unmasked; the signed record stays masked."),
     api_key: str | None = typer.Option(
         None, "--api-key",
         help="API key for the Governance API. Defaults to env PROOFAGENT_API_KEY. "
@@ -344,7 +350,8 @@ def run(
     if per_out:
         _export_per(report, per_out, agent_name=agent or eff_role, agent_version=agent_version,
                     system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
-                    intake=gov_profile.intake if gov_profile else None)
+                    profile=gov_profile,
+                    artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role))
 
     # Agent Governance Profile gate is AUTHORITATIVE when a profile is attached —
     # the tier guardrails decide pass/review/block locally (and the run + profile
@@ -362,9 +369,23 @@ def run(
             source=source,
             environment=environment,
             transcript=_transcript_text(report),
+            system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
+            artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role),
+            upload_transcript=upload_transcript,
         )
 
     if upload:
+        # The PER record first (the platform stores and displays it as is); the run upload is the fallback.
+        _upload_per_and_gate(
+            report,
+            api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
+            agent_name=agent or eff_role,
+            agent_version=agent_version,
+            fail_on=eff_fail_on,
+            system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
+            artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role),
+            upload_transcript=upload_transcript,
+        )
         _upload_and_gate(
             report,
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
@@ -1347,6 +1368,180 @@ def _print_context_engineering(report) -> None:
     console.print("  [dim](Separate sub-score - never affects the metric scores or the gate.)[/dim]")
 
 
+def _policy_args(profile, report=None) -> dict:
+    """The PER's policy inputs: the attached governance profile, else the packaged ProofAgent default policy
+    (``policy/default.yaml``), so the record's governance axis is scored against declared rules. The frameworks a
+    run picks itself (``--assess-compliance --frameworks``) replace the default policy's list; an attached
+    profile's own list is always kept."""
+    from proofagent_harness.governance_profile import default_profile, eio_policy
+
+    prof = profile or default_profile()
+    frameworks = prof.declared_frameworks or None
+    if profile is None and _picked_frameworks(report):
+        frameworks = None
+    return {"intake": prof.intake, "policy": eio_policy(prof), "frameworks": frameworks}
+
+
+def _picked_frameworks(report) -> bool:
+    """Whether the run assessed compliance against frameworks it named."""
+    comp = getattr(report, "compliance", None)
+    if comp is None and isinstance(report, dict):
+        comp = report.get("compliance")
+    fws = getattr(comp, "frameworks", None) if comp is not None and not isinstance(comp, dict) else (comp or {}).get("frameworks")
+    return bool(fws)
+
+
+def _scenarios(report, full: bool = False) -> list[dict]:
+    """The per-turn attack scenarios for the upload (with the attacker's message, and the agent's reply when
+    `--upload-transcript` is on); never fatal."""
+    from proofagent_harness.per_upload import scenarios_from_report
+
+    try:
+        return scenarios_from_report(report, include_agent=full)
+    except Exception:
+        return []
+
+
+_KNOWLEDGE_EXT = (".md", ".txt", ".json", ".yaml", ".yml")
+
+
+def agent_artifacts(ctx, knowledge_dir, report, agent_name: str | None) -> list[dict] | None:
+    """The agent's tool schema and knowledge files for the PER (``per_export._add_artifacts``), each with the agent's
+    name masked like the prompt's copy and a neutral file name (the record carries names in clear, and EIO refuses
+    one that repeats the confidential text: 'fraud-pattern-watchlist.md' over a watchlist)."""
+    from proofagent_harness.per_export import _load, tool_schema_rating
+
+    out: list[dict] = []
+    tools = getattr(ctx, "tools", None) if ctx else None
+    if tools:
+        out.append({"kind": "tools", "name": "tools.json",
+                    "text": mask_agent_name(json.dumps(tools, indent=1, ensure_ascii=False), agent_name),
+                    "ratings": tool_schema_rating(_load(report))})
+    files: list[Path] = []
+    for src in (knowledge_dir, getattr(ctx, "knowledge", None) if ctx else None):
+        if isinstance(src, (str, Path)) and Path(src).exists():
+            p = Path(src)
+            files += [p] if p.is_file() else sorted(x for x in p.rglob("*") if x.is_file() and x.suffix.lower() in _KNOWLEDGE_EXT)
+    for i, f in enumerate(dict.fromkeys(files), 1):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if text.strip():
+            out.append({"kind": "knowledge", "name": f"knowledge-{i}{f.suffix.lower()}", "text": mask_agent_name(text, agent_name)})
+    return out or None
+
+
+def mask_agent_name(system_prompt: str, agent_name: str | None) -> str:
+    """The system prompt with the agent's own name replaced by "the agent", for the PER's confidential copy only:
+    the name is in clear elsewhere in the record, and EIO refuses a clear field that repeats the prompt."""
+    if not agent_name or not agent_name.strip():
+        return system_prompt
+    words = [re.escape(w) for w in agent_name.split()]
+    return re.sub(r"(?<!\w)(?:the\s+)?" + r"[\s_-]+".join(words) + r"(?!\w)", "the agent", system_prompt, flags=re.I)
+
+
+def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_version: str | None,
+                         fail_on: str, system_prompt: str | None = None, profile=None,
+                         exit_on_decision: bool = True, artifacts: list | None = None,
+                         upload_transcript: bool = False) -> bool:
+    """`--upload`, record path: export the PER 2.1, send it with its lookup to POST /api/v1/records, print
+    the platform's decision and exit with the gate code. RETURNS (no exit) when the record cannot be built
+    or the platform has no /records endpoint, so the caller falls back to the classic run upload and the
+    evaluation is never lost. With ``exit_on_decision=False`` (a local governance profile gates the run) it
+    prints the platform's decision and returns True instead of exiting."""
+    import tempfile
+
+    from proofagent_harness import __version__
+    from proofagent_harness.governance import DEFAULT_API_BASE_URL, gate_exit_code
+    from proofagent_harness.per_export import export_per
+    from proofagent_harness.per_upload import PerUploadError, build_lookup, upload_record
+
+    api_url = os.environ.get("PROOFAGENT_API_BASE_URL", "").rstrip("/") or DEFAULT_API_BASE_URL
+    if not api_key or fail_on not in ("pass", "review", "block"):
+        return False  # the classic path reports these with its own messages
+    record = bundle = None
+    with tempfile.TemporaryDirectory() as d:
+        out, bundle_out = Path(d) / "record.per.json", Path(d) / "bundle.json"
+        # With the system prompt the record also scores the agent's context (a required axis of the readiness
+        # score). EIO keeps the prompt confidential and refuses a clear field, such as the agent's name, that
+        # repeats three of its words in a row, and most prompts name their agent ("You are the Refund bot ...").
+        # So: the prompt as is, then the prompt with the agent's name masked, and only then no prompt at all.
+        # The tool schema and knowledge files ride with the prompt (EIO caps the metrics that need them when they
+        # are absent); they are dropped before the prompt is.
+        masked = mask_agent_name(system_prompt, agent_name) if system_prompt else None
+        tries = [(system_prompt, artifacts), (masked, artifacts), (masked, None), (None, None)]
+        seen: list = []
+        for sp, arts in tries:
+            if (sp, bool(arts)) in seen or (arts and not sp):
+                continue
+            seen.append((sp, bool(arts)))
+            try:
+                record = export_per(report, out, bundle_out=bundle_out, agent_name=agent_name,
+                                    agent_version=agent_version or "unversioned", system_prompt=sp,
+                                    artifacts=arts or None, **_policy_args(profile, report))
+                bundle = json.loads(bundle_out.read_text(encoding="utf-8"))
+                break
+            except Exception as exc:  # PerExportError, or EIO's own ConversionError
+                last = exc
+        if record is not None and artifacts and not arts and sp is not None:
+            console.print("[yellow]PER built without the tool schema and knowledge files (EIO refused them: "
+                          f"{str(last)[:160]}); the metrics that need them are capped.[/yellow]")
+        if record is not None and system_prompt and sp is None:
+            console.print("[yellow]PER built without the system prompt (EIO refused it: "
+                          f"{str(last)[:160]}); context is not scored, so readiness is withheld.[/yellow]")
+        if record is None:
+            console.print(f"[yellow]PER not built ({type(last).__name__}: {str(last)[:200]}); "
+                          "uploading the run instead.[/yellow]")
+            return False
+    lookup = build_lookup(record, bundle or {})
+    console.print(f"[dim]Uploading PER {record['header']['per_version']} to {api_url} …[/dim]")
+    if profile is None:
+        console.print("[dim]Policy: ProofAgent default policy (none attached; release needs 95%). "
+                      "Attach yours with --governance-profile or --assess-governance.[/dim]")
+    try:
+        result = upload_record(record, lookup, api_url=api_url, api_key=api_key, harness_version=__version__,
+                               scenarios=_scenarios(report, full=upload_transcript))
+    except PerUploadError as exc:
+        if exc.status in (404, 405):  # a platform without the record endpoint
+            console.print("[yellow]This platform does not accept PER records yet; uploading the run instead.[/yellow]")
+            return False
+        console.print(f"[red]PER upload failed:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    decision = str(result.get("decision") or "").lower()
+    # The policy's behaviour floor, applied on top of the record's decision (EIO's policy object has no per-metric
+    # rule): one behaviour under the floor blocks the release, however high the readiness average is.
+    from proofagent_harness.governance_profile import default_profile, floor_breaches, metric_floor
+
+    floor = metric_floor(profile or default_profile())
+    breaches = floor_breaches(record, floor)
+    if breaches:
+        from proofagent_harness.governance_profile import floor_evidence
+
+        decision = "block"
+        console.print("[red]Policy floor:[/red] " + ", ".join(f"{m.replace('-', ' ')} {v:.0f}%" for m, v in breaches)
+                      + f" below the {floor:.0f}% every behaviour must reach — release blocked.")
+        for m, _ in breaches:
+            ev = floor_evidence(record, m)
+            turns = ev["turns"]
+            where = f"turns {turns[0]}–{turns[-1]}" if len(turns) > 4 else "turn" + ("s " if len(turns) > 1 else " ") + ", ".join(map(str, turns))
+            console.print(f"  {m.replace('-', ' ')}: {ev['failed']} of {ev['of']} checks failed ({', '.join(ev['checks']).replace('-', ' ')}) on {where}"
+                          + (f'\n    the agent: "{ev["quote"][:200]}"' if ev["quote"] else ""))
+    code = gate_exit_code(decision, fail_on=fail_on)
+    color = {"pass": "green", "review": "yellow", "block": "red"}.get(decision, "white")
+    console.print(f"\n[bold]Release decision:[/bold] [{color}]{decision.upper() or 'UNKNOWN'}[/{color}]")
+    readiness = (record.get("scores") or {}).get("readiness", {}).get("value")
+    console.print(f"  Readiness : {round(readiness) if readiness is not None else 'withheld'}"
+                  f" · record {str(result.get('record_id', ''))[:8]} · {'signed' if result.get('signed') else 'unsigned'}")
+    if result.get("url"):
+        _print_outputs(dashboard=result.get("url"))
+    if not exit_on_decision:
+        return True
+    console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
+    raise typer.Exit(code=code)
+
+
 def _upload_and_gate(
     report,
     *,
@@ -1583,13 +1778,20 @@ def _governance_gate_and_exit(
     report, profile, *, fail_on: str, upload: bool, api_key: str | None,
     agent_name: str | None, agent_version: str | None, source: str,
     environment: str | None, transcript: str | None = None,
-    profile_slug: str | None = None,
+    profile_slug: str | None = None, system_prompt: str | None = None, artifacts: list | None = None,
+    upload_transcript: bool = False,
 ) -> None:
     """Apply the LOCAL Agent Governance Profile gate (authoritative), optionally
     uploading first. Always raises typer.Exit."""
     from proofagent_harness.governance import gate_exit_code
 
-    if upload:
+    # The PER record first, scored against the profile's intake (the governance axis); the classic run upload
+    # only when no record could be sent. The local profile gate below stays authoritative for the exit code.
+    if upload and not _upload_per_and_gate(
+        report, api_key=api_key, agent_name=agent_name or "agent-under-test", agent_version=agent_version,
+        fail_on=fail_on, system_prompt=system_prompt, profile=profile, exit_on_decision=False, artifacts=artifacts,
+        upload_transcript=upload_transcript,
+    ):
         _upload_run_best_effort(
             report, api_key=api_key, agent_name=agent_name, agent_version=agent_version,
             source=source, environment=environment, transcript=transcript, profile=profile,
@@ -1961,15 +2163,15 @@ def _print_pai(result, *, explain: bool) -> None:
 
 
 def _export_per(report, out: Path, *, agent_name: str | None = None, agent_version: str | None = None,
-                system_prompt: str | None = None, bundle_out: Path | None = None,
-                intake: dict | None = None) -> None:
+                system_prompt: str | None = None, bundle_out: Path | None = None, profile=None,
+                artifacts: list | None = None) -> None:
     """Write a finished report as a PER 2.1 record; a failure is reported, never fatal to the run."""
     from proofagent_harness.per_export import PerExportError, export_per
 
     try:
         record = export_per(report, out, bundle_out=bundle_out, agent_name=agent_name,
                             agent_version=agent_version or "unversioned", system_prompt=system_prompt,
-                            intake=intake)
+                            artifacts=artifacts if system_prompt else None, **_policy_args(profile, report))
     except Exception as exc:  # PerExportError, or EIO's own ConversionError
         kind = "" if isinstance(exc, PerExportError) else f"{type(exc).__name__}: "
         console.print(f"[yellow]PER export skipped:[/yellow] {kind}{exc}")
@@ -2010,13 +2212,13 @@ def per(
       proof per report.json -o report.per.json
       proof per report.json -o report.per.json --system-prompt agent/system_prompt.md --bundle report.bundle.json
     """
-    intake = None
+    profile = None
     if governance_profile:
         from proofagent_harness.governance_profile import load_profile
 
-        intake = load_profile(str(governance_profile)).intake
+        profile = load_profile(str(governance_profile))
     _export_per(report_path, out, agent_name=agent_name, agent_version=agent_version, bundle_out=bundle_out,
-                system_prompt=system_prompt.read_text(encoding="utf-8") if system_prompt else None, intake=intake)
+                system_prompt=system_prompt.read_text(encoding="utf-8") if system_prompt else None, profile=profile)
 
 
 @app.command("pai")

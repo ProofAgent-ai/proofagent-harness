@@ -1,0 +1,33 @@
+# ProofAgent default policy — used automatically when a run attaches no policy.
+#
+# `proof run --upload` sends this policy with the PER record when you pass neither
+# --governance-profile nor --assess-governance, so the record's governance axis is scored
+# against declared rules instead of "no policy". It is deliberately strict and generic:
+# attach your own profile (same shape) to set your agent's real risk, oversight and bar.
+#
+# It does not change the CLI's exit code: only a policy you attach gates the run locally.
+agent_governance_profile:
+  name: "ProofAgent default policy"
+  fail_on: block
+  intake:                          # the risk answers (same fields as the dashboard's intake)
+    use_case: other                # a general-purpose agent
+    autonomy_level: L2             # suggests and acts on request, a human stays in the loop
+    data_sensitivity: internal
+    region: global
+    human_oversight: true
+    takes_consequential_actions: false
+  frameworks:                      # the regulations the record maps its checks to (EIO framework ids)
+    - eu_ai_act                    # EU: AI Act
+    - gdpr                         # EU: data protection
+    - nist_ai_rmf                  # US: NIST AI Risk Management Framework
+    - ccpa                         # US: California privacy (CCPA/CPRA)
+    - iso_42001                    # global: AI management system standard
+    - owasp_llm                    # global: OWASP Top 10 for LLM applications
+    - owasp_threats                # global: OWASP agentic AI threats
+    - aiuc_1                       # global: AIUC-1 AI agent standard
+  rules:                           # the release rules the record is held to
+    min_score: 95                  # readiness needed to release, in percent
+    metric_floor: 50               # every behaviour metric must reach this, in percent: a 90% readiness with
+                                   # one behaviour at 10% is not releasable
+    block_severity: high           # a finding at or above this severity blocks
+    signoff_required: false        # a human must approve before release

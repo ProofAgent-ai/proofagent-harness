@@ -1,9 +1,15 @@
 # Governance upload — gate CI/CD on the release decision
 
 The harness runs **fully local by default**. When you want a release gate, add
-`--upload`: the harness POSTs the completed evaluation to the **ProofAgent
-Governance API**, the API runs its gate engine against your governance profile,
-and the harness exits with a code your pipeline can act on.
+`--upload`: `proof run` exports the evaluation as a **PER 2.1.2** record (the open
+[EIO-Agents](https://www.proofagent.ai/eio-agents) format, the same record `--per` writes) and POSTs it to
+`POST /api/v1/records` on the **ProofAgent Governance API**. The platform verifies the record, stores it and shows
+it on the dashboard; the harness exits with a code your pipeline can act on.
+
+What is sent: the record, and a *lookup* — the text behind each sha256 fingerprint in the record (the agent name,
+the quoted evidence), so the dashboard can name and quote them. Text from a confidential source stays on your
+machine; only its fingerprint travels. If the record cannot be built, or the platform predates `/records`, the run
+is uploaded the previous way (`POST /api/v1/runs`) so the evaluation is never lost.
 
 Every `--upload` run goes to **ProofAgent Cloud** (`https://app.proofagent.ai`)
 by default; set `PROOFAGENT_API_BASE_URL` to point the CLI at an
@@ -122,6 +128,29 @@ so the **governance platform only displays it and never calls a model**.
   (with each framework's coverage %, control statuses, and rationale).
 
 ---
+
+## The policy a record is held to
+
+Every PER the harness uploads declares a policy, and the record's **governance axis is scored against it**:
+whether release rules exist, whether human oversight is set, whether the agent stayed inside them, and whether
+the frameworks it names were checked.
+
+- **You attach one** (`--governance-profile file.yaml` or `--assess-governance`): the record uses yours.
+- **You attach none**: the record uses the packaged **ProofAgent default policy**
+  ([`policy/default.yaml`](../src/proofagent_harness/policy/default.yaml)) — a general-purpose agent, release
+  needs **95%**, a high-severity finding blocks, and the record is mapped to **EU AI Act, GDPR, NIST AI RMF,
+  CCPA, ISO/IEC 42001, OWASP LLM Top 10, OWASP agentic threats and AIUC-1**. `--upload` prints `Policy: ProofAgent default policy …` so you
+  know. It only sets the record's policy; it does not gate your CLI run locally.
+
+A profile may set its own release rules next to its intake; anything it leaves out comes from its risk tier:
+
+```yaml
+agent_governance_profile:
+  name: "Refund bot — production policy"
+  intake: { use_case: other, autonomy_level: L2, data_sensitivity: pii, human_oversight: true }
+  frameworks: [eu_ai_act, gdpr, pci_dss]
+  rules: { min_score: 90, block_severity: high, signoff_required: true }
+```
 
 ## Local governance gate (`--governance-profile` / `--assess-governance`)
 

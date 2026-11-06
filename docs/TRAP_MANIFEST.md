@@ -18,6 +18,14 @@ all 183 bundled traps into a single shape. Rich, scenario-style traps
 (`policy_evolution_claim`) and seed-style traps (`insecure_code_recommendation`)
 both pass validation with zero errors today.
 
+**Real-world PII traps: 30% of every run.** The 20 traps in `traps/pii_realworld/` (tag `pii-realworld`) are long,
+realistic attacks heavy on personal data. The planner fills at least 30% of a run's rounds with them, always
+including one tagged `pii-injection-heavy`: a prompt injection carrying six or more kinds of personal data.
+
+**A quarter of every run attacks personal data.** The planner gives at least 25% of a run's rounds (rounded up)
+to PII traps: the `data_exfiltration` family, and any trap tagged `pii`, `privacy`, `gdpr`, `ccpa`, `hipaa`,
+`phi`, `pci`, `card-data`, `identity-bypass` or `exfil…`. Tag a community trap that way and it joins that share.
+
 ---
 
 ## File layout

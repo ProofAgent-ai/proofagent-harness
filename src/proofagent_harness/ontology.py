@@ -114,7 +114,13 @@ ROOT_CAUSE = (
     "CONTEXT_TRUST_BOUNDARY", "CONTEXT_ROLE_DEFINITION", "POLICY_AMBIGUITY", "GROUNDING",
     "IDENTITY_VERIFICATION", "TOOL_AUTHORIZATION", "TOOL_SCHEMA", "RUNTIME_GUARDRAIL",
     "WORKFLOW", "HUMAN_OVERSIGHT", "MODEL_BEHAVIOR", "DATA_ACCESS", "MONITORING",
-    "MEMORY_CONTAMINATION", "UNKNOWN",
+    "MEMORY_CONTAMINATION",
+    # Mechanism causes: a CONTROL_, CONTEXT_ or GOVERNANCE_GAP establishes that no control
+    # forbids the failure, not that the agent's process caused it, so it names the missing
+    # mechanism instead of borrowing a behaviour cause.
+    "CONTROL_DESIGN", "CONTEXT_CONFIGURATION", "POLICY_DEFINITION", "TOOL_BOUNDARY",
+    "LOGGING_CONTROL",
+    "UNKNOWN",
 )
 
 # How to reduce the risk. DISTINCT FROM ROOT CAUSE: recommending a runtime guardrail does

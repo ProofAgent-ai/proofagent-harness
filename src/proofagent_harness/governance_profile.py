@@ -265,6 +265,12 @@ class GovernanceProfile:
     classification: dict
     fail_on: str = "block"
     source: str = "file"
+    # Release rules the profile declares itself ({min_score (percent), block_severity, signoff_required}); any
+    # left out come from the tier guardrails.
+    rules: dict = field(default_factory=dict)
+    raw: str | None = None  # the profile file's text, for its digest in the PER
+    # Regulations the profile names itself (registry ids such as "gdpr"); the PER maps its checks to them.
+    declared_frameworks: list = field(default_factory=list)
 
     # ── convenience accessors over the classification ──
     @property
@@ -351,6 +357,8 @@ class GovernanceProfile:
             return res
 
         min_score = c.get("min_final_score")
+        if self.rules.get("min_score") is not None:  # the profile's own floor, in percent (final scores are 0-10)
+            min_score = float(self.rules["min_score"]) / 10
         if min_score is not None:
             if final_score is not None and float(final_score) < float(min_score):
                 res.decision = "block"
@@ -405,7 +413,13 @@ def _extract_block(data: dict) -> tuple[str, dict, str]:
     if not isinstance(intake, dict):
         raise ValueError("governance profile: 'intake' must be a mapping of risk answers.")
     fail_on = str(root.get("fail_on") or "block").lower()
-    return name, intake, fail_on
+    rules = root.get("rules") or {}
+    if not isinstance(rules, dict):
+        raise ValueError("governance profile: 'rules' must be a mapping (min_score, block_severity, signoff_required).")
+    frameworks = root.get("frameworks") or []
+    if not isinstance(frameworks, list) or not all(isinstance(x, str) for x in frameworks):
+        raise ValueError("governance profile: 'frameworks' must be a list of framework ids (e.g. gdpr, eu_ai_act).")
+    return name, intake, fail_on, rules, frameworks
 
 
 def load_profile(path: str | Path) -> GovernanceProfile:
@@ -446,11 +460,86 @@ def load_profile(path: str | Path) -> GovernanceProfile:
             data = yaml.safe_load(text) or {}
     if not isinstance(data, dict):
         raise ValueError("governance profile: top-level must be a mapping.")
-    name, intake, fail_on = _extract_block(data)
+    name, intake, fail_on, rules, frameworks = _extract_block(data)
     classification = classify(intake)
     return GovernanceProfile(
-        name=name, intake=intake, classification=classification, fail_on=fail_on, source=f"file:{p}"
+        name=name, intake=intake, classification=classification, fail_on=fail_on, source=f"file:{p}",
+        rules=rules, raw=text, declared_frameworks=frameworks,
     )
+
+
+DEFAULT_POLICY = Path(__file__).parent / "policy" / "default.yaml"
+
+
+def default_profile() -> GovernanceProfile:
+    """The packaged ProofAgent default policy (``policy/default.yaml``), for a run that attaches none."""
+    profile = load_profile(DEFAULT_POLICY)
+    profile.source = "default"
+    return profile
+
+
+BEHAVIOUR_METRICS = ("safety", "instruction-following", "manipulation-resistance", "hallucination-resistance",
+                     "task-success", "tool-use")
+
+
+def metric_floor(profile: GovernanceProfile | None) -> float | None:
+    """The profile's behaviour-metric floor in percent (``rules.metric_floor``), or None."""
+    v = (profile.rules or {}).get("metric_floor") if profile is not None else None
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def floor_evidence(record: dict, metric: str) -> dict:
+    """Why a metric is low, from the record itself: its failing checks, the turns, and the agent's shortest quote."""
+    m = next((x for x in (record.get("scores") or {}).get("metrics") or []
+              if str(x.get("metric", "")).endswith("." + metric)), None) or {}
+    claims = {c["id"]: c for c in record.get("claims") or []}
+    refs = {r["id"]: r for r in (record.get("evidence") or {}).get("refs") or []}
+    failed = [claims[i] for i in m.get("member_claim_ids") or [] if i in claims and claims[i].get("state") == "APPLICABLE_FAIL"]
+    quotes = sorted((refs[r]["excerpt"] for c in failed for r in c.get("evidence") or []
+                     if r in refs and refs[r].get("source_type") == "AGENT_ANSWER" and refs[r].get("excerpt")), key=len)
+    return {"checks": sorted({str(c.get("predicate", "")).rsplit(".", 1)[-1] for c in failed}),
+            "turns": sorted({t for c in failed for t in c.get("turn_indices") or []}),
+            "failed": len(failed), "of": len(m.get("member_claim_ids") or []), "quote": quotes[0] if quotes else None}
+
+
+def floor_breaches(record: dict, floor: float | None) -> list[tuple[str, float]]:
+    """The behaviour metrics of a PER record measured below the floor, lowest first: [(metric, value)]. EIO's policy
+    object has no per-metric rule, so the floor is applied on top of the record's own decision."""
+    if floor is None:
+        return []
+    out = []
+    for m in (record.get("scores") or {}).get("metrics") or []:
+        mid = str(m.get("metric", "")).rsplit(".", 1)[-1]
+        v = m.get("value")
+        if mid in BEHAVIOUR_METRICS and isinstance(v, (int, float)) and v < floor:
+            out.append((mid, float(v)))
+    return sorted(out, key=lambda x: x[1])
+
+
+def eio_policy(profile: GovernanceProfile) -> dict:
+    """The profile as the PER's declared policy (EIO bundle ``scope.policy``): its rules, with those it leaves out
+    taken from the tier guardrails (min score 0-10 -> percent)."""
+    import hashlib
+
+    c, r = profile.controls, profile.rules
+    floor = r.get("min_score")
+    if floor is None and c.get("min_final_score") is not None:
+        floor = float(c["min_final_score"]) * 10
+    # EIO's policy sources: the profile rides in the record ("embedded_profile"); `origin` says where it came from.
+    origin = "platform" if profile.source.startswith("cloud") else "local"  # EIO: platform | local
+    return {
+        "source": "embedded_profile",
+        "origin": origin,
+        "profile_sha256": "sha256:" + hashlib.sha256(profile.raw.encode("utf-8")).hexdigest() if profile.raw else None,
+        "name": profile.name,
+        "declared": None,
+        "prohibited": bool(profile.prohibited),
+        "rules": {
+            "min_score": float(floor) if floor is not None else None,
+            "block_severity": str(r.get("block_severity") or c.get("block_severity") or "critical").upper(),
+            "signoff_required": bool(r.get("signoff_required", c.get("signoff_required", False))),
+        },
+    }
 
 
 def from_cloud(name: str, classification: dict, intake: dict | None = None, fail_on: str = "block") -> GovernanceProfile:
