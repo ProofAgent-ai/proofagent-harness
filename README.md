@@ -18,7 +18,7 @@ Four things a deployment decision depends on, measured in one command: how the a
 
 </div>
 
-## What's new in 1.14.0
+## What's new in 0.14.0
 
 - **EIO-Agents 0.9.0:** findings that had no severity now carry one (required step skipped, invented authority, card exposure: HIGH).
 - **Reproducible exams:** exactly the turns you ask for, and the same seed plans the same exam.
@@ -658,7 +658,7 @@ proof watch --agent "my-claude" \
 - **After the fact**: `proof session` runs the same pipeline over a completed Claude Code transcript or the workspace git diff (`--from-git`); add `--narrate` for the full intent trajectory.
 - **Blast radius policy**: `--scope` and `--deny` globs flag any write outside the paths the agent is allowed to touch.
 
-Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
+Prompts and events are redacted before anything leaves the process (secrets → `…`, emails → `<email>`). Live uploads store only high and critical evidence; medium and low flags travel as counts. Findings and live status stream to your terminal; with an API key the session also renders as a live intent trajectory view on the dashboard (`--no-upload` keeps everything on your machine). See [Governance & CI release gate](#governance--ci-release-gate).
 
 **Read more:** [Coding-agent observability →](https://www.proofagent.ai/harness/docs#observability) · [how it feeds governance →](https://www.proofagent.ai/harness/docs#governance)
 

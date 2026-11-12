@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.14.0]
+## [0.14.0]
 
 Requires **`eio-agents==0.9.0`** (EIO 0.7.0): findings that reached records with no severity now carry one
 (required workflow step, invented authority, nonexistent entity, privilege scope and card exposure HIGH; uncertainty
