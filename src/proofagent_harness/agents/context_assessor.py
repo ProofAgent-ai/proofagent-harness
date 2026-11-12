@@ -34,9 +34,29 @@ def _emit(state: HarnessState, event: Event) -> None:
 
 
 def assess_enabled(state: HarnessState) -> bool:
+    """On by default: a record without a context grade has its readiness withheld, so the
+    harness always grades context. PROOFAGENT_ASSESS_CONTEXT=0 is the only way off."""
     if bool(state.get("assess_context")):
         return True
-    return os.environ.get("PROOFAGENT_ASSESS_CONTEXT", "").strip().lower() in _TRUTHY
+    return os.environ.get("PROOFAGENT_ASSESS_CONTEXT", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _template_context(state: HarnessState) -> Any:
+    """A stand-in context when none was supplied: the run's role, business case and goal written
+    as the only instructions the agent is known to have. Graded like any other context, it scores
+    what is really there — no guardrails, no tools, no knowledge — so a missing context is measured
+    (and low) instead of withheld."""
+    from proofagent_harness.schemas import AgentContext
+
+    role = str(state.get("role") or "an AI agent").strip()
+    parts = [f"You are {role}."]
+    if state.get("business_case"):
+        parts.append(f"Business case: {str(state['business_case']).strip()}")
+    if state.get("goal"):
+        parts.append(f"Goal: {str(state['goal']).strip()}")
+    parts.append("(No system prompt, tools or knowledge were supplied to the evaluation; this text is "
+                 "the harness's template built from the run's role, business case and goal.)")
+    return AgentContext(system_prompt="\n".join(parts), role=role)
 
 
 def context_assessor_node(state: HarnessState) -> dict[str, Any]:
@@ -78,8 +98,17 @@ def context_assessor_node(state: HarnessState) -> dict[str, Any]:
     try:
         from proofagent_harness.context_engineering import assess_context_engineering
 
+        ctx = state.get("context")
+        templated = not (getattr(ctx, "system_prompt", None) or getattr(ctx, "tools", None))
+        if templated:
+            ctx = _template_context(state)
+            _emit(state, Event(
+                type="warning",
+                detail="no agent context supplied — context graded against the harness template "
+                       "(role, business case, goal); supply --context-dir for a real grade",
+            ))
         result = assess_context_engineering(
-            context=state.get("context"),
+            context=ctx,
             mode=str(state.get("mode") or "multi_turn"),
             model=getattr(state.get("llm"), "model", None) or "gpt-4.1-mini",
             api_base=getattr(state.get("llm"), "api_base", None),
@@ -100,7 +129,16 @@ def context_assessor_node(state: HarnessState) -> dict[str, Any]:
         return {}
 
     if not result:
+        # Never silent: an empty assessment withholds the context axis and with it readiness.
+        _emit(state, Event(
+            type="error",
+            detail=(f"context assessment returned nothing from {getattr(state.get('llm'), 'model', '?')} — "
+                    "the context axis (and readiness) will be withheld; the harness LLM did not return a "
+                    "usable assessment"),
+        ))
         return {}
+    if templated:
+        result["inferred_from_template"] = True
 
     # PROVENANCE. A finding about the prompt should name the file an engineer has to
     # open, not "the supplied context" — this is the only place that knows it, since

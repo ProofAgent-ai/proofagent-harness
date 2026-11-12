@@ -136,7 +136,9 @@ def _access_map(events: list[SessionEvent]) -> dict[str, Any]:
             if h:
                 hosts.add(h)
         elif e.action == "mcp" and e.target:
-            mcp.add(e.target)
+            # an MCP target can carry a whole command line (a terminal tool): masked like `exec`. Measured: a
+            # platform key typed into a terminal-tool command rode out raw in access_map.mcp_tools.
+            mcp.add(_mask_secrets(e.target)[:160])
     return {
         "paths_read": sorted(reads)[:200],
         "paths_written": sorted(writes)[:200],
@@ -145,6 +147,25 @@ def _access_map(events: list[SessionEvent]) -> dict[str, Any]:
         "tools_used": sorted(tools),
         "mcp_tools": sorted(mcp)[:60],
     }
+
+
+def _scrub_payload(obj: Any) -> Any:
+    """Last line of defence before upload: every string anywhere in the payload is passed through the secret
+    patterns, so a field added later can never carry a key out raw (one already did: access_map.mcp_tools)."""
+    from proofagent_harness.session.screen import _SECRET_PATTERNS
+
+    if isinstance(obj, dict):
+        return {k: _scrub_payload(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_payload(v) for v in obj]
+    if isinstance(obj, str):
+        t = obj
+        for _label, pat in _SECRET_PATTERNS:
+            if _label in ("Private key block", "Generic secret assignment"):
+                continue
+            t = pat.sub("…", t)
+        return t
+    return obj
 
 
 def _mask_secrets(text: str) -> str:
@@ -182,12 +203,22 @@ def _events_contract(
     flags_by_seq: dict[int, list[str]] = {}
     for f in result.findings:
         flags_by_seq.setdefault(f.seq, []).append(f.category)
+    # Live uploads keep only HIGH/CRITICAL evidence and the prompt that opened each such turn: every stored row costs
+    # database space, and medium/low flags are summarised as counts instead of shipped one by one.
+    serious = {f.seq for f in result.findings if f.severity in ("critical", "high")}
+    keep_prompts: set[int] = set()
+    opener = None
+    for e in result.events:
+        if e.action == "prompt":
+            opener = e.seq
+        elif e.seq in serious and opener is not None:
+            keep_prompts.add(opener)
     out: list[dict[str, Any]] = []
     for e in result.events:
         # Live/slim mode keeps the risk-bearing events (proof) AND every prompt event —
         # the dashboard rebuilds the intent trajectory from prompts and aligns the narrated
         # rows to them, so dropping prompts would strand the LLM-derived intents/answers.
-        if only_flagged and e.seq not in flags_by_seq and e.action != "prompt":
+        if only_flagged and not (e.seq in serious or e.seq in keep_prompts):
             continue
         label = f"{e.tool or e.kind} - {e.action}"
         safe_target = _mask_secrets(e.target) if e.target else e.target
@@ -276,6 +307,7 @@ def build_session_payload(
             ),
         }
         for f in result.findings
+        if not live or f.severity in ("critical", "high")
     ]
 
     # Tier-2 (the cost-gated artifact rubric) rides on top when it ran: its
@@ -347,6 +379,8 @@ def build_session_payload(
             "tool": tool,
             "capabilities": result.capabilities,
             "access_map": result.access_map,
+            # every flag, by severity: live uploads ship only the high/critical rows, so the totals travel as counts
+            "flag_counts": dict(counts),
             "session": {
                 "event_count": len(result.events),
                 "risk_score": result.risk_score,
@@ -392,4 +426,4 @@ def build_session_payload(
         payload["run_metadata"]["environment"] = str(environment)
     if profile:
         payload["governance_profile"] = str(profile)
-    return payload
+    return _scrub_payload(payload)

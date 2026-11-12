@@ -1146,12 +1146,20 @@ def summary(report: Any) -> str:
              f"{_behaviour_score(report)}, on the behavioural axis alone.")
     else:
         verdict = str(_get(pai, "readiness", "") or "").replace("_", " ")
+        _ps = str(_get(_get(_get(report, "metadata", {}) or {}, "per_release") or {}, "state", "") or "").upper()
+        if _ps == "BLOCK" or verdict.lower() == "blocked":
+            verdict = "not ready"
+        elif _ps == "REVIEW" and verdict.lower() in ("ready", "ready with caveats"):
+            verdict = "hold for review"
         v = (f"**Verdict — {verdict.title() or 'none'}.** Readiness index "
              f"{_get(pai, 'score')}/100 ({_get(pai, 'grade', '')} · "
              f"{_get(pai, 'band', '')}), certification {cert}, behavioural score "
              f"{_behaviour_score(report)}.")
     if caps:
         v += " Capped by: " + "; ".join(str(c) for c in caps)
+    per_state = str(_get(_get(_get(report, "metadata", {}) or {}, "per_release") or {}, "state", "") or "")
+    if per_state:
+        v += f" PER release decision: **{per_state}** (authoritative)."
     return f"{p1}\n\n{p2}\n\n{v}"
 
 
@@ -1670,7 +1678,19 @@ def decision(report: Any, *, rows: list[AuditRow] | None = None) -> dict[str, An
         verdict = "SHIP WITH CAVEATS"
     else:
         verdict = "SHIP"
+    # THE PER IS AUTHORITATIVE. Its release decision applies the declared (or default) policy; the report
+    # may be stricter, never looser. Measured: a report read SHIP / GOLD beside a PER holding the release
+    # for REVIEW (readiness 91.4 against the policy's 95).
+    per_rel = (_get(_get(report, "metadata", {}) or {}, "per_release") or {})
+    per_state = str(_get(per_rel, "state", "") or "").upper()
+    per_reasons = list(_get(per_rel, "reasons", []) or [])
+    if per_state == "BLOCK" and not verdict.startswith("NO VERDICT"):
+        verdict = "DO NOT SHIP"
+    elif per_state == "REVIEW" and verdict in ("SHIP", "SHIP WITH CAVEATS"):
+        verdict = "HOLD FOR REVIEW"
     return {
+        "per_release": per_state or None, "per_reasons": per_reasons,
+        "per_readiness": _get(per_rel, "readiness"),
         "verdict": verdict, "has_index": has_index,
         "score": _get(pai, "score"), "grade": grade, "band": _get(pai, "band"),
         "certification": _enum_value(_get(report, "certification", "")),
@@ -1757,14 +1777,31 @@ def audit_markdown(report: Any, *, after_summary: str = "") -> str:
         dec["severity_counts"].items(), key=lambda kv: _SEV_RANK.get(kv[0], 3)))
     out: list[str] = [
         "## Decision", "",
-        (f"**{dec['verdict']}** — readiness {dec['score']}/100 ({dec['grade']} · "
-         f"{dec['band']}), certification {dec['certification']}."
+        (f"**{dec['verdict']}** — readiness "
+         + (f"{dec['per_readiness']}/100 (PER, authoritative; local index {dec['score']}, "
+            if dec.get("per_readiness") is not None else f"{dec['score']}/100 (")
+         + f"{dec['grade']} · {dec['band']}), certification {dec['certification']}."
          if dec["has_index"] else
          f"**{dec['verdict']}** — certification {dec['certification']}, on the "
          f"behavioural axis alone. See **PAI** for why there is no index."), "",
         f"**{dec['actionable']} actionable** of {dec['findings']} finding(s): {sev}."
         if sev else "No findings.", "",
     ]
+    if dec.get("per_release"):
+        why = ("; ".join(dec.get("per_reasons") or [])) or "no decisive rule listed"
+        follows = {"BLOCK": ("DO NOT SHIP",), "REVIEW": ("HOLD FOR REVIEW",), "PASS": ("SHIP", "SHIP WITH CAVEATS")}
+        if dec["verdict"] in follows.get(str(dec["per_release"]), (dec["verdict"],)) or dec["verdict"].startswith("NO VERDICT"):
+            rel = "authoritative; this verdict follows it"
+        else:
+            # The report may be stricter than the PER, never looser: say so instead of claiming it follows.
+            rel = ("authoritative floor; this report is STRICTER — "
+                   + ("; ".join(str(b).rstrip(".") for b in dec.get("blockers") or []) or "local readiness index") + ", which the PER does not carry")
+        out += [f"**PER release decision: {dec['per_release']}** ({rel}) — {why}.", ""]
+    reg = (_get(report, "metadata", {}) or {}).get("regression") or {}
+    if reg:
+        n = lambda k: len(reg.get(k) or [])  # noqa: E731
+        out += [f"**Re-test of earlier failures:** {n('retested')} re-run word for word — **{n('fixed')} fixed**, "
+                f"**{n('still_open')} still open**; **{n('new')} new** failure(s) found by fresh attacks.", ""]
     if dec["blockers"]:
         out += ["Blocked by: " + "; ".join(dec["blockers"]), ""]
     if dec["first_three"]:

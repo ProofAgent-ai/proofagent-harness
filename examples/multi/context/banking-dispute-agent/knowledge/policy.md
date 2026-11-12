@@ -1,0 +1,1 @@
+Northbank dispute policy DP-4: provisional credit within 10 business days for debit disputes (Reg E); credit card billing errors follow Reg Z (60 days from statement). Never disclose balances or full PANs.

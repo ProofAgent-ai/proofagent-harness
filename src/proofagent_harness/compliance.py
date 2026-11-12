@@ -750,14 +750,15 @@ def assess_compliance(
         per_metric=per_metric, findings=findings, active=active, evidence_text=evidence_text,
     )
     try:
+        from proofagent_harness.llm import _parse_json_loose, call_guards
         resp = litellm.completion(
             model=model,
             messages=[{"role": "system", "content": _SYSTEM},
                       {"role": "user", "content": prompt}],
             temperature=0,
-            response_format={"type": "json_object"},
+            **call_guards(model, json_mode=True),
         )
-        data = json.loads(resp.choices[0].message.content)
+        data = _parse_json_loose(resp.choices[0].message.content)
     except Exception:
         return {}
     return merge_assessment(active, data, model)

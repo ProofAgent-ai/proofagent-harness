@@ -193,11 +193,13 @@ def test_the_turn_floor_is_justified_by_coverage_not_stability() -> None:
     assert w is not None
     assert "coverage" in w.lower()
     assert "sqrt" not in w.lower()          # the disproven claim is gone
-    h.turns = 15
+    h.turns = 25   # the floor is now 25 turns (tool misuse + PII + injection + controls need room)
     assert h._turn_count_warning() is None
 
 
-def test_the_interval_widens_as_turns_shrink() -> None:
+def test_the_interval_widens_as_turns_shrink(monkeypatch) -> None:
+    # sampling error is opt-in now (the default margin is reproducibility only)
+    monkeypatch.setenv("PROOFAGENT_PAI_SAMPLING", "1")
     kw = {"context": 60, "evaluation": 80, "compliance": 85, "governance": 60,
           "axis_margins": {"compliance": 4.0}}
     wide = compute_pai(**kw, turns=8)
@@ -213,7 +215,9 @@ def test_no_margin_is_reported_when_there_is_nothing_to_estimate_from() -> None:
     assert r.score_text == str(r.score)
 
 
-def test_the_interval_does_not_collapse_at_a_perfect_score() -> None:
+def test_the_interval_does_not_collapse_at_a_perfect_score(monkeypatch) -> None:
+    # sampling error is opt-in now (the default margin is reproducibility only)
+    monkeypatch.setenv("PROOFAGENT_PAI_SAMPLING", "1")
     """15 of 15 turns passing does not mean the true rate is exactly 1.0.
 
     The raw binomial term p(1-p)/n is zero at the boundaries, so a perfect run reported
@@ -228,7 +232,9 @@ def test_the_interval_does_not_collapse_at_a_perfect_score() -> None:
     assert shorter.margin > perfect.margin      # fewer trials, wider
 
 
-def test_the_margin_is_clamped_rather_than_absurd() -> None:
+def test_the_margin_is_clamped_rather_than_absurd(monkeypatch) -> None:
+    # sampling error is opt-in now (the default margin is reproducibility only)
+    monkeypatch.setenv("PROOFAGENT_PAI_SAMPLING", "1")
     from proofagent_harness.scoring.pai import MAX_MARGIN
 
     # A near-zero axis makes a geometric mean arbitrarily sensitive; past a point the
@@ -242,3 +248,13 @@ def test_a_capped_score_carries_no_interval() -> None:
     r = compute_pai(context=90, evaluation=90, compliance=90, governance=90,
                     blocked=True, turns=15, axis_margins={"evaluation": 5.0})
     assert r.margin is None
+
+
+def test_the_default_margin_is_reproducibility_only(monkeypatch) -> None:
+    """With no scorer disagreement measured, the margin carries no sampling term: re-scoring the
+    same conversation is what it reports."""
+    from proofagent_harness.scoring.pai import _margin, Axis
+    monkeypatch.delenv("PROOFAGENT_PAI_SAMPLING", raising=False)
+    axes = [Axis(key="evaluation", label="E", score=90.0, weight=1.0, present=True)]
+    assert _margin(axes, [(90.0, 1.0)], 90.0, {"evaluation": 1.0}, turns=25) == 1.0
+    assert _margin(axes, [(90.0, 1.0)], 90.0, {}, turns=25) is None

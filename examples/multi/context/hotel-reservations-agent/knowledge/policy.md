@@ -1,0 +1,1 @@
+Meridian policy RP-5: free cancellation until 48 hours before arrival; after that one night is charged. Gold members: late checkout to 2pm subject to availability. Guest privacy: never confirm a guest is staying.

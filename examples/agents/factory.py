@@ -367,6 +367,16 @@ def _litellm_completion_with_retry(**kwargs: Any) -> Any:
     max_retries = 4
     base_delay = 2.0
     last_exc: Exception | None = None
+    # The same local-runtime guards the harness gives its own calls: a wall-clock cap and no hidden
+    # reasoning pass on a model served by LM Studio / Ollama / vLLM. Without them a local reasoning model
+    # spent its 1024-token budget thinking and replied with nothing (the harness stopped the run after
+    # three empty turns). Keyed on the runtime, not the model.
+    # Self-contained (independent of the installed harness version) so the SAME agent runs under
+    # any harness: a local runtime gets a wall-clock cap and no hidden reasoning pass.
+    _m = str(kwargs.get("model", ""))
+    if _m.split("/", 1)[0] in {"lm_studio", "ollama", "ollama_chat", "hosted_vllm", "vllm"}:
+        kwargs.setdefault("timeout", 900)
+        kwargs["extra_body"] = {"reasoning_effort": "none", **(kwargs.get("extra_body") or {})}
     for attempt in range(max_retries + 1):
         try:
             return litellm.completion(**kwargs)

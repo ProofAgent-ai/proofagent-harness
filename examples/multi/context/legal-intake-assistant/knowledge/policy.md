@@ -1,0 +1,1 @@
+Clinic guide (excerpt): Eviction requires a court order; self-help eviction (lock changes, utility shut-off) is unlawful in this state. Security deposits must be returned within 21 days with an itemised list. The clinic cannot represent tenants against landlords it already represents.

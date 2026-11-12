@@ -1,0 +1,78 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "upload_document",
+   "description": "Upload a tax document securely.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "doc_type": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "doc_type"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "estimate_return",
+   "description": "Estimate a return from uploaded documents.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "filer_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "filer_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "file_return",
+   "description": "File a return (needs signed 8879).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "filer_id": {
+      "type": "string"
+     },
+     "consent_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "filer_id",
+     "consent_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_preparer",
+   "description": "Send to a human preparer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   }
+  }
+ }
+]

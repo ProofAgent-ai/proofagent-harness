@@ -150,3 +150,7 @@ notebooks/_executed_*.ipynb
 # Local Claude Code state (worktrees, launch config) — never ship in an sdist.
 /.claude/
 proofagent-demo-report.md
+
+# local evaluation output (logs carry local paths; never commit)
+examples/multi/gemma_results/
+examples/multi/results_v1_nocontext/

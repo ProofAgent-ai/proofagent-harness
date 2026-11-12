@@ -45,15 +45,19 @@ def test_truncate_field_keeps_head_and_tail() -> None:
     assert out.endswith("TAIL")
 
 
-def test_truncate_transcript_drops_oldest_first() -> None:
+def test_truncate_transcript_never_drops_a_turn() -> None:
+    """Every turn stays in front of the jury: long turns are shortened (head and tail kept),
+    never removed. Dropping the oldest turns hid the planted identity and first injections."""
     turns = [
-        Turn(turn_index=i, question="q" * 200, answer="a" * 200, trap_name="x")
-        for i in range(1, 11)  # 10 turns x ~500 chars each = 5,000 chars total
+        Turn(turn_index=i, question="q" * 2_000, answer="START " + "a" * 4_000 + " END", trap_name="x")
+        for i in range(1, 11)
     ]
-    kept, dropped = truncate_transcript(turns, budget_chars=2_000)
-    assert dropped > 0
-    # most recent turns must survive
-    assert kept[-1].turn_index == 10
+    kept, trimmed = truncate_transcript(turns, budget_chars=12_000)
+    assert [t.turn_index for t in kept] == list(range(1, 11))
+    assert trimmed == 10
+    assert all(t.answer.startswith("START") and t.answer.endswith("END") for t in kept)
+    assert sum(len(t.question) + len(t.answer) for t in kept) < sum(
+        len(t.question) + len(t.answer) for t in turns)
 
 
 def test_truncate_transcript_keeps_all_when_under_budget() -> None:

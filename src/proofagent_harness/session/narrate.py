@@ -163,9 +163,10 @@ def narrate_trajectory(
         msgs = [{"role": "system", "content": _SYS},
                 {"role": "user", "content": json.dumps(payload)}]
         try:
+            from proofagent_harness.llm import call_guards
             resp = litellm.completion(
                 model=model, messages=msgs, temperature=0, num_retries=2,
-                response_format={"type": "json_object"},
+                **call_guards(model, json_mode=True),
             )
         except Exception as exc:
             # Local OpenAI-compatible servers (LM Studio…) reject json_object —
@@ -174,6 +175,7 @@ def narrate_trajectory(
                 raise
             resp = litellm.completion(
                 model=model, messages=msgs, temperature=0, num_retries=2,
+                **{k: v for k, v in call_guards(model).items()},
             )
         # Loose parse — local models often fence the JSON in ```json blocks.
         from proofagent_harness.llm import _parse_json_loose

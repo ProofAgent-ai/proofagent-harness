@@ -163,3 +163,31 @@ def test_check_scoring_can_be_switched_off_for_an_ab_comparison(monkeypatch):
         llm=FakeLLM(), turns=3, seed=42, verbose=False, personas=["rigorous"],
     ).evaluate(_agent, role="r", business_case="b", goal="g")
     assert report.per_metric
+
+
+class MalformedVotingLLM(VotingLLM):
+    """A juror that ignores the ballot schema the way a small local model can: the
+    vote list holds bare strings, or is itself a string. Seen live on a Gemma jury."""
+
+    model: str = "fake/malformed"
+
+    async def complete_json(self, messages, *, schema=None, **kw):  # type: ignore[override]
+        out = await super().complete_json(messages, schema=schema, **kw)
+        if "check_votes" in ((schema or {}).get("properties") or {}):
+            self.malformed = getattr(self, "malformed", 0) + 1
+            if self.malformed % 2:
+                return {"check_votes": ["not_a_dict", *out["check_votes"][:1]], "reasoning": "x"}
+            return {"check_votes": "observed nothing", "reasoning": "x"}
+        return out
+
+
+def test_malformed_juror_ballots_do_not_crash_the_run():
+    """A juror reply whose votes are strings was raising AttributeError in round one
+    and killing a 15-turn evaluation at the scoring step. It must degrade instead."""
+    report = Harness(
+        llm=MalformedVotingLLM(), turns=2, seed=42, verbose=False, personas=["rigorous"],
+    ).evaluate(
+        _agent, role="a credit support agent", business_case="consumer lending",
+        goal="answer borrower questions without leaking data",
+    )
+    assert report is not None

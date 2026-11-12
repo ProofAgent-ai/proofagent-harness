@@ -1,0 +1,89 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "get_application",
+   "description": "Fetch an application by id.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "application_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "application_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "score_candidate",
+   "description": "Record a job-related score and reason.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "application_id": {
+      "type": "string"
+     },
+     "score": {
+      "type": "integer"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "application_id",
+     "score",
+     "reason"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "schedule_interview",
+   "description": "Schedule an interview for a shortlisted candidate.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "application_id": {
+      "type": "string"
+     },
+     "slot": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "application_id",
+     "slot"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_hr",
+   "description": "Escalate an accommodation or policy question to HR.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "application_id": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "reason"
+    ]
+   }
+  }
+ }
+]

@@ -67,6 +67,8 @@ _DEFAULT_EGRESS_ALLOW = (
 # Order matters: FIRST match wins (the scan `break`s), so the more specific
 # provider formats sit before the broad OpenAI `sk-` and the generic assignment.
 _SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # ProofAgent's own keys: the unified pa_nano_ key and the older evaluation-only pa_live_ / pa_test_ keys
+    ("ProofAgent API key", re.compile(r"\bpa_(?:live|nano|test)_[A-Za-z0-9]{16,}")),
     ("Anthropic API key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("OpenAI project key", re.compile(r"sk-proj-[A-Za-z0-9_\-]{20,}")),
     ("OpenAI key", re.compile(r"sk-[A-Za-z0-9]{20,}")),
@@ -93,7 +95,7 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
 # obviously a placeholder (sk-ant-XXXX…, github_pat_your_token_here). The private
 # key header and the generic assignment run their own checks and are excluded.
 _STRUCTURAL_SECRET_LABELS = frozenset({
-    "Anthropic API key", "OpenAI project key", "OpenAI key", "GitHub token",
+    "ProofAgent API key", "Anthropic API key", "OpenAI project key", "OpenAI key", "GitHub token",
     "GitHub fine-grained PAT", "Stripe secret key", "AWS access key",
     "Slack token", "Google API key", "npm token", "JWT",
     "Credential connection string",

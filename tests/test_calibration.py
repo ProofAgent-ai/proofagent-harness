@@ -185,6 +185,24 @@ def test_damping_is_off_by_default_so_an_unstable_scorer_stays_single_pass(
     assert residual > cal.TOLERANCE     # but the instability IS reported
 
 
+def test_jury_measurement_is_skipped_when_it_cannot_change_the_pass_count(monkeypatch) -> None:
+    """With the single-rung ladder the measurement always lands on 1 pass, so the run
+    must not spend two full panel passes on it — unless the residual is asked for."""
+    from proofagent_harness.harness import Harness
+
+    monkeypatch.delenv("PROOFAGENT_JURY_DAMPING", raising=False)
+    monkeypatch.delenv("PROOFAGENT_JURY_MEASURE", raising=False)
+    assert cal.jury_measure_enabled() is False
+    # Returns before touching the harness, the state or any LLM.
+    assert _run(Harness._calibrate_jury(None, {}, cal, cal.Calibration(), None)) == (None, 1)
+
+    monkeypatch.setenv("PROOFAGENT_JURY_MEASURE", "1")
+    assert cal.jury_measure_enabled() is True
+    monkeypatch.delenv("PROOFAGENT_JURY_MEASURE")
+    monkeypatch.setenv("PROOFAGENT_JURY_DAMPING", "1")
+    assert cal.jury_measure_enabled() is True
+
+
 def test_an_unstable_scorer_escalates_the_pass_count(tmp_path, monkeypatch) -> None:
     # The returned residual is the spread AT the chosen pass count — i.e. the
     # guarantee the run ships with — so escalation shows up as k > 1, not as a
@@ -214,8 +232,9 @@ def test_the_ladder_gives_up_rather_than_looping(tmp_path, monkeypatch) -> None:
     assert residual > cal.TOLERANCE     # and honest that it did not converge
 
 
-def test_a_measured_profile_is_cached_and_reused(tmp_path, monkeypatch) -> None:
+def test_a_measured_profile_is_cached_and_reused_when_opted_in(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PROOFAGENT_HOME", str(tmp_path))
+    monkeypatch.setenv("PROOFAGENT_JURY_CACHE", "1")
     calls = {"n": 0}
 
     async def counted():
@@ -226,6 +245,23 @@ def test_a_measured_profile_is_cached_and_reused(tmp_path, monkeypatch) -> None:
     first = calls["n"]
     _run(cal.measure_jury(counted, key="shared"))
     assert calls["n"] == first          # second run measured nothing
+
+
+def test_jury_noise_is_measured_per_run_by_default(tmp_path, monkeypatch) -> None:
+    """The cache key is the harness-LLM setup only, so reusing it would report another
+    agent's jury noise on this run. Default: measure every run."""
+    monkeypatch.setenv("PROOFAGENT_HOME", str(tmp_path))
+    monkeypatch.delenv("PROOFAGENT_JURY_CACHE", raising=False)
+    calls = {"n": 0}
+
+    async def counted():
+        calls["n"] += 1
+        return {"safety": 8.0}
+
+    _run(cal.measure_jury(counted, key="shared"))
+    first = calls["n"]
+    _run(cal.measure_jury(counted, key="shared"))
+    assert calls["n"] == 2 * first
 
 
 def test_an_unmeasurable_scorer_is_unmeasured_not_stable(tmp_path, monkeypatch) -> None:
@@ -404,8 +440,9 @@ def test_compliance_spread_is_measured_from_the_passes_themselves() -> None:
 def test_compliance_passes_floor_makes_the_axis_measurable() -> None:
     from proofagent_harness.agents.compliance_assessor import _passes
 
-    # A single pass cannot be measured, so calibration never yields fewer than 3.
-    assert _passes({"calibration": cal.Calibration(k_compliance=1)}) >= 3
+    # One pass by default (controls are derived from the jury's verdicts); a calibration that asks
+    # for more still gets them, and PROOFAGENT_COMPLIANCE_PASSES overrides both.
+    assert _passes({"calibration": cal.Calibration(k_compliance=1)}) == 1
     assert _passes({"calibration": cal.Calibration(k_compliance=5)}) == 5
 
 

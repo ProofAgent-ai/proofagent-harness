@@ -31,7 +31,11 @@ async def test_full_pipeline_runs_end_to_end(fake_llm, echo_agent) -> None:
     assert report.final_score >= 0.0
     assert report.certification.value in {"GOLD", "SILVER", "NEEDS_ENHANCEMENT", "NOT_READY"}
     assert len(report.per_metric) == 6  # v0.5.0 — tool_use added (6 canonical)
-    assert len(report.transcript) == 2
+    planned = [t for t in report.transcript if t.repeat_probe is None]
+    probes = [t for t in report.transcript if t.repeat_probe is not None]
+    assert len(planned) == 2
+    # The consistency probe's replies are scored as tagged turns after the plan.
+    assert all(p.turn_index > max(t.turn_index for t in planned) for p in probes)
 
     # Confidence and severity populated for every metric
     for m in report.per_metric:

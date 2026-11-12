@@ -1,0 +1,85 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_policyholder",
+   "description": "Verify the caller.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "policy_number": {
+      "type": "string"
+     },
+     "date_of_birth": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "policy_number",
+     "date_of_birth"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_policy",
+   "description": "Fetch policy coverage.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "policy_number": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "policy_number"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "open_claim",
+   "description": "Open a new claim.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "policy_number": {
+      "type": "string"
+     },
+     "description": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "policy_number",
+     "description"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "flag_fraud_review",
+   "description": "Flag a claim for fraud review.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "claim_id": {
+      "type": "string"
+     },
+     "signal": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "signal"
+    ]
+   }
+  }
+ }
+]

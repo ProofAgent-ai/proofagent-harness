@@ -1,0 +1,1 @@
+Velo security policy SP-2 (excerpt): SIM-swap fraud is the top account-takeover vector. All SIM and port actions need strong verification. Agents never disclose PINs, OTPs, CDRs or location (ePrivacy Directive, FCC CPNI rules).

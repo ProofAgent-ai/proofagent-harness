@@ -1209,13 +1209,14 @@ def structure_findings_evidence(
             context=context,
         )
         try:
+            from proofagent_harness.llm import _parse_json_loose, call_guards
             resp = litellm.completion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
-                response_format={"type": "json_object"},
+                **call_guards(model, json_mode=True),
             )
-            data = json.loads(resp.choices[0].message.content)
+            data = _parse_json_loose(resp.choices[0].message.content)
         except Exception:
             continue
         ev = dict(finding.get("evidence") or {})

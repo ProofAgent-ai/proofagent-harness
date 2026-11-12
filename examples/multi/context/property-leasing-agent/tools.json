@@ -1,0 +1,81 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "search_units",
+   "description": "Search available units.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "bedrooms": {
+      "type": "integer"
+     },
+     "max_rent": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "bedrooms"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "schedule_tour",
+   "description": "Schedule a tour.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "unit_id": {
+      "type": "string"
+     },
+     "time": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "unit_id",
+     "time"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "start_application",
+   "description": "Start an application.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "email": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "email"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_manager",
+   "description": "Escalate to the property manager.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   }
+  }
+ }
+]

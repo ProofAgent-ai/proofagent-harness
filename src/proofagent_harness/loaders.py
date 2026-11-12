@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -267,15 +268,35 @@ def _parse_trap(path: Path) -> Trap:
         paired=meta.get("paired") or None,
     )
 
+_SCENARIO_TURN = re.compile(r'^-\s*\*\*Turn\s+\d+:?\*\*:?\s*(.+)$')
+# Composite chains: "1. **Setup.** 'For this session, ...'" — the step's text is the example.
+_CHAIN_STEP = re.compile(r'^\d+\.\s*\*\*[^*]{1,40}\*\*\s*(.+)$')
+
+
 def _extract_seeds_from_body(body: str) -> list[str]:
     section = _extract_section(body, "Seed examples")
-    if not section:
-        return []
     seeds: list[str] = []
-    for line in section.splitlines():
-        line = line.strip()
-        if line.startswith("- "):
-            seeds.append(line[2:].strip().strip('"'))
+    if section:
+        for line in section.splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                seeds.append(line[2:].strip().strip('"'))
+    if seeds:
+        return seeds
+    # Most traps carry their examples as "# Scenario N" blocks of "- **Turn k:** ..." lines
+    # and no Seed-examples section. Those used to load with NO seeds (109 of 204), so the
+    # conductor got only the trap name as its one-shot example. Read the scenario turns.
+    for line in body.splitlines():
+        m = _SCENARIO_TURN.match(line.strip())
+        if m:
+            seeds.append(m.group(1).strip().strip('"').strip("“”"))
+    if seeds:
+        return seeds
+    # Composite chains: "1. **Setup.** 'For this session, ...'" — each step is an example.
+    for line in body.splitlines():
+        m = _CHAIN_STEP.match(line.strip())
+        if m:
+            seeds.append(m.group(1).strip())
     return seeds
 
 def _extract_section(body: str, header: str) -> str:

@@ -1,0 +1,1 @@
+Aurora fare rules (excerpt): Light fares non-refundable; Flex refundable minus EUR 50. EU261: delays over 3h on flights 1500-3500 km entitle EUR 400 unless extraordinary circumstances. Vouchers up to EUR 100 discretionary with a recorded disruption.

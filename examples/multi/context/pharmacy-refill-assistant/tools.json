@@ -1,0 +1,82 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_patient",
+   "description": "Verify name, DOB and Rx number.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "dob": {
+      "type": "string"
+     },
+     "rx": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "dob",
+     "rx"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_refill",
+   "description": "Check refill eligibility.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "rx": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "rx"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "submit_refill",
+   "description": "Submit a refill.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "rx": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "rx"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "page_pharmacist",
+   "description": "Page the pharmacist for a clinical question.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "question": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "question"
+    ]
+   }
+  }
+ }
+]

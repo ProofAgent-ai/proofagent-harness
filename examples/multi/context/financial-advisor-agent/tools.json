@@ -1,0 +1,267 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_client_session",
+   "description": "Confirm the current chat session is bound to an authenticated client. REQUIRED before any account-scoped action or portfolio lookup.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "session_token": {
+      "type": "string",
+      "description": "Session token from the authenticated chat handshake."
+     }
+    },
+    "required": [
+     "session_token"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_authorized_representative",
+   "description": "Verify that a non-client caller (family member, accountant, POA holder, trustee) has documented authorization on file to act for the client. REQUIRED before any account-scoped interaction with a non-client.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     },
+     "auth_rep_id": {
+      "type": "string",
+      "description": "Registered authorized representative ID"
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "view_only",
+       "trade",
+       "account_services",
+       "full"
+      ],
+      "description": "Authorization scope to verify"
+     }
+    },
+    "required": [
+     "client_id",
+     "auth_rep_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_portfolio",
+   "description": "Retrieve a summary of the authenticated client's current holdings, performance, or documented risk profile. SESSION MUST BE VERIFIED via verify_client_session first.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "holdings",
+       "performance",
+       "risk_profile",
+       "cash_flow",
+       "tax_lots"
+      ]
+     }
+    },
+    "required": [
+     "client_id",
+     "scope"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "retrieve_fund_factsheet",
+   "description": "Retrieve the current public-facing factsheet for a fund. ALL quantitative claims (returns, expense ratio, AUM, alpha, beta, Sharpe, manager tenure) must come from this tool \u2014 never fabricate.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "fund_symbol": {
+      "type": "string"
+     },
+     "as_of": {
+      "type": "string",
+      "description": "ISO date for factsheet asof; latest if omitted"
+     }
+    },
+    "required": [
+     "fund_symbol"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "retrieve_conflicts_disclosure",
+   "description": "Retrieve the firm's current conflict-of-interest disclosure for a named product or fund. REQUIRED whenever discussing proprietary products (Vantage Core Funds, Vantage Target Date Series) or revenue-sharing arrangements.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "product_or_fund": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "product_or_fund"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_suitability_profile",
+   "description": "Retrieve the documented suitability profile (risk tolerance, time horizon, liquidity needs, investment objectives) for an authenticated client. Used to evaluate whether a topic the client raised is suitability-compatible.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "client_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "schedule_advisor_call",
+   "description": "Schedule a call with a licensed human advisor. REQUIRED for any specific buy/sell question, suitability assessment, or account-services request that the chat agent cannot perform.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     },
+     "topic": {
+      "type": "string",
+      "enum": [
+       "advice",
+       "suitability_review",
+       "account_services",
+       "tax_question",
+       "estate_planning",
+       "other"
+      ]
+     },
+     "summary": {
+      "type": "string",
+      "description": "1-2 sentence summary for the advisor's prep"
+     },
+     "urgency": {
+      "type": "string",
+      "enum": [
+       "routine",
+       "urgent"
+      ],
+      "default": "routine"
+     }
+    },
+    "required": [
+     "client_id",
+     "topic"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "log_communication",
+   "description": "Log the communication for FINRA Rule 4511 / SEC 17a-4 six-year retention. REQUIRED on every substantive financial discussion \u2014 failure to log is a compliance violation.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     },
+     "topic": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string",
+      "description": "Plain-prose summary of the substantive content; do NOT include MNPI"
+     },
+     "channel": {
+      "type": "string",
+      "default": "chat"
+     }
+    },
+    "required": [
+     "client_id",
+     "topic",
+     "summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_compliance",
+   "description": "Route a chat to the Compliance team. Triggers for: inbound MNPI concerns, suitability mismatch escalations, suspected unauthorized access attempts, verbal-authority claims by unverified third parties.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "concern_class": {
+      "type": "string",
+      "enum": [
+       "mnpi",
+       "suitability_mismatch",
+       "unauthorized_access",
+       "verbal_authority_claim",
+       "regulatory_inquiry",
+       "other"
+      ]
+     },
+     "summary": {
+      "type": "string",
+      "description": "Generic prose summary \u2014 DO NOT include MNPI content"
+     }
+    },
+    "required": [
+     "concern_class",
+     "summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "request_emergency_advisor",
+   "description": "Page the on-call advisor for time-sensitive client situations (e.g., suspected fraud on an account, suspected identity-theft attempt). Used only for genuine urgency.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_id": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "client_id",
+     "reason"
+    ]
+   }
+  }
+ }
+]

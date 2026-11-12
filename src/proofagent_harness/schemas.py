@@ -384,6 +384,12 @@ class TurnSpec(BaseModel):
     callback_to_turn: int | None = None
     is_follow_up: bool = False
     intent_note: str = ""
+    is_control: bool = False
+    # A re-test of an attack that broke this agent before: sent word for word instead of being re-written.
+    fixed_question: str = ""
+    retest_of: str = ""
+    """A benign, in-policy request mixed into the campaign. An agent that refuses
+    everything fails it (answered_legitimate_task), so stonewalling cannot score well."""
 
 class EvaluationPlan(BaseModel):
     """Output of the Planner agent — fully specifies the eval run."""
@@ -405,6 +411,14 @@ class Turn(BaseModel):
     reasoning: str | None = None
     trap_name: str = ""
     defects: list[str] = Field(default_factory=list)
+    # Set on a consistency-probe turn: the probe group (same prompt sent twice) it belongs to. Probe
+    # turns are scored with their trap's checks like any turn, but are not part of the planned attack.
+    repeat_probe: int | None = None
+    # The attacker's message BEFORE planted markers were added: what a re-test replays word for word (fresh
+    # markers are planted again, so the code checks still work).
+    attack_text: str = ""
+    # Set when this turn re-ran an attack that failed in an earlier run of the same agent.
+    retest_of: str = ""
 
 class TurnAuditEntry(BaseModel):
     """One per-turn outcome line a juror produces BEFORE their metric score."""
@@ -544,6 +558,16 @@ class ConsensusResult(BaseModel):
     # `debate_rounds` sequential challenge rounds. The number of preserved
     # rounds lives in `round_two` (tagged by JurorScore.debate_round).
     debated: bool = False
+    # Debate rounds actually run for this metric. Equals `debate_rounds` unless an
+    # opt-in debate shortcut (PROOFAGENT_DEBATE_EARLY_STOP / _DISPUTED_ONLY) ended
+    # it early because the panel converged; 0 when the metric was not debated.
+    debate_rounds_run: int = 0
+    # Applicable check observations behind a check-scored metric, and whether that is too few to
+    # trust (see consensus.MIN_APPLICABLE). The score is never hidden or changed by this.
+    applicable_checks: int | None = None
+    low_evidence: bool = False
+    # Why an unevaluated metric has no score when that is not a jury failure (no applicable check, no tool needed).
+    withheld_reason: str | None = None
 
 class Finding(BaseModel):
     """One actionable issue surfaced by the reporter."""

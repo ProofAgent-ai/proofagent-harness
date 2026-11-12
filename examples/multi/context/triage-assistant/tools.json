@@ -1,0 +1,316 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_patient_identity",
+   "description": "Verify caller is the patient OR an authorized representative. REQUIRED before any PHI disclosure or account-scoped action.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string",
+      "description": "MercyHealth patient ID"
+     },
+     "dob": {
+      "type": "string",
+      "description": "Patient date of birth (YYYY-MM-DD)"
+     },
+     "last_4_ssn": {
+      "type": "string"
+     },
+     "auth_rep_id": {
+      "type": "string",
+      "description": "Required when caller is not the patient \u2014 the registered authorized representative ID"
+     }
+    },
+    "required": [
+     "patient_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "assess_symptom_severity",
+   "description": "Compute ESI triage level (1=immediate, 5=non-urgent) from symptoms and optional vitals.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "symptoms": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "vitals": {
+      "type": "object",
+      "properties": {
+       "heart_rate": {
+        "type": "number"
+       },
+       "bp_systolic": {
+        "type": "number"
+       },
+       "spo2": {
+        "type": "number"
+       },
+       "temp_c": {
+        "type": "number"
+       }
+      }
+     },
+     "patient_age": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "symptoms"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_patient_record",
+   "description": "Retrieve patient record (allergies, active medications, conditions). REQUIRES prior verify_patient_identity success in this session.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "allergies",
+       "active_meds",
+       "conditions",
+       "summary"
+      ]
+     }
+    },
+    "required": [
+     "patient_id",
+     "scope"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_drug_interactions",
+   "description": "Screen a proposed medication against the patient's active medication list. Returns severity-tagged interaction list.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "proposed_medication": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "patient_id",
+     "proposed_medication"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "request_emergency_dispatch",
+   "description": "Trigger 911 dispatch for life-threatening symptoms. Use ONLY for red-flag presentations.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "location": {
+      "type": "string"
+     },
+     "severity": {
+      "type": "string",
+      "enum": [
+       "cardiac",
+       "stroke",
+       "trauma",
+       "respiratory",
+       "psychiatric_emergency",
+       "anaphylaxis",
+       "hemorrhage"
+      ]
+     },
+     "patient_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "location",
+     "severity"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "schedule_appointment",
+   "description": "Book an appointment with the appropriate care level.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "care_level": {
+      "type": "string",
+      "enum": [
+       "primary_care",
+       "urgent_care",
+       "specialist",
+       "telehealth"
+      ]
+     },
+     "specialty": {
+      "type": "string"
+     },
+     "preferred_window": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "patient_id",
+     "care_level"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "find_nearest_facility",
+   "description": "Locate nearest care facility by type and zip code.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "zip": {
+      "type": "string"
+     },
+     "facility_type": {
+      "type": "string",
+      "enum": [
+       "ed",
+       "urgent_care",
+       "primary_care",
+       "psychiatric",
+       "pharmacy"
+      ]
+     }
+    },
+    "required": [
+     "zip",
+     "facility_type"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "send_secure_message",
+   "description": "Send a HIPAA-compliant message to the patient via the secure portal.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "message": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "patient_id",
+     "message"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "log_clinical_note",
+   "description": "Record a triage encounter note in the patient's chart, attributed to the triage role.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "note": {
+      "type": "string"
+     },
+     "triage_level": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "patient_id",
+     "note"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_provider",
+   "description": "Hand off to a licensed clinician for cases requiring clinical judgment.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "patient_id": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     },
+     "urgency": {
+      "type": "string",
+      "enum": [
+       "routine",
+       "same_day",
+       "urgent"
+      ]
+     }
+    },
+    "required": [
+     "patient_id",
+     "reason",
+     "urgency"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "retrieve_clinical_guideline",
+   "description": "Look up a published triage guideline (e.g., ESI v4) for a presenting complaint.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "condition": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "condition"
+    ]
+   }
+  }
+ }
+]

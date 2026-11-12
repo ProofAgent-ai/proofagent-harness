@@ -31,7 +31,7 @@ frameworks:
     art11: [audit_trail_gap]
     art13: [overclaimed_certainty, fabricated_authority, adverse_action_without_notice]
     art14: [human_oversight_bypass, unauthorized_action]
-    art15: [instruction_override, unauthorized_disclosure, privilege_escalation,
+    art15: [instruction_override, unauthorized_disclosure, data_exposure, privilege_escalation,
             forbidden_tool_use, phantom_action, unsafe_code, role_confusion]
 
   nist_ai_rmf:
@@ -41,7 +41,7 @@ frameworks:
                      phantom_action]
     measure_safety: [harmful_content, abusive_interaction, unsafe_code,
                      safety_critical_advice]
-    measure_secure: [instruction_override, unauthorized_disclosure, privilege_escalation,
+    measure_secure: [instruction_override, unauthorized_disclosure, data_exposure, privilege_escalation,
                      channel_switching, forbidden_tool_use]
     manage:         [guardrail_bypass, policy_drift, unauthorized_action]
 
@@ -71,16 +71,16 @@ frameworks:
 
   china_genai:
     content_safety:      [harmful_content, abusive_interaction]
-    data_lawfulness:     [consent_bypass, unauthorized_disclosure]
+    data_lawfulness:     [consent_bypass, unauthorized_disclosure, data_exposure]
     labeling:            [overclaimed_certainty, fabricated_authority]
     security_assessment: [instruction_override, privilege_escalation, unsafe_code]
 
   # ── Privacy ──────────────────────────────────────────────────────────────────
   gdpr:
-    lawfulness:      [consent_bypass, unauthorized_disclosure]
+    lawfulness:      [consent_bypass, unauthorized_disclosure, data_exposure]
     minimization:    [data_minimisation_failure, retention_violation]
     dsar:            [rights_request_mishandling]
-    security_art32:  [unauthorized_disclosure, cross_subject_disclosure,
+    security_art32:  [unauthorized_disclosure, data_exposure, cross_subject_disclosure,
                       channel_switching, privilege_escalation, special_category_disclosure,
                       role_confusion]
     dpia:            [protected_class_inference, special_category_disclosure]
@@ -88,8 +88,8 @@ frameworks:
                       disparate_treatment]
 
   uk_gdpr:
-    lawfulness: [consent_bypass, unauthorized_disclosure]
-    security:   [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+    lawfulness: [consent_bypass, unauthorized_disclosure, data_exposure]
+    security:   [unauthorized_disclosure, data_exposure, cross_subject_disclosure, channel_switching]
     dsar:       [rights_request_mishandling]
     dpia:       [protected_class_inference, special_category_disclosure]
 
@@ -97,11 +97,11 @@ frameworks:
     notice:         [adverse_action_without_notice, consent_bypass]
     opt_out:        [rights_request_mishandling, consent_bypass]
     access_delete:  [rights_request_mishandling]
-    sensitive_data: [special_category_disclosure, unauthorized_disclosure]
+    sensitive_data: [special_category_disclosure, unauthorized_disclosure, data_exposure]
 
   hipaa:
     privacy_rule:         [special_category_disclosure, cross_subject_disclosure,
-                           unauthorized_disclosure]
+                           unauthorized_disclosure, data_exposure]
     minimum_necessary:    [data_minimisation_failure]
     security_rule:        [privilege_escalation, channel_switching, unsafe_code]
     breach_notification:  [audit_trail_gap]
@@ -109,65 +109,65 @@ frameworks:
   pipeda:
     consent:        [consent_bypass]
     accuracy:       [fabricated_fact, overclaimed_certainty]
-    safeguards:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    safeguards:     [unauthorized_disclosure, data_exposure, channel_switching, privilege_escalation]
     accountability: [audit_trail_gap, human_oversight_bypass]
 
   lgpd:
     legal_basis: [consent_bypass]
     rights:      [rights_request_mishandling]
-    security:    [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+    security:    [unauthorized_disclosure, data_exposure, cross_subject_disclosure, channel_switching]
     dpo:         [audit_trail_gap]
 
   pdpa_sg:
     consent:        [consent_bypass]
     purpose:        [data_minimisation_failure, retention_violation]
-    protection:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    protection:     [unauthorized_disclosure, data_exposure, channel_switching, privilege_escalation]
     accountability: [audit_trail_gap]
 
   dpdp_india:
     consent_notice: [consent_bypass, adverse_action_without_notice]
     purpose_limit:  [data_minimisation_failure, retention_violation]
-    safeguards:     [unauthorized_disclosure, channel_switching, privilege_escalation]
+    safeguards:     [unauthorized_disclosure, data_exposure, channel_switching, privilege_escalation]
     breach_notify:  [audit_trail_gap]
 
   popia:
     accountability:      [audit_trail_gap, human_oversight_bypass]
     processing_limit:    [data_minimisation_failure, consent_bypass]
-    security_safeguards: [unauthorized_disclosure, cross_subject_disclosure,
+    security_safeguards: [unauthorized_disclosure, data_exposure, cross_subject_disclosure,
                           privilege_escalation]
     participation:       [rights_request_mishandling]
 
   au_privacy:
     app_collection: [consent_bypass, data_minimisation_failure]
-    app_use:        [unauthorized_disclosure, retention_violation]
+    app_use:        [unauthorized_disclosure, data_exposure, retention_violation]
     app_security:   [channel_switching, privilege_escalation, unsafe_code]
     app_access:     [rights_request_mishandling]
 
   # ── Security and assurance ───────────────────────────────────────────────────
   soc2:
-    cc6: [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+    cc6: [privilege_escalation, unauthorized_disclosure, data_exposure, forbidden_tool_use,
           instruction_override, role_confusion]
     cc7: [audit_trail_gap, unsafe_code]
     cc8: [unauthorized_action, capability_composition]
     pi1: [phantom_action, fabricated_fact, missing_required_tool]
-    c1:  [unauthorized_disclosure, cross_subject_disclosure, channel_switching]
+    c1:  [unauthorized_disclosure, data_exposure, cross_subject_disclosure, channel_switching]
 
   iso_27001:
     a5_policies:  [policy_drift, guardrail_bypass]
     a8_asset:     [data_minimisation_failure, retention_violation]
-    a9_access:    [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+    a9_access:    [privilege_escalation, unauthorized_disclosure, data_exposure, forbidden_tool_use,
                    role_confusion]
     a12_ops:      [unsafe_code, capability_composition]
     a16_incident: [audit_trail_gap]
 
   pci_dss:
-    protect_data:    [payment_data_exposure, unauthorized_disclosure, channel_switching]
+    protect_data:    [payment_data_exposure, unauthorized_disclosure, data_exposure, channel_switching]
     access_control:  [privilege_escalation, forbidden_tool_use, role_confusion]
     monitor_test:    [audit_trail_gap]
     infosec_policy:  [policy_drift, guardrail_bypass]
 
   fedramp:
-    ac_access:    [privilege_escalation, unauthorized_disclosure, forbidden_tool_use,
+    ac_access:    [privilege_escalation, unauthorized_disclosure, data_exposure, forbidden_tool_use,
                    role_confusion]
     au_audit:     [audit_trail_gap]
     ir_incident:  [audit_trail_gap, unsafe_code]
@@ -194,7 +194,7 @@ frameworks:
     suitability:    [safety_critical_advice, disparate_treatment, fabricated_fact]
 
   glba:
-    safeguards:      [unauthorized_disclosure, payment_data_exposure, channel_switching,
+    safeguards:      [unauthorized_disclosure, data_exposure, payment_data_exposure, channel_switching,
                       privilege_escalation]
     privacy_notice:  [consent_bypass, adverse_action_without_notice]
     access_controls: [privilege_escalation, forbidden_tool_use, role_confusion]
@@ -248,7 +248,7 @@ frameworks:
     asi01: [instruction_override, guardrail_bypass, policy_drift, role_confusion]
     asi02: [forbidden_tool_use, unauthorized_action, capability_composition,
             missing_required_tool]
-    asi03: [privilege_escalation, role_confusion, unauthorized_disclosure,
+    asi03: [privilege_escalation, role_confusion, unauthorized_disclosure, data_exposure,
             cross_subject_disclosure]
     asi05: [unsafe_code, capability_composition]
     asi06: [instruction_override, policy_drift]
@@ -261,7 +261,7 @@ frameworks:
   owasp_threats:
     t1:  [instruction_override, policy_drift]
     t2:  [forbidden_tool_use, unauthorized_action, missing_required_tool]
-    t3:  [privilege_escalation, role_confusion, unauthorized_disclosure]
+    t3:  [privilege_escalation, role_confusion, unauthorized_disclosure, data_exposure]
     t5:  [fabricated_fact, fabricated_citation, fabricated_authority]
     t6:  [instruction_override, guardrail_bypass, policy_drift]
     t7:  [phantom_action, unauthorized_action, overclaimed_certainty]
@@ -273,12 +273,12 @@ frameworks:
 
   owasp_llm:
     llm01: [instruction_override, guardrail_bypass, role_confusion]
-    llm02: [unauthorized_disclosure, cross_subject_disclosure, payment_data_exposure,
+    llm02: [unauthorized_disclosure, data_exposure, cross_subject_disclosure, payment_data_exposure,
             special_category_disclosure, data_minimisation_failure]
     llm05: [unsafe_code]
     llm06: [forbidden_tool_use, unauthorized_action, privilege_escalation,
             capability_composition, human_oversight_bypass]
-    llm07: [unauthorized_disclosure]
+    llm07: [unauthorized_disclosure, data_exposure]
     llm08: [cross_subject_disclosure, fabricated_fact]
     llm09: [fabricated_fact, fabricated_citation, fabricated_authority,
             overclaimed_certainty, phantom_action]
@@ -286,14 +286,14 @@ frameworks:
   aiuc_1:
     a001: [consent_bypass]
     a002: [data_minimisation_failure, channel_switching]
-    a003: [unauthorized_disclosure, cross_subject_disclosure]
+    a003: [unauthorized_disclosure, data_exposure, cross_subject_disclosure]
     a005: [cross_subject_disclosure]
     a006: [special_category_disclosure, payment_data_exposure,
            data_minimisation_failure]
-    a008: [unauthorized_disclosure]
+    a008: [unauthorized_disclosure, data_exposure]
     b002: [instruction_override]
     b006: [unauthorized_action, forbidden_tool_use, privilege_escalation]
-    b007: [role_confusion, unauthorized_disclosure]
+    b007: [role_confusion, unauthorized_disclosure, data_exposure]
     b009: [data_minimisation_failure]
     b010: [unsafe_code]
     c003: [harmful_content, abusive_interaction]
@@ -309,9 +309,9 @@ frameworks:
     f001: [unsafe_code, capability_composition]
 
   nist_800_53:
-    ac_3:    [unauthorized_disclosure, cross_subject_disclosure, unauthorized_action,
+    ac_3:    [unauthorized_disclosure, data_exposure, cross_subject_disclosure, unauthorized_action,
               forbidden_tool_use]
-    ac_4:    [channel_switching, data_minimisation_failure, unauthorized_disclosure,
+    ac_4:    [channel_switching, data_minimisation_failure, unauthorized_disclosure, data_exposure,
               cross_subject_disclosure]
     ac_6:    [privilege_escalation, forbidden_tool_use, capability_composition]
     ac_6_9:  [audit_trail_gap]

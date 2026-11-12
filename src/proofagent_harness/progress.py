@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import time
 
 from rich.console import Console
 from rich.markup import escape
@@ -40,6 +41,12 @@ class ProgressReporter:
         self._total: float = 100.0
         self._turn_count: int = 0
         self._turns_done: int = 0
+        # Plain-line mode: when output is not a terminal (CI, a pipe, `| tee log`), a Rich
+        # live bar renders nothing until the end, so a 30-minute run looked hung. Print one
+        # timestamped line per stage change instead.
+        self._plain: bool = False
+        self._t0: float = 0.0
+        self._last_line: str = ""
 
     def start(self, turn_count: int = 8, *, calibrate: bool = True) -> None:
         """`calibrate=False` for modes that skip the pre-graph phase — its weight must
@@ -59,6 +66,11 @@ class ProgressReporter:
         )
         self._completed = 0.0
         self._turns_done = 0
+        self._t0 = time.monotonic()
+        self._plain = not self.console.is_terminal
+        if self._plain:
+            self._line("[init]", "Initializing...")
+            return
 
         self._progress = Progress(
             SpinnerColumn(),
@@ -77,7 +89,31 @@ class ProgressReporter:
             stage="[init]",
         )
 
+    def _cap(self, event: Event, value: float) -> float:
+        """Never show 100% before the report is built. Debate re-votes add rounds the
+        total did not budget for, which made the bar sit at 100% through the whole jury."""
+        if event.type in ("report_end", "done"):
+            return min(self._total, value)
+        return min(self._total * 0.95, value)
+
+    def _line(self, stage: str, description: str) -> None:
+        line = f"{stage} {description}"
+        if line == self._last_line:
+            return
+        self._last_line = line
+        el = int(time.monotonic() - self._t0)
+        pct = int(100 * self._completed / self._total) if self._total else 0
+        with contextlib.suppress(Exception):
+            self.console.print(
+                f"{el // 60:02d}:{el % 60:02d} {pct:3d}% {stage} {description}",
+                highlight=False, markup=False, soft_wrap=True,
+            )
+
     def stop(self) -> None:
+        if self._plain:
+            self._line("[done]", "finished")
+            self._plain = False
+            return
         if self._progress:
             if self._task_id is not None and self._completed < self._total:
                 self._progress.update(self._task_id, completed=self._total)
@@ -85,7 +121,19 @@ class ProgressReporter:
             self._progress = None
 
     def on_event(self, event: Event) -> None:
-        if not self.enabled or self._progress is None or self._task_id is None:
+        if not self.enabled:
+            return
+        if self._plain:
+            stage, description, advance = self._stage_for(event)
+            if advance:
+                self._completed = self._cap(event, self._completed + advance)
+            if event.type in ("plan_turns", "context_assessed", "error") and event.detail:
+                stage = stage or "[info]"
+                description = str(event.detail)
+            if stage is not None and event.type != "juror_scored":
+                self._line(stage, description)
+            return
+        if self._progress is None or self._task_id is None:
             return
 
         # Lines the user must actually READ, not watch flash past. The progress bar's
@@ -111,7 +159,7 @@ class ProgressReporter:
             return
 
         if advance:
-            self._completed = min(self._total, self._completed + advance)
+            self._completed = self._cap(event, self._completed + advance)
 
         self._progress.update(
             self._task_id,

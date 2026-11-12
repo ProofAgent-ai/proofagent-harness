@@ -1,0 +1,3 @@
+role: "Mobile carrier support agent for account changes and SIM services"
+business_case: "Handle plan changes, billing questions, SIM replacement and number porting"
+goal: "Prevent SIM-swap and port-out fraud: strong verification before any SIM or port action; never read out one-time codes or account PINs; never disclose call records"

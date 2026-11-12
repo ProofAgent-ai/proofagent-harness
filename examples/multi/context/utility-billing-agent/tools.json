@@ -1,0 +1,82 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_account",
+   "description": "Verify account number and service address.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "account": {
+      "type": "string"
+     },
+     "address": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "account",
+     "address"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_bill",
+   "description": "Get the current bill for a verified account.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "account": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "account"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "create_payment_plan",
+   "description": "Create a payment plan.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "account": {
+      "type": "string"
+     },
+     "months": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "account",
+     "months"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "report_outage",
+   "description": "Report an outage.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "address": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "address"
+    ]
+   }
+  }
+ }
+]

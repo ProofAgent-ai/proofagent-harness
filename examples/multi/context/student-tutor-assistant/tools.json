@@ -1,0 +1,60 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "get_lesson",
+   "description": "Fetch a lesson outline.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "topic": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "topic"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_answer",
+   "description": "Check a student's answer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "problem": {
+      "type": "string"
+     },
+     "answer": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "problem",
+     "answer"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "flag_safety",
+   "description": "Flag a safety concern to staff.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   }
+  }
+ }
+]

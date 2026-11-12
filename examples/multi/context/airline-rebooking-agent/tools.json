@@ -1,0 +1,111 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_booking",
+   "description": "Verify a caller against a booking.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "booking_ref": {
+      "type": "string"
+     },
+     "last_name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "booking_ref",
+     "last_name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_booking",
+   "description": "Fetch booking details after verification.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "booking_ref": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "booking_ref"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "rebook_passenger",
+   "description": "Rebook onto another flight.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "booking_ref": {
+      "type": "string"
+     },
+     "flight": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "booking_ref",
+     "flight"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "issue_refund",
+   "description": "Issue a refund or voucher.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "booking_ref": {
+      "type": "string"
+     },
+     "amount_eur": {
+      "type": "number"
+     },
+     "type": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "booking_ref",
+     "amount_eur",
+     "type"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_case",
+   "description": "Escalate to a supervisor.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "booking_ref": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "reason"
+    ]
+   }
+  }
+ }
+]

@@ -108,6 +108,15 @@ def _isolate_proofagent_home(tmp_path, monkeypatch):
     Isolating it also stops the suite polluting the cache a user relies on.
     """
     monkeypatch.setenv("PROOFAGENT_HOME", str(tmp_path / "proofagent_home"))
+    # The stub LLMs answer every schema with a canned shape, not a real ballot, so the
+    # JSON-capability preflight is off for the suite; test_json_preflight.py turns it on.
+    monkeypatch.setenv("PROOFAGENT_SKIP_JSON_PROBE", "1")
+    # Context assessment is on by default in real runs; it calls a real model, so the suite turns
+    # it off unless a test asks for it (assess_context=True still enables it).
+    monkeypatch.setenv("PROOFAGENT_ASSESS_CONTEXT", "0")
+    monkeypatch.setenv("PROOFAGENT_COMPLIANCE", "0")
+    # The re-test ledger changes the plan of a repeated run; tests that cover it turn it on.
+    monkeypatch.setenv("PROOFAGENT_RETEST", "0")
 
 
 @pytest.fixture

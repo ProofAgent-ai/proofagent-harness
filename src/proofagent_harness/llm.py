@@ -65,6 +65,30 @@ _DEPRECATED_PARAMS_BY_MODEL: dict[str, set[str]] = {
 }
 
 
+# ── Reasoning effort ────────────────────────────────────────────────────────
+# OpenAI reasoning models (gpt-5*, o1/o3/o4) think before answering and bill the
+# thinking as output. At their default effort a single attacker/juror call measured
+# 16.3 s and 2,550 output tokens on gpt-5-nano; at "low" 5.7 s / 871; at "minimal"
+# 1.7 s / 88. The harness's calls are short structured tasks, so "low" is the default.
+# Only sent to OpenAI reasoning families: for Anthropic/Gemini litellm maps
+# reasoning_effort onto extended thinking, which would turn thinking ON.
+REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+DEFAULT_REASONING_EFFORT = os.environ.get("PROOFAGENT_REASONING_EFFORT", "low")
+
+
+_JSON_SCHEMA_PROVIDERS = ("lm_studio/", "hosted_vllm/", "llamafile/")
+
+
+def _wants_json_schema(model: str) -> bool:
+    """Local runtimes that accept response_format=json_schema but not json_object."""
+    return (model or "").lower().startswith(_JSON_SCHEMA_PROVIDERS)
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    m = (model or "").lower().split("/")[-1]
+    return m.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
 def _strip_deprecated_params(model: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Drop params known to be rejected by `model`. Returns a new dict."""
     out = dict(kwargs)
@@ -153,6 +177,9 @@ class LLM:
     # max_tokens never increases cost — it only avoids truncation.
     max_tokens: int = 8192
     seed: int | None = None
+    # minimal | low | medium | high, or "" to leave the provider default. Applied only to
+    # OpenAI reasoning models (see _is_openai_reasoning_model).
+    reasoning_effort: str = field(default_factory=lambda: DEFAULT_REASONING_EFFORT)
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
     # ── v0.4.4: explicit api_base override ──
     # When set, this is passed to litellm.acompletion as `api_base=` for
@@ -242,6 +269,7 @@ class LLM:
         temperature: float | None = None,
         max_tokens: int | None = None,
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
     ) -> CompletionResult:
         """Underlying single-attempt LiteLLM call. No fallback, no retry.
         Raises LLMError on transport / API failure. ``json_mode=True`` asks the
@@ -275,12 +303,42 @@ class LLM:
         # A single failed juror call otherwise degrades the panel (and, before
         # the round-2 fallback fix, could erase a metric outright).
         call_kwargs.setdefault("num_retries", 3)
+        # A per-attempt wall-clock cap. Without one, a local model stuck in a runaway generation
+        # held a whole evaluation for 36+ minutes on one request (observed: LM Studio, Gemma 26B,
+        # after calibration). A timed-out attempt is retried like any other failure, and a call
+        # that keeps failing surfaces as an LLM error the run already reports.
+        call_kwargs.setdefault("timeout", _call_timeout(self.model))
+        if _wants_json_schema(str(self.model or "")) and not call_kwargs.get("max_tokens") \
+                and not call_kwargs.get("max_completion_tokens"):
+            call_kwargs["max_tokens"] = _local_max_tokens()
+        # Local runtimes: no hidden reasoning pass (see _local_reasoning_off). Keyed on HOW the
+        # model is served, never on its name, so it holds for any local model.
+        if _local_reasoning_off(self.model):
+            extra = dict(call_kwargs.get("extra_body") or {})
+            extra.setdefault("reasoning_effort", "none")
+            call_kwargs["extra_body"] = extra
         if json_mode:
-            call_kwargs.setdefault("response_format", {"type": "json_object"})
+            if _wants_json_schema(self.model):
+                # LM Studio (and similar local OpenAI-compatible runtimes) reject json_object
+                # with a bare HTTP 400 and no detail, so the drop-the-param recovery never
+                # fired and every structured call failed. They accept json_schema.
+                # The call's own schema when it has one. A bare {"type": "object"} lets a
+                # grammar-constrained local model satisfy it with an empty object: Qwen 3.8
+                # answered the jury ballot with {"": {}} under it, and valid votes without it.
+                call_kwargs.setdefault("response_format", {
+                    "type": "json_schema",
+                    "json_schema": {"name": "reply", "schema": json_schema or {"type": "object"}}})
+            else:
+                call_kwargs.setdefault("response_format", {"type": "json_object"})
         call_kwargs["temperature"] = (
             temperature if temperature is not None else self.temperature
         )
         call_kwargs["max_tokens"] = max_tokens or self.max_tokens
+        if self.reasoning_effort and _is_openai_reasoning_model(self.model):
+            call_kwargs.setdefault("reasoning_effort", self.reasoning_effort)
+            # These models accept only temperature=1 while reasoning; litellm's
+            # drop_params removes it, but say so explicitly instead of relying on it.
+            call_kwargs.pop("temperature", None)
 
         # v0.4.4: explicit api_base override pins the endpoint regardless of
         # any OPENAI_BASE_URL / OPENAI_API_BASE env var the user may have
@@ -447,7 +505,7 @@ class LLM:
         try:
             r = await self._raw_complete(
                 messages, system=primary_sys, temperature=temperature,
-                max_tokens=effective_max_tokens, json_mode=True,
+                max_tokens=effective_max_tokens, json_mode=True, json_schema=schema,
             )
             try:
                 data = _parse_json_loose(r.text)
@@ -503,6 +561,7 @@ class LLM:
             temperature=temperature,
             max_tokens=fallback_max_tokens,
             json_mode=True,
+            json_schema=schema,
         )
         try:
             data = _parse_json_loose(fb_r.text)
@@ -726,6 +785,57 @@ def default_llm() -> LLM:
     """Return a sensible default LLM, picking up provider keys from env."""
     model = os.getenv("PROOFAGENT_LLM", "claude-sonnet-4-6")
     return LLM(model=model)
+
+def _local_reasoning_off(model: str | None) -> bool:
+    """Ask a LOCAL runtime (LM Studio, Ollama, vLLM…) for no hidden reasoning pass, whatever model it serves.
+
+    The harness only asks for short structured answers. A local reasoning model left to think spent its
+    whole token budget reasoning and returned an empty reply (measured 9.1 s and empty vs 0.3 s and a valid
+    ballot); `reasoning_effort: "none"` is the OpenAI-compatible way to say so, and a runtime serving a model
+    without reasoning ignores it. Hosted providers keep their own setting (--reasoning-effort).
+    PROOFAGENT_LOCAL_REASONING=on keeps the local model's own reasoning."""
+    return bool(model) and _wants_json_schema(str(model)) and \
+        os.environ.get("PROOFAGENT_LOCAL_REASONING", "off").strip().lower() not in ("on", "1", "true")
+
+
+def call_guards(model: str, *, json_mode: bool = False) -> dict[str, Any]:
+    """The kwargs every DIRECT litellm.completion call needs (the ones outside LLM._raw_complete): a
+    wall-clock cap, the JSON format a local runtime accepts (LM Studio rejects json_object with a bare
+    HTTP 400), and no hidden reasoning pass on a local thinking model (Qwen 3.x)."""
+    out: dict[str, Any] = {"timeout": _call_timeout(model)}
+    m = str(model or "")
+    if json_mode:
+        out["response_format"] = (
+            {"type": "json_schema", "json_schema": {"name": "reply", "schema": {"type": "object"}}}
+            if _wants_json_schema(m) else {"type": "json_object"})
+    if _local_reasoning_off(m):
+        out["extra_body"] = {"reasoning_effort": "none"}
+    if _wants_json_schema(m):
+        out["max_tokens"] = _local_max_tokens()
+    return out
+
+
+def _local_max_tokens() -> int:
+    """Output cap for a local runtime (PROOFAGENT_LOCAL_MAX_TOKENS, default 8000). LM Studio applies none by
+    default, so a model looping inside a JSON grammar generated until the call's 15-minute limit."""
+    try:
+        return max(512, int(os.environ.get("PROOFAGENT_LOCAL_MAX_TOKENS", "8000")))
+    except ValueError:
+        return 8000
+
+
+def _call_timeout(model: str | None = None) -> float:
+    """Seconds one LLM attempt may take: PROOFAGENT_LLM_TIMEOUT, else 300 for hosted models and 900
+    for a local runtime. A dense local model reading a 30-40k-token jury prompt beside other requests
+    took 2-4 minutes per call; a 300 s cap cut valid calls off and lost their votes."""
+    raw = os.environ.get("PROOFAGENT_LLM_TIMEOUT")
+    if raw:
+        try:
+            return max(10.0, float(raw))
+        except ValueError:
+            pass
+    return 900.0 if model and _wants_json_schema(str(model)) else 300.0
+
 
 async def gather_with_concurrency(n: int, *coros: Any) -> list[Any]:
     """asyncio.gather with a bounded semaphore (for jury fan-out)."""

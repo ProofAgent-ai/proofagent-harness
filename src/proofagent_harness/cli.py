@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -38,6 +38,31 @@ app.add_typer(traps_app)
 console = Console()
 
 
+def _install_interrupt_handler() -> None:
+    """Make Ctrl-C stop a run.
+
+    Agent calls run in worker threads and litellm retries with backoff, so the default
+    KeyboardInterrupt waited on in-flight threads and a run could not be stopped from the
+    terminal. First Ctrl-C: say so and exit 130 at once (nothing partial is uploaded, since
+    upload happens only after the report is built)."""
+    import signal
+
+    def _stop(signum, frame):
+        try:
+            sys.stderr.write("\n[proof] interrupted: stopping now (no report written, nothing uploaded)\n")
+            sys.stderr.flush()
+        finally:
+            os._exit(130)
+
+    with contextlib.suppress(ValueError, OSError):  # not on the main thread / unsupported
+        signal.signal(signal.SIGINT, _stop)
+
+
+@app.callback()
+def _main() -> None:
+    _install_interrupt_handler()
+
+
 
 def _abort_on_agent_crash(exc) -> None:
     """Turn the conductor's AgentUnderTestError into a clean, actionable panel
@@ -62,6 +87,21 @@ def _abort_on_agent_crash(exc) -> None:
     raise typer.Exit(code=2)
 
 
+def _version_privacy_problem(version: str | None) -> str | None:
+    """Why the PER's privacy rule would refuse this agent version, or None. The record keeps the version in
+    clear, so EIO refuses identifying-shaped tokens: a digit run of four or more (a date, an id), or more than
+    three numeric groups. A git short SHA is fine."""
+    import re
+
+    if not version:
+        return None
+    if re.search(r"(?<![A-Za-z])\d{4,}(?![A-Za-z])", version):
+        return "it holds a number of four digits or more (a date or an id)"
+    if len(re.findall(r"\d+", version)) > 3:
+        return "it has more than three numeric groups"
+    return None
+
+
 @app.command("run")
 def run(
     agent_file: Path = typer.Argument(..., exists=True, help="Python file exposing a callable named `agent`."),
@@ -70,7 +110,7 @@ def run(
     business_case: str = typer.Option("", "--business-case"),
     goal: str = typer.Option("", "--goal"),
     turns: int = typer.Option(
-        15, "--turns", min=1, max=50,
+        25, "--turns", min=1, max=50,
         help="Adversarial turns. Drives trap COVERAGE — the library spans 11 attack "
              "families, so a short run leaves most of them unprobed. It does not reduce "
              "run-to-run spread: measured 8 turns 22.1pp vs 15 turns 28.2pp."),
@@ -85,7 +125,7 @@ def run(
              "tier, declared frameworks, context weaknesses, tool surface, domains). "
              "Without it --turns stands, and the recommendation is printed and recorded "
              "in the report beside what actually ran."),
-    consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
+    consensus: str = typer.Option("independent", "--consensus", help="independent (default: one blind round) | delphi | debate"),
     seed: int = typer.Option(
         42, "--seed",
         help="Seed for trap selection and scoring — reproducible by DEFAULT, so two "
@@ -124,6 +164,22 @@ def run(
              "(rate-limit / quota / empty / bad JSON). Cross-family is best, e.g. "
              "--llm gpt-4.1-mini --fallback-llm anthropic/claude-haiku-4-5. "
              "Defaults to env PROOFAGENT_FALLBACK_LLM.",
+    ),
+    attacker_llm: str | None = typer.Option(
+        None, "--attacker-llm",
+        help="Model that WRITES the adversarial turns (the conductor). Defaults to --llm. "
+             "Use a different family from --jury-llm so the model grading the attacks "
+             "is not the one that wrote them.",
+    ),
+    jury_llm: str | None = typer.Option(
+        None, "--jury-llm",
+        help="Model the JURY scores with. Defaults to --llm.",
+    ),
+    reasoning_effort: str | None = typer.Option(
+        None, "--reasoning-effort",
+        help="minimal | low | medium | high, for OpenAI reasoning models (gpt-5*, o-series). "
+             "Default low (or PROOFAGENT_REASONING_EFFORT). Measured on gpt-5-nano: "
+             "default effort 16.3 s/call, low 5.7 s, minimal 1.7 s.",
     ),
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
@@ -227,9 +283,15 @@ def run(
     # value pins selection, so the default (42) makes runs comparable out of the box.
     eff_seed: int | None = None if seed < 0 else seed
 
+    if reasoning_effort is not None and reasoning_effort not in ("minimal", "low", "medium", "high", ""):
+        console.print("[red]--reasoning-effort must be minimal, low, medium or high.[/red]")
+        raise typer.Exit(code=2)
     harness = Harness(
         llm=llm,
         fallback_llm=fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM"),
+        attacker_llm=attacker_llm or os.environ.get("PROOFAGENT_ATTACKER_LLM"),
+        jury_llm=jury_llm or os.environ.get("PROOFAGENT_JURY_LLM"),
+        reasoning_effort=reasoning_effort,
         metrics=metric_list,
         turns=turns,
         adaptive_turns=adaptive_turns,
@@ -274,6 +336,13 @@ def run(
     if eff_fail_on not in ("pass", "review", "block"):
         console.print(f"[red]--fail-on must be pass | review | block (got {eff_fail_on!r}).[/red]")
         raise typer.Exit(code=2)
+    bad_version = _version_privacy_problem(agent_version)
+    if (upload or per_out) and bad_version:
+        # Checked BEFORE the run: the record's privacy rule refuses this shape at export time, which
+        # used to surface only after the whole evaluation had run (and was then blamed on the jury).
+        console.print(f"[red]--agent-version {agent_version!r} cannot go into an evidence record: {bad_version}. "
+                      f"Use a release-style label such as v1.4 or local-gemma.[/red]")
+        raise typer.Exit(code=2)
 
     # Compliance scope: --frameworks wins; else the attached governance profile's
     # frameworks-in-scope; else --assess-compliance with a key fetches the platform
@@ -293,6 +362,9 @@ def run(
             ("Agent file", f"{agent_file}  (entry: {entry})"),
             ("Harness LLM", llm or "(default)"),
             ("Fallback LLM", fallback_llm or os.environ.get("PROOFAGENT_FALLBACK_LLM") or "-"),
+            ("Attacker LLM", harness.attacker_llm.model),
+            ("Jury LLM", harness.jury_llm.model),
+            ("Reasoning effort", getattr(harness.llm, "reasoning_effort", "") or "provider default"),
             ("Turns", str(turns)),
             ("Consensus", consensus),
             ("Seed", f"{eff_seed}  (reproducible)" if eff_seed is not None
@@ -341,17 +413,20 @@ def run(
     if not show_pai:
         _print_context_engineering(report)
 
+    # The PER first: its release decision is the authoritative one, so the report written next carries it
+    # and the two never disagree (a report read SHIP / GOLD beside a record holding the release for REVIEW).
+    if per_out:
+        record = _export_per(report, per_out, agent_name=agent or eff_role, agent_version=agent_version,
+                             system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
+                             profile=gov_profile,
+                             artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role))
+        _carry_per_release(report, record)
     if json_out:
         report.to_json(str(json_out))
     if md_out:
         report.to_markdown(str(md_out))
     if json_out or md_out:
         _print_outputs(json_out=json_out, md_out=md_out)
-    if per_out:
-        _export_per(report, per_out, agent_name=agent or eff_role, agent_version=agent_version,
-                    system_prompt=getattr(ctx, "system_prompt", None) if ctx else None,
-                    profile=gov_profile,
-                    artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role))
 
     # Agent Governance Profile gate is AUTHORITATIVE when a profile is attached —
     # the tier guardrails decide pass/review/block locally (and the run + profile
@@ -375,7 +450,8 @@ def run(
         )
 
     if upload:
-        # The PER record first (the platform stores and displays it as is); the run upload is the fallback.
+        # ONE path: the signed PER record (POST /api/v1/records). The classic run upload was removed —
+        # a run that cannot produce a record is reported and NOT uploaded, never sent another way.
         _upload_per_and_gate(
             report,
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
@@ -386,18 +462,7 @@ def run(
             artifacts=agent_artifacts(ctx, domain_knowledge_dir, report, agent or eff_role),
             upload_transcript=upload_transcript,
         )
-        _upload_and_gate(
-            report,
-            api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
-            agent_name=agent or eff_role,
-            agent_version=agent_version,
-            profile=profile,
-            fail_on=eff_fail_on,
-            source=source,
-            environment=environment,
-            transcript=_transcript_text(report),
-        )
-        # _upload_and_gate always raises typer.Exit with the gate code.
+        # _upload_per_and_gate exits with the gate code, or with 2 when nothing could be uploaded.
 
     raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
 
@@ -422,7 +487,7 @@ def artifact(
     fallback_llm: str | None = typer.Option(
         None, "--fallback-llm", help="Cross-family fallback LLM. Defaults to env PROOFAGENT_FALLBACK_LLM."
     ),
-    consensus: str = typer.Option("delphi", "--consensus", help="independent | delphi | debate"),
+    consensus: str = typer.Option("independent", "--consensus", help="independent (default: one blind round) | delphi | debate"),
     seed: int = typer.Option(42, "--seed"),
     json_out: Path | None = typer.Option(None, "--json", help="Write report JSON to this path."),
     md_out: Path | None = typer.Option(None, "--markdown", help="Write report Markdown to this path."),
@@ -557,24 +622,14 @@ def artifact(
         _print_outputs(json_out=json_out, md_out=md_out)
 
     if upload:
-        _upload_and_gate(
+        # ONE path for every mode: the signed PER record.
+        _upload_per_and_gate(
             report,
             api_key=api_key or os.environ.get("PROOFAGENT_API_KEY"),
             agent_name=agent or role,
             agent_version=agent_version,
-            profile=profile,
             fail_on=fail_on,
-            source=source,
-            environment=environment,
-            artifact_text=getattr(art, "generated_artifact", None),
-            knowledge_text=(
-                "\n\n".join(
-                    p.read_text(errors="ignore")
-                    for p in sorted(Path(knowledge_dir).rglob("*.md"))
-                )[:24000]
-                if knowledge_dir and Path(knowledge_dir).exists()
-                else None
-            ),
+            profile=profile,
         )
 
     raise typer.Exit(code=0 if report.certification.value != "NOT_READY" else 1)
@@ -1446,9 +1501,8 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
                          exit_on_decision: bool = True, artifacts: list | None = None,
                          upload_transcript: bool = False) -> bool:
     """`--upload`, record path: export the PER 2.1, send it with its lookup to POST /api/v1/records, print
-    the platform's decision and exit with the gate code. RETURNS (no exit) when the record cannot be built
-    or the platform has no /records endpoint, so the caller falls back to the classic run upload and the
-    evaluation is never lost. With ``exit_on_decision=False`` (a local governance profile gates the run) it
+    the platform's decision and exit with the gate code. This is the ONLY upload path: when the record cannot be
+    built or the platform has no /records endpoint it exits 2 and uploads nothing. With ``exit_on_decision=False`` (a local governance profile gates the run) it
     prints the platform's decision and returns True instead of exiting."""
     import tempfile
 
@@ -1458,8 +1512,12 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
     from proofagent_harness.per_upload import PerUploadError, build_lookup, upload_record
 
     api_url = os.environ.get("PROOFAGENT_API_BASE_URL", "").rstrip("/") or DEFAULT_API_BASE_URL
-    if not api_key or fail_on not in ("pass", "review", "block"):
-        return False  # the classic path reports these with its own messages
+    if not api_key:
+        console.print("[red]--upload needs an API key (--api-key or PROOFAGENT_API_KEY).[/red]")
+        raise typer.Exit(code=2)
+    if fail_on not in ("pass", "review", "block"):
+        console.print(f"[red]--fail-on must be pass, review or block (got {fail_on!r}).[/red]")
+        raise typer.Exit(code=2)
     record = bundle = None
     with tempfile.TemporaryDirectory() as d:
         out, bundle_out = Path(d) / "record.per.json", Path(d) / "bundle.json"
@@ -1491,10 +1549,19 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
             console.print("[yellow]PER built without the system prompt (EIO refused it: "
                           f"{str(last)[:160]}); context is not scored, so readiness is withheld.[/yellow]")
         if record is None:
-            console.print(f"[yellow]PER not built ({type(last).__name__}: {str(last)[:200]}); "
-                          "uploading the run instead.[/yellow]")
-            return False
+            # No evidence record means the run produced nothing citable (typically every
+            # juror call failed). Uploading it through the classic path put a "score 0.0"
+            # run on the dashboard that read like a real result. Refuse instead.
+            console.print(Panel(
+                f"[bold red]Not uploaded: no evidence record could be built.[/bold red]\n\n"
+                f"{type(last).__name__}: {str(last)[:300]}\n\n"
+                "The run produced no verdict that can be cited as evidence, usually because the "
+                "jury model failed (see the [error] lines above). Fix the harness LLM and re-run; "
+                "nothing was sent to the platform.",
+                border_style="red"))
+            raise typer.Exit(code=2)
     lookup = build_lookup(record, bundle or {})
+    _print_per_scores(record)
     console.print(f"[dim]Uploading PER {record['header']['per_version']} to {api_url} …[/dim]")
     if profile is None:
         console.print("[dim]Policy: ProofAgent default policy (none attached; release needs 95%). "
@@ -1504,35 +1571,53 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
                                scenarios=_scenarios(report, full=upload_transcript))
     except PerUploadError as exc:
         if exc.status in (404, 405):  # a platform without the record endpoint
-            console.print("[yellow]This platform does not accept PER records yet; uploading the run instead.[/yellow]")
-            return False
+            console.print("[red]This platform has no PER records endpoint (/api/v1/records). Upgrade the "
+                          "platform; the harness uploads evidence records only.[/red]")
+            raise typer.Exit(code=2) from exc
         console.print(f"[red]PER upload failed:[/red] {exc}")
         raise typer.Exit(code=2) from exc
 
     decision = str(result.get("decision") or "").lower()
+    record_decision = decision
     # The policy's behaviour floor, applied on top of the record's decision (EIO's policy object has no per-metric
-    # rule): one behaviour under the floor blocks the release, however high the readiness average is.
-    from proofagent_harness.governance_profile import default_profile, floor_breaches, metric_floor
+    # rule): one behaviour under the floor blocks the release, however high the readiness average is. A behaviour
+    # scored from fewer than FLOOR_MIN_CHECKS checks is reported but does not block: one verdict is not a measurement.
+    from proofagent_harness.governance_profile import default_profile, floor_breaches, floor_evidence, metric_floor
 
+    FLOOR_MIN_CHECKS = 3
     floor = metric_floor(profile or default_profile())
     breaches = floor_breaches(record, floor)
-    if breaches:
-        from proofagent_harness.governance_profile import floor_evidence
-
+    blocking = []
+    for m, v in breaches:
+        ev = floor_evidence(record, m)
+        turns = ev["turns"]
+        where = (f"turns {turns[0]}–{turns[-1]}" if len(turns) > 4
+                 else "turn" + ("s " if len(turns) > 1 else " ") + ", ".join(map(str, turns)))
+        thin = int(ev.get("of") or 0) < FLOOR_MIN_CHECKS
+        if not thin:
+            blocking.append((m, v))
+        console.print(f"[{'yellow' if thin else 'red'}]Policy floor:[/] {m.replace('-', ' ')} {v:.0f}% below the "
+                      f"{floor:.0f}% every behaviour must reach"
+                      + (f" — not blocking: only {ev['of']} check(s), too few to measure" if thin else " — release blocked."))
+        console.print(f"  {ev['failed']} of {ev['of']} checks failed ({', '.join(ev['checks']).replace('-', ' ')}) on {where}"
+                      + (f'\n    the agent: "{ev["quote"][:200]}"' if ev["quote"] else ""))
+    if blocking:
         decision = "block"
-        console.print("[red]Policy floor:[/red] " + ", ".join(f"{m.replace('-', ' ')} {v:.0f}%" for m, v in breaches)
-                      + f" below the {floor:.0f}% every behaviour must reach — release blocked.")
-        for m, _ in breaches:
-            ev = floor_evidence(record, m)
-            turns = ev["turns"]
-            where = f"turns {turns[0]}–{turns[-1]}" if len(turns) > 4 else "turn" + ("s " if len(turns) > 1 else " ") + ", ".join(map(str, turns))
-            console.print(f"  {m.replace('-', ' ')}: {ev['failed']} of {ev['of']} checks failed ({', '.join(ev['checks']).replace('-', ' ')}) on {where}"
-                          + (f'\n    the agent: "{ev["quote"][:200]}"' if ev["quote"] else ""))
     code = gate_exit_code(decision, fail_on=fail_on)
     color = {"pass": "green", "review": "yellow", "block": "red"}.get(decision, "white")
-    console.print(f"\n[bold]Release decision:[/bold] [{color}]{decision.upper() or 'UNKNOWN'}[/{color}]")
+    console.print(f"\n[bold]Release decision:[/bold] [{color}]{decision.upper() or 'UNKNOWN'}[/{color}]"
+                  + (f" [dim](record: {record_decision.upper()}; the behaviour floor above is stricter and is not in "
+                     f"the record)[/dim]" if decision != record_decision else ""))
     readiness = (record.get("scores") or {}).get("readiness", {}).get("value")
-    console.print(f"  Readiness : {round(readiness) if readiness is not None else 'withheld'}"
+    if readiness is not None:
+        shown = str(round(readiness))
+    else:
+        from proofagent_harness.per_export import partial_readiness
+
+        part = partial_readiness(record)
+        shown = (f"{round(part['value'])} (partial: {part['note']}; averaged over "
+                 f"{', '.join(part['measured'])})" if part else "withheld")
+    console.print(f"  Readiness : {shown}"
                   f" · record {str(result.get('record_id', ''))[:8]} · {'signed' if result.get('signed') else 'unsigned'}")
     if result.get("url"):
         _print_outputs(dashboard=result.get("url"))
@@ -1541,104 +1626,6 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
     console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
     raise typer.Exit(code=code)
 
-
-def _upload_and_gate(
-    report,
-    *,
-    api_key: str | None,
-    agent_name: str,
-    agent_version: str | None,
-    profile: str | None,
-    fail_on: str,
-    source: str,
-    environment: str | None = None,
-    artifact_text: str | None = None,
-    knowledge_text: str | None = None,
-    transcript: str | None = None,
-) -> None:
-    """Build the governance payload, upload it, print the gate decision, and
-    exit with the gate-mapped code. Always raises ``typer.Exit``."""
-    from proofagent_harness.governance import (
-        DEFAULT_API_BASE_URL,
-        GovernanceUploadError,
-        build_governance_payload,
-        gate_exit_code,
-        structure_findings_evidence,
-        upload_run,
-    )
-
-    # Upload target: ProofAgent Cloud by default. `PROOFAGENT_API_BASE_URL` repoints
-    # it - needed for on-prem / Enterprise backends and for local end-to-end testing
-    # against a self-hosted governance stack (e.g. http://localhost:8000). Cloud stays
-    # the default when the env var is unset, so a normal user only needs an API key.
-    api_url = os.environ.get("PROOFAGENT_API_BASE_URL", "").rstrip("/") or DEFAULT_API_BASE_URL
-
-    if not api_key:
-        console.print(
-            "[red]--upload was set but no API key was provided. Pass --api-key "
-            "or set PROOFAGENT_API_KEY (get one at "
-            f"{api_url} → Settings → API Keys).[/red]"
-        )
-        raise typer.Exit(code=2)
-
-    if fail_on not in ("pass", "review", "block"):
-        console.print(
-            f"[red]--fail-on must be one of pass | review | block (got {fail_on!r}).[/red]"
-        )
-        raise typer.Exit(code=2)
-
-    payload = build_governance_payload(
-        report,
-        agent_name=agent_name,
-        agent_version=agent_version,
-        profile=profile,
-        source=source,
-        environment=environment,
-    )
-
-    # Evidence-driven findings: structure each finding into claim → ref →
-    # contradiction → fix. Best-effort + no-op-safe; disable with PROOFAGENT_EVIDENCE=0.
-    if os.environ.get("PROOFAGENT_EVIDENCE", "1") != "0":
-        with contextlib.suppress(Exception):
-            structure_findings_evidence(
-                payload,
-                artifact_text=artifact_text,
-                knowledge_text=knowledge_text,
-                transcript=transcript,
-                model=os.environ.get("PROOFAGENT_EVIDENCE_LLM", "gpt-4.1-mini"),
-            )
-
-    console.print(f"[dim]Uploading run to {api_url} …[/dim]")
-    try:
-        result = upload_run(payload, api_url=api_url, api_key=api_key)
-    except GovernanceUploadError as exc:
-        console.print(f"[red]Governance upload failed:[/red] {exc}")
-        raise typer.Exit(code=2) from exc
-
-    gate_status = str(result.get("gate_status", "")).lower()
-    code = gate_exit_code(gate_status, fail_on=fail_on)
-
-    color = {"pass": "green", "review": "yellow", "block": "red"}.get(gate_status, "white")
-    console.print(
-        f"\n[bold]Governance gate:[/bold] [{color}]{gate_status.upper() or 'UNKNOWN'}[/{color}]"
-    )
-    if result.get("final_score") is not None:
-        grade = result.get("grade_label", "")
-        grade_suffix = f" ({grade})" if grade else ""
-        console.print(f"  Final score : {result.get('final_score')}{grade_suffix}")
-    failed_rules = result.get("failed_rules") or []
-    if failed_rules:
-        console.print("  Failed rules:")
-        for rule in failed_rules:
-            console.print(f"    [red]- {rule}[/red]")
-    if result.get("dashboard_url"):
-        _print_outputs(dashboard=result.get("dashboard_url"))
-    console.print(f"[dim]Exit code {code} (fail-on={fail_on}).[/dim]")
-
-    raise typer.Exit(code=code)
-
-
-# ── Agent Governance Profile (governance as code) ────────────────────────────
 
 def _resolve_governance_profile(
     *, file: Path | None, assess: bool, agent: str | None, api_key: str | None, api_base: str | None
@@ -1729,51 +1716,6 @@ def _print_governance_verdict(profile, gate, exit_code: int | None = None) -> No
     console.print("  " + "   ".join(bits))
 
 
-def _upload_run_best_effort(
-    report, *, api_key: str | None, agent_name: str | None, agent_version: str | None,
-    source: str, environment: str | None, transcript: str | None, profile,
-    profile_slug: str | None = None,
-) -> None:
-    """Upload the run WITH the attached Agent Governance Profile embedded, without
-    gating/exiting (the local governance gate is authoritative). Best-effort."""
-    if not api_key:
-        console.print("[yellow]--upload skipped: no API key.[/yellow]")
-        return
-    from proofagent_harness.governance import (
-        DEFAULT_API_BASE_URL,
-        build_governance_payload,
-        structure_findings_evidence,
-        upload_run,
-    )
-    from proofagent_harness.governance_profile import to_payload
-
-    api_url = os.environ.get("PROOFAGENT_API_BASE_URL", "").rstrip("/") or DEFAULT_API_BASE_URL
-    payload = build_governance_payload(
-        report, agent_name=agent_name, agent_version=agent_version,
-        profile=profile_slug, source=source, environment=environment,
-    )
-    payload["agent_governance_profile"] = to_payload(profile)  # rides up for the dashboard card
-
-    # Evidence-driven findings — same treatment as the plain upload path, so a
-    # governance-profile run is never a poorer record on the dashboard.
-    # Best-effort + no-op-safe; disable with PROOFAGENT_EVIDENCE=0.
-    if os.environ.get("PROOFAGENT_EVIDENCE", "1") != "0":
-        with contextlib.suppress(Exception):
-            structure_findings_evidence(
-                payload,
-                transcript=transcript,
-                model=os.environ.get("PROOFAGENT_EVIDENCE_LLM", "gpt-4.1-mini"),
-            )
-
-    console.print(f"[dim]Uploading run (+ governance profile) to {api_url} …[/dim]")
-    try:
-        result = upload_run(payload, api_url=api_url, api_key=api_key)
-        if result.get("dashboard_url"):
-            _print_outputs(dashboard=result.get("dashboard_url"))
-    except Exception as exc:  # best-effort — never fail the run on upload trouble
-        console.print(f"[yellow]Upload failed (run gated locally anyway):[/yellow] {exc}")
-
-
 def _governance_gate_and_exit(
     report, profile, *, fail_on: str, upload: bool, api_key: str | None,
     agent_name: str | None, agent_version: str | None, source: str,
@@ -1787,15 +1729,11 @@ def _governance_gate_and_exit(
 
     # The PER record first, scored against the profile's intake (the governance axis); the classic run upload
     # only when no record could be sent. The local profile gate below stays authoritative for the exit code.
-    if upload and not _upload_per_and_gate(
-        report, api_key=api_key, agent_name=agent_name or "agent-under-test", agent_version=agent_version,
-        fail_on=fail_on, system_prompt=system_prompt, profile=profile, exit_on_decision=False, artifacts=artifacts,
-        upload_transcript=upload_transcript,
-    ):
-        _upload_run_best_effort(
-            report, api_key=api_key, agent_name=agent_name, agent_version=agent_version,
-            source=source, environment=environment, transcript=transcript, profile=profile,
-            profile_slug=profile_slug,
+    if upload:
+        _upload_per_and_gate(
+            report, api_key=api_key, agent_name=agent_name or "agent-under-test", agent_version=agent_version,
+            fail_on=fail_on, system_prompt=system_prompt, profile=profile, exit_on_decision=False,
+            artifacts=artifacts, upload_transcript=upload_transcript,
         )
     gate = profile.gate(
         final_score=getattr(report, "final_score", None),
@@ -2175,7 +2113,7 @@ def _export_per(report, out: Path, *, agent_name: str | None = None, agent_versi
     except Exception as exc:  # PerExportError, or EIO's own ConversionError
         kind = "" if isinstance(exc, PerExportError) else f"{type(exc).__name__}: "
         console.print(f"[yellow]PER export skipped:[/yellow] {kind}{exc}")
-        return
+        return None
     readiness = record["scores"]["readiness"].get("value")
     console.print(
         f"[green]PER {record['header']['per_version']}[/green] → {out} · "
@@ -2185,6 +2123,54 @@ def _export_per(report, out: Path, *, agent_name: str | None = None, agent_versi
     skipped = getattr(export_per, "skipped", [])
     if skipped:
         console.print(f"[dim]{len(skipped)} check(s) left out: EIO could not cite their evidence.[/dim]")
+    _print_per_scores(record)
+    return record
+
+
+def _carry_per_release(report, record: dict | None) -> None:
+    """Put the PER's release decision on the report (metadata.per_release), where the report's verdict reads it."""
+    if not record:
+        return
+    rr = record.get("release_recommendation") or {}
+    reasons = [f"{d.get('id')}: expected {d.get('expected')}, observed {d.get('observed')}"
+               for d in (rr.get("decisive") or []) if isinstance(d, dict)]
+    meta = getattr(report, "metadata", None)
+    if isinstance(meta, dict):
+        rd = ((record.get("scores") or {}).get("readiness") or {}).get("value")
+        meta["per_release"] = {"state": rr.get("state"), "reasons": reasons,
+                               "readiness": round(float(rd), 1) if isinstance(rd, (int, float)) else None}
+
+
+_PRINTED_PER_SCORES: set[str] = set()
+
+
+def _print_per_scores(record: dict) -> None:
+    """The signed record's own axes and metrics: the numbers the platform shows. The PAI card
+    above is the harness's local view; where they differ, the PER is authoritative."""
+    key = json.dumps(record.get("scores") or {}, sort_keys=True, default=str)
+    if key in _PRINTED_PER_SCORES:  # --per and --upload both build the record: print it once
+        return
+    _PRINTED_PER_SCORES.add(key)
+    def pct(v):
+        return "withheld" if v is None else f"{round(float(v))}%"
+    sc = record.get("scores") or {}
+    axes = " · ".join(f"{str(a.get('axis', '')).rsplit('.', 1)[-1]} {pct(a.get('value'))}"
+                      for a in sc.get("axes") or [])
+    mets = " · ".join(f"{str(m.get('metric', '')).rsplit('.', 1)[-1]} {pct(m.get('value'))}"
+                      for m in sc.get("metrics") or [] if m.get("status") == "MEASURED")
+    held = [str(m.get("metric", "")).rsplit(".", 1)[-1] for m in sc.get("metrics") or []
+            if m.get("status") != "MEASURED"]
+    console.print(f"[bold]PER axes (authoritative, as the platform shows):[/bold] {axes}")
+    from proofagent_harness.per_export import partial_readiness
+
+    part = partial_readiness(record)
+    if part:
+        console.print(f"  [yellow]readiness withheld in the record ({part['note']}); partial readiness over "
+                      f"{', '.join(part['measured'])}: {round(part['value'])}"
+                      f"{' (capped)' if part['capped'] else ''}[/yellow]")
+    console.print(f"  metrics: {mets}")
+    if held:
+        console.print(f"  [yellow]withheld (no evidence):[/yellow] {', '.join(held)}")
 
 
 @app.command("per")
@@ -2888,6 +2874,12 @@ def _load_callable(path: Path, name: str):
     obj = getattr(mod, name)
     if not callable(obj):
         raise typer.BadParameter(f"{name!r} in {path} is not callable.")
+    # A module-level `reset()` clears the agent's conversation state. The harness calls it
+    # around calibration probes so they never leak into the adversarial conversation.
+    reset = getattr(mod, "reset", None)
+    if callable(reset) and not hasattr(obj, "reset"):
+        with contextlib.suppress(AttributeError, TypeError):
+            obj.__proofagent_reset__ = reset
     return obj
 
 if __name__ == "__main__":

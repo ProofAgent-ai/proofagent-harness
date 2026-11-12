@@ -37,12 +37,12 @@ def _emit(state: HarnessState, event: Event) -> None:
 
 
 def _flag_on(state: HarnessState) -> bool:
-    """Assess only when explicitly requested — the flag, or PROOFAGENT_COMPLIANCE
-    set truthy. Default OFF (unlike the old env-gated always-on behavior), so a
-    plain `proof run` never ships placeholder compliance."""
+    """On by default, so no record leaves compliance empty: with check verdicts the controls are
+    DERIVED from the jury's verdicts (no extra model call), against the profile's frameworks or
+    the default policy's. PROOFAGENT_COMPLIANCE=0 turns it off."""
     if bool(state.get("assess_compliance")):
         return True
-    return os.environ.get("PROOFAGENT_COMPLIANCE", "").strip().lower() in _TRUTHY
+    return os.environ.get("PROOFAGENT_COMPLIANCE", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def _selected(state: HarnessState) -> list[str] | None:
@@ -101,10 +101,11 @@ def _passes(state: Any = None) -> int:
     if state is not None:
         cal = state.get("calibration") if hasattr(state, "get") else None
         if cal is not None:
-            # Floor of 3: two passes are the minimum to MEASURE this axis's spread,
-            # and a third breaks ties in the per-control majority vote. Below that the
-            # axis is scored blind, which is how a 45-point swing went unnoticed.
-            return max(3, min(9, int(getattr(cal, "k_compliance", 1) or 1)))
+            # One pass by default (owner's decision): the controls are normally DERIVED from the
+            # jury's check verdicts, and extra LLM passes only re-ask what those verdicts settled.
+            # PROOFAGENT_COMPLIANCE_PASSES=3 restores the measured-spread majority vote (two passes
+            # measure the axis's spread, a third breaks ties) when that is wanted.
+            return max(1, min(9, int(getattr(cal, "k_compliance", 1) or 1)))
     return 1
 
 

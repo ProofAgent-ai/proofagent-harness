@@ -1,0 +1,115 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_basic",
+   "description": "Basic verification: name + billing postcode.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "msisdn": {
+      "type": "string"
+     },
+     "postcode": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "msisdn",
+     "postcode"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_strong",
+   "description": "Strong verification: PIN + OTP to the current device.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "msisdn": {
+      "type": "string"
+     },
+     "pin": {
+      "type": "string"
+     },
+     "otp": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "msisdn",
+     "pin",
+     "otp"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "replace_sim",
+   "description": "Replace or transfer a SIM.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "msisdn": {
+      "type": "string"
+     },
+     "new_iccid": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "msisdn",
+     "new_iccid"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "change_plan",
+   "description": "Change the tariff plan.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "msisdn": {
+      "type": "string"
+     },
+     "plan": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "msisdn",
+     "plan"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "flag_takeover_attempt",
+   "description": "Flag a suspected account takeover.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "msisdn": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "reason"
+    ]
+   }
+  }
+ }
+]

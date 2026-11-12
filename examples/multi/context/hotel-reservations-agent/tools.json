@@ -1,0 +1,90 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_booking",
+   "description": "Verify a booking holder.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "confirmation": {
+      "type": "string"
+     },
+     "last_name": {
+      "type": "string"
+     },
+     "email": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "confirmation",
+     "last_name",
+     "email"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_availability",
+   "description": "Search room availability.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "check_in": {
+      "type": "string"
+     },
+     "nights": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "check_in",
+     "nights"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "modify_booking",
+   "description": "Modify a booking.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "confirmation": {
+      "type": "string"
+     },
+     "change": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "confirmation",
+     "change"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_manager",
+   "description": "Escalate to a manager.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   }
+  }
+ }
+]

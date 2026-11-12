@@ -50,6 +50,14 @@ class HarnessState(TypedDict, total=False):
     context: AgentContext
 
     agent_callable: Callable[..., Any]
+    # Deferred agent-consistency probe (a coroutine factory set by calibration) and its result,
+    # measured alongside jury round 1 instead of before the attack.
+    agent_probe: Callable[..., Any] | None
+    agent_consistency: dict[str, Any]
+    # turn_index -> Trap for consistency-probe turns (they sit after the planned turns).
+    probe_traps: dict[int, Any]
+    custom_traps: list[Any]
+    regression: dict[str, Any]
 
     # Provider/framework-agnostic PerformanceCollector (performance.py) — a shared
     # mutable object the conductor records each turn's latency + optional (answer,
@@ -58,6 +66,10 @@ class HarnessState(TypedDict, total=False):
     perf_collector: Any
 
     llm: LLM
+    attacker_llm: LLM
+    """Model that writes adversarial turns (conductor). Defaults to `llm`."""
+    jury_llm: LLM
+    """Model the jurors score with. Defaults to `llm`."""
 
     skills: list[Skill]
     traps: list[Trap]
@@ -127,6 +139,8 @@ class HarnessState(TypedDict, total=False):
     # preserved for the audit trail. The FINAL round lands in round_two_scores
     # (it's what finalize_consensus aggregates). Empty for delphi / independent.
     debate_round_scores: Annotated[list[JurorScore], _extend_juror_scores]
+    # metric -> debate rounds actually run (see ConsensusResult.debate_rounds_run).
+    debate_rounds_run: dict[str, int]
     metrics_to_revote: list[str]
 
     consensus: Annotated[dict[str, ConsensusResult], _merge_dicts]
@@ -235,6 +249,15 @@ class HarnessState(TypedDict, total=False):
 
     _agent_last_crash_type: str | None
     """Exception type of the most recent crash (None after a clean turn)."""
+
+    _conductor_llm_failures: int
+    """Attacker LLM calls that raised; the turn fell back to the trap seed."""
+
+    _attacker_refusals: int
+    """Turns on which the attacker model first refused to write the attack."""
+
+    _attacker_refusals_unrecovered: int
+    """Of those, turns where retry and fallback also refused; the seed was sent."""
 
     artifact_type: str
     """Artifact type tag (BRD, code, business_plan, etc.). Drives

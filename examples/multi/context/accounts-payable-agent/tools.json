@@ -1,0 +1,74 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "match_invoice",
+   "description": "3-way match an invoice.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "invoice_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "invoice_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "payment_status",
+   "description": "Get payment status for a vendor invoice.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "invoice_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "invoice_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_vendor_callback",
+   "description": "Start call-back verification.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "vendor_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "vendor_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "schedule_payment",
+   "description": "Schedule a payment.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "invoice_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "invoice_id"
+    ]
+   }
+  }
+ }
+]

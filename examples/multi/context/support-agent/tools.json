@@ -1,0 +1,300 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_identity",
+   "description": "Verify the caller's identity. REQUIRED before any account action. Verification requires BOTH email-on-file confirmation AND security-question success.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     },
+     "email_on_file_confirmed": {
+      "type": "boolean"
+     },
+     "security_question_correct": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "customer_id",
+     "email_on_file_confirmed",
+     "security_question_correct"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_customer",
+   "description": "Retrieve basic customer profile (name, account status, last activity). REQUIRES prior verify_identity success.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "customer_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_order",
+   "description": "Look up an order's status, items, total, and shipment tracking. REQUIRES prior verify_identity for the customer who owns the order.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "order_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "process_refund",
+   "description": "Issue a refund on a verified order. MUST be called only AFTER verify_identity success in this session for the order's customer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string"
+     },
+     "amount_usd": {
+      "type": "number"
+     },
+     "reason_code": {
+      "type": "string",
+      "enum": [
+       "voluntary_within_24h",
+       "defective_item",
+       "shipment_lost",
+       "service_issue",
+       "policy_exception_documented"
+      ]
+     }
+    },
+    "required": [
+     "order_id",
+     "amount_usd",
+     "reason_code"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "update_shipping_address",
+   "description": "Update the customer's shipping address on file. REQUIRES prior verify_identity success.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     },
+     "address_line1": {
+      "type": "string"
+     },
+     "city": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string"
+     },
+     "postal_code": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "customer_id",
+     "address_line1"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "cancel_subscription",
+   "description": "Cancel an active subscription. REQUIRES prior verify_identity success.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "subscription_id": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "subscription_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_specialist",
+   "description": "Hand off to a specialist team (billing dispute, fraud review, hardship review, legal/compliance).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     },
+     "department": {
+      "type": "string",
+      "enum": [
+       "billing_dispute",
+       "fraud_review",
+       "hardship_review",
+       "legal_compliance",
+       "tier2_support"
+      ]
+     },
+     "urgency": {
+      "type": "string",
+      "enum": [
+       "routine",
+       "urgent"
+      ]
+     },
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "department",
+     "urgency",
+     "summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "send_email",
+   "description": "Send a templated email to a verified customer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     },
+     "template_id": {
+      "type": "string"
+     },
+     "params": {
+      "type": "object"
+     }
+    },
+    "required": [
+     "customer_id",
+     "template_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "create_support_ticket",
+   "description": "Create a support ticket for tracking an open issue.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "category": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string"
+     },
+     "customer_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "category",
+     "summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_policy",
+   "description": "Look up a documented internal policy (refund window, return rules, promotion terms). Use this instead of guessing.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "topic": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "topic"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_promotion_eligibility",
+   "description": "Verify whether a customer + promo code combination is eligible for a discount.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string"
+     },
+     "promo_code": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "customer_id",
+     "promo_code"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "request_supervisor_callback",
+   "description": "Request a supervisor callback for cases beyond agent authority.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "case_id": {
+      "type": "string"
+     },
+     "preferred_window": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "case_id"
+    ]
+   }
+  }
+ }
+]

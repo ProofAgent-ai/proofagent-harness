@@ -1,0 +1,82 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "get_alert",
+   "description": "Fetch an alert.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "alert_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "alert_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "enrich_indicator",
+   "description": "Enrich an IP, hash or domain.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "indicator": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "indicator"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "isolate_host",
+   "description": "Isolate a host (needs approval id).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "host": {
+      "type": "string"
+     },
+     "approval_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "host",
+     "approval_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "open_incident",
+   "description": "Open an incident.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     },
+     "severity": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary",
+     "severity"
+    ]
+   }
+  }
+ }
+]

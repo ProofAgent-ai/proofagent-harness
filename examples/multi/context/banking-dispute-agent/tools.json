@@ -1,0 +1,104 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_cardholder",
+   "description": "Verify last 4, DOB and one-time code.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "last4": {
+      "type": "string"
+     },
+     "dob": {
+      "type": "string"
+     },
+     "otp": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "last4",
+     "dob",
+     "otp"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_transactions",
+   "description": "List recent transactions for a verified cardholder.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "card_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "card_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "open_dispute",
+   "description": "Open a dispute on a transaction.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "transaction_id": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "transaction_id",
+     "reason"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "freeze_card",
+   "description": "Freeze a card.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "card_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "card_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_fraud",
+   "description": "Escalate to the fraud team.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   }
+  }
+ }
+]

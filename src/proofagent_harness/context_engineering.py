@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from typing import Any
 
 # Fixed context-engineering criteria — the lenses the sub-score is built from.
@@ -77,6 +78,27 @@ NON_SCORING_CRITERIA: frozenset[str] = frozenset({
 #: is told what was actually being judged rather than given a restated percentage.
 _CRITERION_DESC: dict[str, str] = dict(CRITERIA)
 
+
+# The assessment's real shape. Sent to local runtimes as their JSON schema: a bare {"type": "object"} let a
+# grammar-constrained local model (Bonsai 27B, LM Studio) generate one never-ending object until the call's
+# time limit, on every retry.
+_ASSESSMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "criteria": {"type": "array", "maxItems": 12, "items": {
+            "type": "object", "properties": {"id": {"type": "string"}, "score": {"type": "number"}},
+            "required": ["id", "score"]}},
+        "findings": {"type": "array", "maxItems": 16, "items": {
+            "type": "object", "properties": {
+                "title": {"type": "string"}, "criterion": {"type": "string"}, "problem": {"type": "string"},
+                "proof": {"type": "string"}, "source": {"type": "string"}, "fix": {"type": "string"},
+                "token_impact": {"type": "string"}},
+            "required": ["title", "criterion", "problem", "fix"]}},
+        "token_savings_estimate": {"type": "integer"},
+        "summary": {"type": "string"},
+    },
+    "required": ["criteria", "findings", "summary"],
+}
 
 def _derived_finding(
     cid: str, score: float, sources: list[str], *, non_scoring: bool
@@ -463,21 +485,39 @@ def assess_context_engineering(
             "temperature": 0,
             "num_retries": 2,
         }
+        # The same local-model guards every harness call gets (see llm.LLM._raw_complete): a
+        # wall-clock cap, and no hidden reasoning pass on a local thinking model. Without them
+        # Qwen spent its whole budget reasoning, returned an empty reply, and the context axis
+        # was silently withheld.
+        from proofagent_harness.llm import _call_timeout
+        kwargs["timeout"] = _call_timeout(str(model))
+        from proofagent_harness.llm import _local_max_tokens, _wants_json_schema as _local
+        if _local(str(model)):
+            kwargs.setdefault("max_tokens", _local_max_tokens())
+        from proofagent_harness.llm import _local_reasoning_off
+        if _local_reasoning_off(str(model)):
+            kwargs["extra_body"] = {"reasoning_effort": "none"}
         # Route custom/OpenAI-compatible endpoints (Eden, vLLM, Azure) — without this
         # an `openai/...` model with no api_base hits api.openai.com and fails.
         if api_base:
             kwargs["api_base"] = api_base
         if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
+            from proofagent_harness.llm import _wants_json_schema
+            # LM Studio and similar runtimes reject json_object with a bare HTTP 400 (no
+            # mention of response_format), so the retry below never fired and every local
+            # run lost its context score. They accept json_schema.
+            kwargs["response_format"] = (
+                {"type": "json_schema", "json_schema": {"name": "assessment", "schema": _ASSESSMENT_SCHEMA}}
+                if _wants_json_schema(str(model)) else {"type": "json_object"})
         return litellm.completion(**kwargs)
 
     try:
         try:
             resp = _call(json_mode=True)
         except Exception as exc:
-            # Local OpenAI-compatible servers (LM Studio…) reject json_object —
-            # retry once without it instead of silently skipping the assessment.
-            if "response_format" not in str(exc).lower():
+            # Any rejection of the request shape: retry once without JSON mode (the loose
+            # parser below handles fenced JSON) instead of silently skipping the assessment.
+            if not any(k in str(exc).lower() for k in ("response_format", "400", "bad request", "badrequest")):
                 raise
             resp = _call(json_mode=False)
         # Loose parse — local models often fence the JSON in ```json blocks.

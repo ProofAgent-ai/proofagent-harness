@@ -89,6 +89,11 @@ def _agent_completion(**kwargs):
     global _AGENT_ACCEPTS_TEMPERATURE
     if not _AGENT_ACCEPTS_TEMPERATURE:
         kwargs.pop("temperature", None)
+    # AGENT_REASONING_EFFORT (minimal|low|medium|high) for OpenAI reasoning models; unset = provider default.
+    _effort = os.getenv("AGENT_REASONING_EFFORT")
+    if _effort and AGENT_LLM.split("/")[-1].startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs.setdefault("reasoning_effort", _effort)
+        kwargs.pop("temperature", None)
     try:
         return litellm.completion(**kwargs)
     except litellm.BadRequestError as exc:

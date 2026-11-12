@@ -11,12 +11,19 @@ Four things a deployment decision depends on, measured in one command: how the a
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/ProofAgent-ai/proofagent-harness/actions/workflows/ci.yml)
 [![arXiv](https://img.shields.io/badge/arXiv-2605.24134-b31b1b.svg)](https://arxiv.org/abs/2605.24134)
-[![EIO-Agents](https://img.shields.io/badge/EIO--Agents-0.8.5-0e7c86.svg)](https://www.proofagent.ai/eio-agents)
+[![EIO-Agents](https://img.shields.io/badge/EIO--Agents-0.9.0-0e7c86.svg)](https://www.proofagent.ai/eio-agents)
 [![PER](https://img.shields.io/badge/PER-2.1.2-0e7c86.svg)](https://www.proofagent.ai/eio-agents/per)
 
 <img src="docs/architecture.png" alt="ProofAgent Harness evaluation pipeline" width="720" />
 
 </div>
+
+## What's new in 1.14.0
+
+- **EIO-Agents 0.9.0:** findings that had no severity now carry one (required step skipped, invented authority, card exposure: HIGH).
+- **Reproducible exams:** exactly the turns you ask for, and the same seed plans the same exam.
+- **Fewer false positives:** refusals, faithfully quoted tool results and code examples are no longer flagged.
+- **Coding-agent watch:** secrets are scrubbed from every upload; only high and critical evidence is stored.
 
 ## What's new in 0.13.0: export to the PER standard
 
@@ -31,7 +38,7 @@ proof per report.json -o report.per.json                                        
 eio-agents validate report.per.json                                                # check it with the standard's tool
 ```
 
-- **Installed automatically:** [`eio-agents`](https://pypi.org/project/eio-agents/) (0.8.5) is a core dependency.
+- **Installed automatically:** [`eio-agents`](https://pypi.org/project/eio-agents/) (0.9.0) is a core dependency.
 - **Nothing about scoring changes:** the export reads the finished report and maps its checks to EIO predicates.
 - **Jury proof:** juror ballots and quotes carry over, so a finding can be PROVEN under the standard's
   2-of-3 jury-consensus rule.
@@ -113,7 +120,7 @@ proof run agent.py --context-dir ./my_agent/context --turns 15
 | `--traps a,b` / `--families f` | Restrict to named traps or families (183 traps across 11 families). |
 | `--extra-traps ./dir` | Add your own traps — one Markdown file each. |
 | `--personas p,q` | Which juror personas score the run. |
-| `--consensus` | `delphi` (default, jurors independent then revised blind) · `independent` · `debate`. |
+| `--consensus` | `independent` (default: one blind jury round, fastest) · `delphi` (jurors independent, then a second blind round on disputed metrics) · `debate`. |
 | `--fresh` | Never reuse a stored transcript; always re-run the agent. |
 
 **Read more:** [multi-turn mode →](https://www.proofagent.ai/harness/docs#multi-turn-mode) · [the 6 metrics →](https://www.proofagent.ai/harness/docs#metrics) · [sizing the run →](https://www.proofagent.ai/harness/docs#turn-budget) · [bring your own traps →](https://www.proofagent.ai/harness/docs#red-teaming)
@@ -778,7 +785,7 @@ With neither `--governance-profile` nor `--assess-governance`, nothing changes �
 Every report can also be written as a **PER**: the open, versioned record format of the
 [EIO-Agents standard](https://www.proofagent.ai/eio-agents) (Evaluation Intelligence Ontology for AI Agents). A PER
 carries the same evaluation in a form any EIO-aware tool, dashboard or auditor can read, validate and check, without
-running the harness. [EIO-Agents](https://pypi.org/project/eio-agents/) (`eio-agents==0.8.5`) is a core dependency
+running the harness. [EIO-Agents](https://pypi.org/project/eio-agents/) (`eio-agents==0.9.0`) is a core dependency
 and is installed with the harness.
 
 ```bash
@@ -829,7 +836,7 @@ bundle; the record holds only cited quotes and fingerprints, so it is safe to sh
 |---|---|---|
 | PER 2.1.0 | Default | [per/2.1.0](https://www.proofagent.ai/eio-agents/schema/per/2.1.0/per.schema.json) |
 | PER 2.1.1 | A finding is PROVEN by jury consensus | [per/2.1.1](https://www.proofagent.ai/eio-agents/schema/per/2.1.1/per.schema.json) |
-| PER 2.1.2 | The record carries evaluator usage telemetry (every export with EIO-Agents 0.8.5) | [per/2.1.2](https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json) |
+| PER 2.1.2 | The record carries evaluator usage telemetry (every export with EIO-Agents 0.8.5 or later) | [per/2.1.2](https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json) |
 
 Every schema is also bundled in the `eio-agents` package, so validation works offline:
 `check-jsonschema --schemafile https://www.proofagent.ai/eio-agents/schema/per/2.1.2/per.schema.json report.per.json`.

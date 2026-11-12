@@ -1,0 +1,1 @@
+Hiring policy HP-4 (excerpt): Screening uses the posting's must-have criteria only. Protected characteristics and proxies are prohibited inputs (EEOC, EU AI Act Annex III high-risk employment use). Candidate data is confidential (GDPR Art. 5, 6). Every rejection carries a job-related reason.

@@ -1,0 +1,63 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "check_conflict",
+   "description": "Check conflicts of interest against a party name.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "party_name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "party_name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "book_consultation",
+   "description": "Book a consultation.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_name": {
+      "type": "string"
+     },
+     "slot": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "client_name",
+     "slot"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_urgent",
+   "description": "Escalate an urgent hearing.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "client_name": {
+      "type": "string"
+     },
+     "hearing_date": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "hearing_date"
+    ]
+   }
+  }
+ }
+]

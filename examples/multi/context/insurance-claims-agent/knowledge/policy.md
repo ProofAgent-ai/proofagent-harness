@@ -1,0 +1,1 @@
+Meridian home policy HO-3 (excerpt): Water damage from sudden pipe burst covered; gradual leaks excluded. Deductible EUR 500. Auto: collision covered with EUR 300 deductible; rental car up to 10 days. All payouts require adjuster sign-off.

@@ -46,9 +46,10 @@ TOLERANCE = 0.1
 # differently between runs, which averaging cannot touch. K=5 tripled jury calls
 # (18 -> 90 per run, $0.29 -> $0.85) for no measurable gain.
 #
-# The residual is still MEASURED and reported — knowing the scorer's spread is worth the
-# one cached measurement — it just no longer multiplies the work. Set
-# PROOFAGENT_JURY_DAMPING=1 to re-enable the ladder.
+# With the ladder at (1,) the measurement cannot change the pass count, so it is skipped
+# by default: it cost two full jury passes before every run (slow on a local harness LLM)
+# for a number only reported. PROOFAGENT_JURY_MEASURE=1 measures and reports the residual
+# anyway; PROOFAGENT_JURY_DAMPING=1 re-enables the ladder (and so the measurement).
 _LADDER_OFF = (1,)
 _LADDER_ON = (1, 3, 5)
 
@@ -59,6 +60,12 @@ def damping_enabled() -> bool:
 
 def _ladder() -> tuple[int, ...]:
     return _LADDER_ON if damping_enabled() else _LADDER_OFF
+
+
+def jury_measure_enabled() -> bool:
+    """Whether to spend the up-front jury passes: only when the result can pick the
+    pass count (damping on) or the user asked for the residual."""
+    return len(_ladder()) > 1 or os.environ.get("PROOFAGENT_JURY_MEASURE", "0") == "1"
 # Probe budget for the agent-volatility check. Deliberately small: the question is
 # BINARY — does this agent answer the same prompt differently — and detecting that needs
 # far less evidence than estimating how much. The earlier 3x3 spent 9 agent calls per
@@ -74,7 +81,7 @@ _SCHEMA_VERSION = 3
 # reading a new knob — a missed one silently allows a wrong-transcript replay.
 AGENT_ENV_KEYS: tuple[str, ...] = (
     "AGENT_LLM", "AGENT_TEMPERATURE", "AGENT_MODEL", "AGENT_SEED",
-    "AGENT_TOP_P", "AGENT_MAX_TOKENS", "AGENT_BASE_URL",
+    "AGENT_TOP_P", "AGENT_MAX_TOKENS", "AGENT_BASE_URL", "AGENT_REASONING_EFFORT",
 )
 
 
@@ -373,9 +380,13 @@ async def measure_jury(score_once: Any, *, key: str) -> tuple[float | None, int]
     "perfectly stable, one pass" verdict for a scorer nobody had ever observed. An
     unmeasured result is also NOT cached, so the next run tries again.
     """
-    cached = _load_profile(key)
-    if cached is not None:
-        return cached
+    # Measured on THIS run's input by default. The cache is keyed on the harness-LLM
+    # setup only, so a cached value describes whichever agent was measured first, not the
+    # run whose report carries it. PROOFAGENT_JURY_CACHE=1 restores reuse for cost-bound runs.
+    if os.environ.get("PROOFAGENT_JURY_CACHE", "0") == "1":
+        cached = _load_profile(key)
+        if cached is not None:
+            return cached
 
     samples: list[dict[str, float]] = []
     residual: float | None = None
@@ -436,9 +447,9 @@ async def measure_agent(
     identical = True
     batches: list[tuple[str, list[str]]] = []
     for prompt in prompts:
-        replies = [str(r or "") for r in await asyncio.gather(
-            *[ask(prompt) for _ in range(_REPLIES)]
-        )]
+        # Sequential, never concurrent: two simultaneous calls into one stateful agent
+        # interleave in its history, and the reset between probes would race.
+        replies = [str((await ask(prompt)) or "") for _ in range(_REPLIES)]
         if len({r.strip() for r in replies}) > 1:
             identical = False
             batches.append((prompt, replies))
@@ -449,8 +460,10 @@ async def measure_agent(
         return STABLE, 0.9, []
 
     equivalent = 0
-    for prompt, replies in batches:
-        verdict = await judge(prompt, replies)
+    # The judge calls are independent (each compares one prompt's two replies) and hit
+    # the harness LLM, not the agent — so unlike the probes above they run together.
+    verdicts = await asyncio.gather(*[judge(prompt, replies) for prompt, replies in batches])
+    for verdict in verdicts:
         if verdict.get("equivalent"):
             equivalent += 1
         else:

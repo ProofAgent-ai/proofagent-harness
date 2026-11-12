@@ -49,15 +49,23 @@ def test_refusal_carries_the_status(monkeypatch):
     assert e.value.status == 404
 
 
-def test_cli_falls_back_to_the_run_upload_when_the_record_cannot_be_built(monkeypatch):
+def test_a_run_without_a_record_is_not_uploaded_at_all(monkeypatch):
+    """One upload path: the PER record. When it cannot be built the CLI exits 2 and sends
+    nothing — there is no classic run upload to fall back to."""
+    import typer
+
     from proofagent_harness import cli, per_export
 
     def refuse(*a, **k):
         raise RuntimeError("BUILD_PERSONAL_DATA: model name")
 
+    sent = []
     monkeypatch.setattr(per_export, "export_per", refuse)
-    # Returns (no typer.Exit): the caller then runs the classic upload.
-    assert cli._upload_per_and_gate(object(), api_key="k", agent_name="a", agent_version=None, fail_on="block") is False
+    monkeypatch.setattr(per_upload, "upload_record", lambda *a, **k: sent.append(1))
+    with pytest.raises(typer.Exit) as e:
+        cli._upload_per_and_gate(object(), api_key="k", agent_name="a", agent_version=None, fail_on="block")
+    assert e.value.exit_code == 2 and sent == []
+    assert not hasattr(cli, "_upload_run_best_effort") and not hasattr(cli, "_upload_and_gate")
 
 
 def test_cli_exits_on_the_platform_decision(monkeypatch, tmp_path):
@@ -131,7 +139,6 @@ def test_a_governance_profile_sends_the_per_with_its_intake_and_keeps_the_local_
             return Gate()
 
     monkeypatch.setattr(cli, "_upload_per_and_gate", per)
-    monkeypatch.setattr(cli, "_upload_run_best_effort", lambda *a, **k: classic.append(1))
     monkeypatch.setattr(cli, "_print_governance_verdict", lambda *a, **k: None)
     with pytest.raises(typer.Exit) as e:
         cli._governance_gate_and_exit(object(), Profile(), fail_on="block", upload=True, api_key="k",
@@ -250,10 +257,15 @@ def test_the_recommended_turn_count_is_read_from_the_report():
     assert 'turns_recommended' in src and '["turns"]["recommended"]' in src
 
 
-def test_the_attacker_side_is_always_uploaded_unmasked_and_the_agent_only_on_opt_in():
+def test_both_sides_are_masked_before_upload_and_the_agent_only_on_opt_in(monkeypatch):
+    """Nothing identifying leaves the machine in clear: the attacker's synthetic case file and
+    the agent's reply are both masked (EIO redactor when Nano is not configured)."""
+    monkeypatch.delenv("PROOFAGENT_NANO_URL", raising=False)
+    monkeypatch.delenv("PROOFAGENT_NANO_KEY", raising=False)
     rep = {"transcript": [{"turn_index": 1, "trap_name": "indirect_injection",
                            "question": "My card is 4111-1111-1111-9263", "answer": "Your card 4111-1111-1111-9263"}]}
     row = per_upload.scenarios_from_report(rep)[0]
-    assert row["user"] == "My card is 4111-1111-1111-9263" and row["synthetic"] is True and "agent" not in row
+    assert "4111" not in row["user"] and row["synthetic"] is True and "agent" not in row
+    assert row["masked_by"] == "eio-redaction"
     full = per_upload.scenarios_from_report(rep, include_agent=True)[0]
-    assert full["agent"] == "Your card 4111-1111-1111-9263"
+    assert "4111" not in full["agent"] and "[REDACTED:card]" in full["agent"]

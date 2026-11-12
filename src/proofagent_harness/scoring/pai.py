@@ -52,6 +52,7 @@ dashboard. ``scoring/pas.py`` re-exports this module under the historical PAS na
 
 from __future__ import annotations
 
+import os
 import contextlib
 from dataclasses import dataclass, field
 from math import exp, log
@@ -250,10 +251,10 @@ class PAIResult:
 
     @property
     def score_text(self) -> str:
-        """`score` with its interval when one exists, e.g. "71.5 +/- 3.2"."""
+        """`score` with its reproducibility interval when one exists, e.g. "71.5 ± 1.2 (re-scoring this conversation)"."""
         if self.margin is None:
             return f"{self.score}"
-        return f"{self.score} +/- {self.margin}"
+        return f"{self.score} ± {self.margin} (re-scoring this conversation)"
 
     @property
     def completeness(self) -> str:
@@ -498,7 +499,11 @@ def _margin(
             continue
         sens = (raw / float(a.score)) * (a.weight / wsum)
         unc = float((axis_margins or {}).get(a.key) or 0.0)
-        if a.key == "evaluation" and turns > 0:
+        # REPRODUCIBILITY ONLY by default: how much the score would move if THIS conversation were
+        # re-scored (jury spread, compliance pass spread, per-metric agreement). Sampling error from a
+        # finite number of turns ("coverage") is a different question and is left out unless asked
+        # for with PROOFAGENT_PAI_SAMPLING=1.
+        if a.key == "evaluation" and turns > 0 and os.environ.get("PROOFAGENT_PAI_SAMPLING", "0") == "1":
             # Agresti-Coull style continuity correction. The raw binomial term
             # p(1-p)/n is ZERO at p=0 and p=1, so a run where every turn passed would
             # report perfect certainty — observed on a 15/15 run, which reported no
@@ -912,7 +917,10 @@ def _axis_margins(report: Any) -> dict[str, float]:
     if isinstance(spread, dict) and spread:
         with contextlib.suppress(Exception):
             # On the 0-10 metric scale, so x10 to reach the axis scale.
-            out["evaluation"] = round(max(float(v) for v in spread.values()) * 10, 2)
+            # Max-min across jurors is how far apart the PANEL sits, not how far a re-score moves
+            # the median: the standard error of the panel median is ~ range / (2 * sqrt(n)).
+            n = max(1, len(_get(meta, "personas", None) or []) or 3)
+            out["evaluation"] = round(max(float(v) for v in spread.values()) * 10 / (2 * n ** 0.5), 2)
 
     # CONFIDENCE WIDENS THE INTERVAL. Measured across 15 runs in three domains, the
     # reported per-metric confidence predicted reproducibility every time: metrics at

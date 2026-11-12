@@ -1,0 +1,60 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "check_status",
+   "description": "Check an application's status.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "application_id": {
+      "type": "string"
+     },
+     "dob": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "application_id",
+     "dob"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "start_application",
+   "description": "Start an application.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "program": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "program"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "request_accommodation",
+   "description": "Request an interpreter or accessibility support.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "type"
+    ]
+   }
+  }
+ }
+]

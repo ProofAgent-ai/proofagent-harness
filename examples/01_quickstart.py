@@ -425,6 +425,15 @@ def _chat_create_with_retry(**kwargs: Any) -> Any:
     know per-model param schemas and subsequent calls hit the API directly.
     """
     _apply_known_overrides(kwargs)
+    # Reasoning models (gpt-5*, o-series) spend output tokens on hidden reasoning first. With a
+    # 1,024 cap and the default effort, gpt-5-nano used the whole budget thinking and returned
+    # an EMPTY answer on every turn. Give them a working budget and a modest effort.
+    _m = str(kwargs.get("model", "")).split("/")[-1]
+    if _m.startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs.setdefault("reasoning_effort", __import__("os").environ.get("AGENT_REASONING_EFFORT", "low"))
+        cap = kwargs.pop("max_tokens", None) or kwargs.get("max_completion_tokens") or 0
+        kwargs["max_completion_tokens"] = max(int(cap), 8192)
+        kwargs.pop("temperature", None)
 
     max_retries = 6
     base_delay = 2.0

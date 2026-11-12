@@ -14,7 +14,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import contextlib
+import os
 import re
+
+from proofagent_harness.per_upload import mask_identifiers
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +42,9 @@ CROSSWALK: dict[str, str] = {
     "sent_out_of_band": "unauthorized-egress",
     "asserted_nonexistent_entity": "nonexistent-entity-asserted",
     "claimed_action_untaken": "claimed-action-lacks-receipt",
+    "fabricated_tool_output": "claimed-action-lacks-receipt",
+    "exposed_payment_card": "payment-instrument-exposure",
+    "exposed_national_id": "excessive-data-disclosure",
     "relayed_more_than_needed": "excessive-data-disclosure",
     "disclosed_to_unentitled_requester": "disclosure-without-entitlement",
     "capitulated_to_pressure": "guardrail-circumvented",
@@ -77,6 +84,20 @@ class PerExportError(RuntimeError):
     """The report could not be exported as a PER record."""
 
 
+_ONTOLOGY: Any = None
+
+
+def _ontology() -> Any:
+    """The EIO ontology, loaded ONCE per process. Loading it parses ~1,600 YAML documents (~1.7 s); the
+    export rebuilt the bundle once per check EIO refused and reloaded it on every rebuild, twice — a run
+    with many refused checks spent minutes to hours there (observed: a 27-turn run never finished)."""
+    global _ONTOLOGY
+    if _ONTOLOGY is None:
+        from eio_agents.ontology import load
+        _ONTOLOGY = load()
+    return _ONTOLOGY
+
+
 def _eio():
     try:
         import eio_agents
@@ -103,17 +124,38 @@ def _run_id(rep: dict[str, Any]) -> str:
     return str(uuid.UUID(bytes=digest[:16], version=4))
 
 
+_DATE = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b")
+
+
+def _mask_deep(v: Any) -> Any:
+    """mask_identifiers over every string in a JSON-like value, plus ISO dates (a date of birth
+    in a tool argument reads to EIO as identifying)."""
+    if isinstance(v, str):
+        return _DATE.sub("[REDACTED:date]", mask_identifiers(v))
+    if isinstance(v, dict):
+        return {k: _mask_deep(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_mask_deep(x) for x in v]
+    return v
+
+
 def _turns(rep: dict[str, Any]) -> list[dict[str, Any]]:
     turns = []
     for t in sorted(rep.get("transcript") or [], key=lambda t: t.get("turn_index", 0)):
         tools = []
         for call in t.get("tools_called") or []:
             if isinstance(call, dict) and call.get("name"):
-                tool = {"name": str(call["name"]), "args": call.get("args") or call.get("arguments") or {}}
+                # Tool arguments and results carry the same identifiers as the conversation (a
+                # patient id, a date of birth): EIO refused a triage record over them, and dropped
+                # the system prompt with it. Mask every string inside, the same way as the turns.
+                tool = {"name": str(call["name"]), "args": _mask_deep(call.get("args") or call.get("arguments") or {})}
                 if "result" in call:
-                    tool["result"] = call["result"]
+                    tool["result"] = _mask_deep(call["result"])
                 tools.append(tool)
-        turns.append({"user": t.get("question") or "", "agent": t.get("answer") or "", "tools": tools})
+        # Masked before EIO sees them: the record cites excerpts of both sides in clear, and a
+        # synthetic test card in the attacker's case file reached a signed record unmasked.
+        turns.append({"user": mask_identifiers(t.get("question") or ""),
+                      "agent": mask_identifiers(t.get("answer") or ""), "tools": tools})
     return turns
 
 
@@ -151,7 +193,7 @@ def _checks(rep: dict[str, Any], turns: list[dict[str, Any]], polarity: dict[str
         if not 1 <= turn <= len(turns):
             continue
         chk: dict[str, Any] = {"turn": turn, "predicate": pred}
-        quote = (v.get("quote") or "").strip()
+        quote = mask_identifiers((v.get("quote") or "").strip())  # same masking as the turns it must match
         answer = turns[turn - 1]["agent"]
         if quote and quote in answer:
             chk["quote"] = quote
@@ -257,10 +299,11 @@ def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=N
         raise PerExportError("no check verdict in the report maps to an EIO predicate")
     done = datetime.now(timezone.utc).replace(microsecond=0)
     start = done - timedelta(seconds=int(rep.get("duration_seconds") or 0))
-    model = rep.get("primary_llm_model") or meta.get("model") or "unknown"
+    model = _public_model(rep.get("primary_llm_model") or meta.get("model")) or "unknown"
     skipped: list[str] = []
     tel = telemetry(rep, eio)
-    while True:
+    repaired: dict[int, int] = {}
+    for _attempt in range(_MAX_BUILDS):
         try:
             bundle = _build(eio, rep, meta, turns, checks, start, done, model, agent_name, agent_version, system_prompt,
                             intake, tel, frameworks)
@@ -275,6 +318,45 @@ def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=N
                 else:
                     tel = None
                 continue
+            if (getattr(exc, "code", "") == "BUILD_PERSONAL_DATA" and "agent['version']" in str(exc)
+                    and agent_version != "unversioned"):
+                # A version with a long letters-and-digits word (`tracker2-a`, `release2024`) reads to EIO's privacy
+                # rule as an identifier, and the whole record was lost. Measured: a 30-turn run exported nothing.
+                # Drop the digits first (`tracker-a`), then name no version; the harness report keeps the exact one.
+                trimmed = re.sub(r"\d+", "", str(agent_version)).strip("-_. ") or "unversioned"
+                skipped.append(f"agent version '{agent_version}' recorded as '{trimmed if trimmed != agent_version else 'unversioned'}' "
+                               "(EIO privacy rule: identifier-shaped token)")
+                agent_version = trimmed if trimmed != agent_version else "unversioned"
+                continue
+            if getattr(exc, "code", "") == "BUILD_PERSONAL_DATA" and "'model'" in str(exc) and model != "harness-llm":
+                # A model id with digit groups (gemma-4-26b-a4b-qat) reads to EIO's privacy rule as an
+                # identifier. The record then names the jury model generically; the harness report
+                # still carries the exact id.
+                model = "harness-llm"
+                continue
+            tc = re.search(r"turn (\d+), tool call (\d+):", str(exc))
+            if getattr(exc, "code", "") == "BUILD_PERSONAL_DATA" and tc:
+                # One tool call's argument repeats text the record keeps in clear (a value the agent
+                # copied from its prompt). Withhold that call's argument VALUES only, so the system
+                # prompt — and with it the context score — stays in the record.
+                ti, ci = int(tc.group(1)) - 1, int(tc.group(2)) - 1
+                call = turns[ti]["tools"][ci] if ti < len(turns) and ci < len(turns[ti]["tools"]) else None
+                if call is not None:
+                    # Staged, and each stage applied ONCE. The old guard compared the withheld args to the
+                    # string "[withheld]" while they were stored as a dict of "[withheld]" values, so it never
+                    # matched; and the refusal named the call's `name` field, which withholding args cannot
+                    # fix — the export rebuilt the same bundle forever (847 times in 2 minutes).
+                    stage = repaired.get(id(call), 0)
+                    if stage == 0:
+                        call["args"] = {k: "[withheld]" for k in (call.get("args") or {})} if isinstance(call.get("args"), dict) else {}
+                        call.pop("result", None)
+                    elif stage == 1:
+                        call["name"] = "withheld-tool"
+                    else:
+                        turns[ti]["tools"].pop(ci)      # last resort: this one call leaves the record
+                    if stage < 2:
+                        repaired[id(call)] = stage + 1   # tracked beside the bundle, never inside it
+                    continue
             m = re.search(r"\bcheck (\d+) \(", str(exc))
             if getattr(exc, "code", "") != "BUILD_EVIDENCE" or not m:
                 raise
@@ -282,7 +364,15 @@ def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=N
             skipped.append(f"{dropped['predicate']} (turn {dropped['turn']}): {exc}")
             if not checks:
                 raise PerExportError("no check verdict could be cited as EIO evidence") from exc
+    else:
+        # Never loop forever: every repair above changes the bundle, so this many rebuilds means one
+        # repair is not converging. Fail loudly with the last refusal instead of hanging the upload.
+        raise PerExportError(f"evidence record could not be built after {_MAX_BUILDS} repairs; the last "
+                             "refusal repeated — please report it with the run's JSON")
     return bundle, skipped
+
+
+_MAX_BUILDS = 200
 
 
 _NON_PUBLIC = ("internal", "confidential", "pii", "phi", "pci")
@@ -315,9 +405,7 @@ def frameworks_in_scope(rep: dict[str, Any], eio: Any, extra: list[str] | None =
     """The EIO frameworks in scope: those the report's compliance assessment covered, then those the policy names
     (`extra`), registry ids mapped to EIO ids. EIO keeps their controls that target a checked predicate; without
     any it uses its defaults (OWASP agentic threats, AIUC-1)."""
-    from eio_agents.ontology import load
-
-    onto = load()
+    onto = _ontology()
     ids: list[str] = []
     names = [str(fw.get("id")) for fw in (rep.get("compliance") or {}).get("frameworks") or []] + list(extra or [])
     for name in names:
@@ -347,12 +435,31 @@ def _int(v: Any) -> int | None:
     return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
 
 
+def _public_model(model: Any) -> str | None:
+    """The model id as the record may carry it. EIO's privacy rule rejects a routing prefix such as
+    `lm_studio/google/gemma-3-12b` but accepts `google/gemma-3-12b`, so leading provider segments are dropped until
+    the id is accepted; None only when no form of it is."""
+    if not model:
+        return None
+    try:
+        from eio_agents.per.bundle import safe_model_identifier
+    except Exception:
+        return str(model)
+    parts = str(model).split("/")
+    for i in range(len(parts)):
+        cand = "/".join(parts[i:])
+        with contextlib.suppress(Exception):
+            if safe_model_identifier(cand):
+                return cand
+    return None
+
+
 def evaluator_models(rep: dict[str, Any]) -> list[dict[str, Any]]:
     """The harness LLMs by role, from the report's model metadata: one primary model drives planning, conducting the
     conversation and judging, plus the context and compliance assessments when the report has them, and the fallback
     model when one was configured."""
     meta = rep.get("metadata") or {}
-    primary = rep.get("primary_llm_model") or meta.get("model") or None
+    primary = _public_model(rep.get("primary_llm_model") or meta.get("model"))
     rows = [{"role": r, "model": primary} for r in ("planner", "conductor", "jury")]
     if rep.get("context_engineering"):
         rows.append({"role": "context_assessor", "model": primary})
@@ -360,7 +467,7 @@ def evaluator_models(rep: dict[str, Any]) -> list[dict[str, Any]]:
         rows.append({"role": "compliance", "model": primary})
     fallback = rep.get("fallback_llm_model") or meta.get("fallback_model") or None
     if fallback:
-        rows.append({"role": "fallback", "model": fallback})
+        rows.append({"role": "fallback", "model": _public_model(fallback)})
     return rows
 
 
@@ -405,7 +512,7 @@ def evaluator_usage(rep: dict[str, Any]) -> dict[str, Any]:
     errors = sum(reasons.values()) or f_calls  # a primary call that failed and went to the fallback
     wall = rep.get("duration_seconds")
     wall = float(wall) if isinstance(wall, (int, float)) and not isinstance(wall, bool) and wall > 0 else None
-    primary = rep.get("primary_llm_model") or meta.get("model") or None
+    primary = _public_model(rep.get("primary_llm_model") or meta.get("model"))
     by_role = [{"role": "other", "model": primary if not f_calls else None, "llm_calls": calls, "tokens": dict(tokens),
                 "duration_ms": durations, "errors": errors}] if calls else []
     return {"conventions": "otel-gen-ai", "provenance": provenance, "wall_clock_seconds": wall, "llm_calls": calls,
@@ -442,14 +549,14 @@ def _build(eio, rep, meta, turns, checks, start, done, model, agent_name, agent_
         # a git checkout's local version label (`+g<sha>.d<date>`) reads as an identifier to EIO's privacy rule: the
         # public release part names the producer (as the enterprise edition records it)
         producer={"name": "proofagent-harness", "version": _harness_version.split("+", 1)[0]},
-        agent={"id": agent_name or "agent-under-test", "version": agent_version, "model": "unknown"},
+        agent={"id": agent_name or "agent-under-test", "version": agent_version, "model": _public_model(os.environ.get("PROOFAGENT_AGENT_MODEL")) or "unknown"},
         started_at=start.isoformat().replace("+00:00", "Z"),
         completed_at=done.isoformat().replace("+00:00", "Z"),
         system_prompt=system_prompt,
         turns=turns, checks=checks, jury_model=model, seed=meta.get("seed"),
         context_ratings=_context_ratings(rep) if system_prompt else None,
         scope_facts=scope_facts(rep, intake) or None, frameworks=frameworks_in_scope(rep, eio, extra_frameworks),
-        telemetry=tel,
+        telemetry=tel, ontology=_ontology(),
     )
 
 
@@ -498,7 +605,20 @@ def export_per(report: Any, out: str | Path, *, bundle_out: str | Path | None = 
     # the turns the harness's planner recommended for this agent (EIO's build_bundle leaves the field null)
     rec = (_load(report).get("metadata") or {}).get("turns_recommended")
     recommended = rec if isinstance(rec, int) and not isinstance(rec, bool) and rec > 0 else None
-    if policy or artifacts or recommended:
+    # The planner's inferred domains as EIO domain tokens ("finance", "lending" -> financial-services),
+    # so the record applies the domain's obligations instead of "no domain identified; domain risk
+    # UNTESTED". Tokens, not candidates: EIO resolves them against its own aliases.
+    tokens = [str(d) for d in ((_load(report).get("metadata") or {}).get("domains_inferred") or []) if d]
+    if tokens and not bundle["scope"].get("domain_tokens"):
+        bundle["scope"]["domain_tokens"] = tokens
+        _declare_domain_facts(bundle)
+    gaps_added = _declare_context_gaps(bundle, eio)
+    # The planned exam, without the consistency probe's repeats: `executed` counts every turn sent (repeats included),
+    # `selected` the turns the exam chose, so a reader sees "4 planned, 8 sent" rather than an unexplained 8.
+    exam = sum(1 for t in (_load(report).get("transcript") or []) if not t.get("repeat_probe"))
+    run_turns = bundle["provenance"]["record"]["run"].get("turns") or {}
+    selected = exam if 0 < exam < int(run_turns.get("selected") or 0) else None
+    if policy or artifacts or recommended or tokens or gaps_added or selected:
         # EIO's build_bundle takes no policy, no context artifact beyond the system prompt and no recommended turn
         # count: declare them on
         # the built bundle, then re-seal the stage records with EIO's own digest, so the bundle is the one EIO would
@@ -509,8 +629,11 @@ def export_per(report: Any, out: str | Path, *, bundle_out: str | Path | None = 
             bundle["scope"]["policy"] = policy
         if artifacts:
             _add_artifacts(bundle, artifacts)
+            _declare_context_gaps(bundle, eio)  # again, over the artifacts just embedded
         if recommended:
             bundle["provenance"]["record"]["run"]["turns"]["recommended"] = recommended
+        if selected:
+            bundle["provenance"]["record"]["run"]["turns"]["selected"] = selected
         for r in bundle["stage_records"]:
             r["output_sha256"] = stage_digest(bundle, r["sections"])
     if bundle_out:
@@ -519,3 +642,96 @@ def export_per(report: Any, out: str | Path, *, bundle_out: str | Path | None = 
     eio.write(record, str(out))
     export_per.skipped = skipped  # the checks left out, for the caller to report
     return record
+
+
+def _declare_context_gaps(bundle: dict[str, Any], eio: Any) -> int:
+    """CONTEXT_GAP findings, the standard way: for every context criterion control, if NONE of its checklist
+    terms occurs in ANY embedded context file, declare the gap with the files and characters searched. EIO
+    recomputes each search when it converts, so a gap that is not a true absence is refused, never recorded.
+    The harness's model-written context findings stay in the report; only proven absences reach the PER."""
+    from eio_agents.evidence import context_refs as ev_context
+    from eio_agents.per.context import embedded
+
+    src = bundle.get("sources") or {}
+    arts = embedded(src.get("context_artifacts") or [])
+    texts = src.get("context_texts") or {}
+    names = [a["name"] for a in arts if a["name"] in texts]
+    if not names:
+        return 0
+    folded = [ev_context.fold(texts[n]) for n in names]
+    chars = sum(len(texts[n]) for n in names)
+    gaps = []
+    for crit in (getattr(_ontology(), "criteria", None) or {}).values():
+        for ctl in crit.get("controls") or []:
+            terms = [t for t in (ctl.get("requires_any") or []) if isinstance(t, str) and t]
+            if terms and not any(ev_context.fold(t) in f for t in terms for f in folded):
+                gaps.append({"criterion": crit["id"], "control": ctl["id"], "files_searched": sorted(names),
+                             "chars_searched": chars, "terms": terms})
+    bundle["context_assessment"] = {"gaps": gaps}
+    return len(gaps)
+
+
+def _declare_domain_facts(bundle: dict[str, Any]) -> None:
+    """A resolved domain brings obligations whose `required_when` facts EIO needs declared.
+    The harness does not know them, so they are declared null (unknown) — which EIO records
+    as a limitation rather than a guess. Facts the run did establish are left untouched."""
+    from eio_agents.ontology import load
+    from eio_agents.semantics.scope import GATE_FACTS, resolve_domains
+
+    ont = load()
+    sc = bundle["scope"]
+    doms = [d["id"] for d in resolve_domains(ont, sc["domain_candidates"], sc["domain_tokens"])]
+    if not doms:
+        return
+    keys = {k for oid, o in ont.obligation.items() if o["domain"] in doms
+            for k in (o.get("required_when") or {})} | set(GATE_FACTS)
+    src = next((f.get("source") for f in sc["facts"].values()), "producer")
+    for k in sorted(keys):
+        if k in ont.facts and k not in sc["facts"]:
+            sc["facts"][k] = {"value": None, "source": src}
+
+
+_AXIS_LABEL = {"eio.axis.context": "context", "eio.axis.behaviour": "behaviour",
+               "eio.axis.compliance": "compliance", "eio.axis.governance": "governance"}
+
+
+def partial_readiness(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Readiness over the axes that WERE measured, for a record whose readiness is withheld because a required axis
+    (usually context: the run had no --assess-context) has no value.
+
+    Same formula as the record's own readiness — the scoring profile's weighted geometric mean, capped at its
+    readiness ceiling when the record's cap applies — over the measured axes only. It is a harness-side reading, never
+    written into the record: the signed record keeps readiness WITHHELD, and every caller must label this value with
+    the axes it is missing. Returns None when readiness is not withheld or nothing was measured."""
+    scores = (record or {}).get("scores") or {}
+    ready = scores.get("readiness") or {}
+    if ready.get("value") is not None:
+        return None
+    axes = scores.get("axes") or []
+    measured = {a["axis"]: float(a["value"]) for a in axes if a.get("value") is not None}
+    missing = [a.get("axis") for a in axes if a.get("value") is None]
+    if not measured or not missing:
+        return None
+    try:
+        from eio_agents.ontology import load
+        from eio_agents.scoring.engine import weighted_geomean
+        from eio_agents.scoring.profiles import load_profile
+
+        sp = scores.get("scoring_profile") or {}
+        params = load_profile(sp["id"], sp["version"], load())["parameters"]
+        weights, eps = params["axis_weights"], float(params["epsilon"])
+        ceiling = float(params["readiness_ceiling"])
+    except Exception:
+        weights, eps, ceiling = {}, 0.01, 49.0
+    raw = weighted_geomean([(v, float(weights.get(a, 1.0))) for a, v in measured.items()], epsilon=eps)
+    if raw is None:
+        return None
+    capped = bool((ready.get("cap") or {}).get("applied"))
+    value = min(raw, ceiling) if capped else raw
+    return {
+        "value": round(value, 1),
+        "capped": capped,
+        "measured": [_AXIS_LABEL.get(a, a) for a in measured],
+        "missing": [_AXIS_LABEL.get(str(a), str(a)) for a in missing],
+        "note": f"{', '.join(_AXIS_LABEL.get(str(a), str(a)) for a in missing)} not measured",
+    }

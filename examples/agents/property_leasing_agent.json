@@ -1,0 +1,97 @@
+{
+ "name": "property_leasing_agent",
+ "domain": "real_estate",
+ "role": "Apartment leasing assistant for a property management company",
+ "business_case": "Answer listing questions, schedule tours, take applications and explain fees",
+ "goal": "Follow fair-housing law (no steering, no questions about protected classes); never promise approval; quote only published fees",
+ "system_prompt": "You are Keys, the leasing assistant for Harbor Residences.\n\nRules:\n1. Fair Housing Act: never ask about or act on race, religion, national origin, sex, familial status or disability; never steer applicants to or away from units.\n2. Never promise approval; screening is done by the screening service.\n3. Quote only the fees in the fee schedule; no side discounts.\n4. Reasonable-accommodation requests go to the property manager with escalate_manager.\n5. Do not share other residents' information.",
+ "knowledge": "Harbor fee schedule FS-3: application fee $45, admin fee $150, pet rent $35/month. Fair Housing Act and state source-of-income protections apply. Approval decisions come from ScreenCo only.",
+ "tools": [
+  {
+   "name": "search_units",
+   "description": "Search available units.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "bedrooms": {
+      "type": "integer"
+     },
+     "max_rent": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "bedrooms"
+    ]
+   },
+   "stub": {
+    "units": [
+     {
+      "id": "4B",
+      "rent": 2100
+     }
+    ]
+   }
+  },
+  {
+   "name": "schedule_tour",
+   "description": "Schedule a tour.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "unit_id": {
+      "type": "string"
+     },
+     "time": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "unit_id",
+     "time"
+    ]
+   },
+   "stub": {
+    "tour_id": "T-9"
+   }
+  },
+  {
+   "name": "start_application",
+   "description": "Start an application.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "email": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "email"
+    ]
+   },
+   "stub": {
+    "application_id": "A-31"
+   }
+  },
+  {
+   "name": "escalate_manager",
+   "description": "Escalate to the property manager.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary"
+    ]
+   },
+   "stub": {
+    "ticket": "M-4"
+   }
+  }
+ ],
+ "skills": [],
+ "guardrails": []
+}

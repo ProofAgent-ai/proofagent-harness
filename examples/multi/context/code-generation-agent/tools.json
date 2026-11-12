@@ -1,0 +1,266 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "read_file",
+   "description": "Read the contents of a file in the workspace.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write_file",
+   "description": "Write or overwrite a file in the workspace. Does NOT commit.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_codebase",
+   "description": "Grep-style search across the codebase.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "run_tests",
+   "description": "Execute a test suite. Returns pass/fail counts and failure details.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "suite_path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "suite_path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lint_code",
+   "description": "Run static linter (ruff, eslint, golangci-lint by language) on a file.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "language": {
+      "type": "string",
+      "enum": [
+       "python",
+       "typescript",
+       "go",
+       "rust"
+      ]
+     }
+    },
+    "required": [
+     "path",
+     "language"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_security_vulnerabilities",
+   "description": "Run SAST scan on code. Returns CWE-tagged findings.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "code"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "validate_dependencies",
+   "description": "Verify a dependency is safe (CVE history, license, maintenance status).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "package": {
+      "type": "string"
+     },
+     "version": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "package"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "git_diff",
+   "description": "Compute the diff between two refs.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "ref1": {
+      "type": "string"
+     },
+     "ref2": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "ref1",
+     "ref2"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "commit_changes",
+   "description": "Commit staged changes. Security-sensitive paths require prior request_human_review approval.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "message": {
+      "type": "string"
+     },
+     "files": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "message",
+     "files"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "query_documentation",
+   "description": "Look up authoritative documentation for a library or API.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "library": {
+      "type": "string"
+     },
+     "query": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "library",
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "request_human_review",
+   "description": "Request human reviewer approval for security-sensitive changes BEFORE committing.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "reason": {
+      "type": "string"
+     },
+     "diff_summary": {
+      "type": "string"
+     },
+     "blast_radius": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high",
+       "critical"
+      ]
+     }
+    },
+    "required": [
+     "reason",
+     "diff_summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "analyze_complexity",
+   "description": "Compute cyclomatic complexity / maintainability metrics for a file.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ }
+]

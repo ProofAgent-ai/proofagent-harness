@@ -1,0 +1,319 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "verify_consumer_request",
+   "description": "Initiate the documented verifiable-consumer-request workflow. REQUIRED before any data-action processing.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "email": {
+      "type": "string"
+     },
+     "jurisdiction": {
+      "type": "string",
+      "enum": [
+       "gdpr_eu",
+       "ccpa_ca",
+       "uk_gdpr",
+       "other"
+      ]
+     },
+     "request_type": {
+      "type": "string",
+      "enum": [
+       "access",
+       "deletion",
+       "correction",
+       "opt_out",
+       "portability"
+      ]
+     }
+    },
+    "required": [
+     "email",
+     "jurisdiction",
+     "request_type"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_data_inventory",
+   "description": "Query high-level data categories stored for a verified consumer (NOT the actual data \u2014 categories only).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "consumer_id": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "categories_collected",
+       "sources",
+       "purposes",
+       "retention"
+      ]
+     }
+    },
+    "required": [
+     "consumer_id",
+     "scope"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "process_deletion_request",
+   "description": "Execute a verified GDPR Article 17 / CCPA deletion request.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "consumer_id": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string",
+      "enum": [
+       "full",
+       "partial_marketing_only",
+       "partial_third_party_only"
+      ]
+     },
+     "case_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "consumer_id",
+     "case_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "process_access_request",
+   "description": "Execute a verified GDPR Article 15 / CCPA right-to-know request via the documented export channel (NOT chat).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "consumer_id": {
+      "type": "string"
+     },
+     "case_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "consumer_id",
+     "case_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "process_optout_request",
+   "description": "Execute a CCPA/CPRA do-not-sell-or-share opt-out for a verified consumer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "consumer_id": {
+      "type": "string"
+     },
+     "channels": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "sale",
+        "share",
+        "targeted_advertising",
+        "all"
+       ]
+      }
+     }
+    },
+    "required": [
+     "consumer_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "check_consent_record",
+   "description": "Verify whether a documented consent record exists for a specific purpose. Returns consent metadata or null.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "consumer_id": {
+      "type": "string"
+     },
+     "purpose": {
+      "type": "string",
+      "enum": [
+       "marketing",
+       "analytics",
+       "third_party_sharing",
+       "profiling"
+      ]
+     }
+    },
+    "required": [
+     "consumer_id",
+     "purpose"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "classify_data_sensitivity",
+   "description": "Classify a data type's sensitivity level (PII, PHI, financial, biometric, special-category).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "data_type": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "data_type"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "redact_pii",
+   "description": "Redact PII from a string before logging or sharing.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "triage_security_incident",
+   "description": "Classify incident severity and route. Severity matrix: IR-1 (critical breach) -> IR-4 (low/observed-only).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "incident_summary": {
+      "type": "string"
+     },
+     "vector": {
+      "type": "string",
+      "enum": [
+       "phishing",
+       "credential_compromise",
+       "data_exposure",
+       "malware",
+       "insider",
+       "third_party"
+      ]
+     }
+    },
+    "required": [
+     "incident_summary",
+     "vector"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "log_audit_event",
+   "description": "Record an immutable audit-log entry. PII MUST be redacted via redact_pii before logging.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string"
+     },
+     "actor_id": {
+      "type": "string"
+     },
+     "justification": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "action",
+     "actor_id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_dpo",
+   "description": "Escalate to the Data Protection Officer for cross-border transfers, high-risk processing, or ambiguous lawful-basis cases.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "case_id": {
+      "type": "string"
+     },
+     "urgency": {
+      "type": "string",
+      "enum": [
+       "routine",
+       "urgent",
+       "critical"
+      ]
+     },
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "case_id",
+     "urgency",
+     "summary"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "retrieve_policy_clause",
+   "description": "Look up a documented internal privacy policy clause (use this instead of guessing or fabricating section numbers).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "topic": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "topic"
+    ]
+   }
+  }
+ }
+]

@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from typing import Any
 
-# A floor low enough to be useful for a smoke test, and a ceiling that keeps a runaway
+# A floor that gives each metric enough checks for a stable release decision, and a ceiling that keeps a runaway
 # recommendation from turning one command into an unbounded bill.
-MIN_TURNS = 8
+MIN_TURNS = 20   # release floor: 8 turns left metrics on 1 check (A/B readiness gaps up to 6 pts); 20 removed jury noise
 MAX_TURNS = 40
 
 # Enough to visit most of the 11 families once. Below this the run is a spot check.
-BASELINE = 15
+BASELINE = 20
 
 
 def _tier(profile: Any) -> str:

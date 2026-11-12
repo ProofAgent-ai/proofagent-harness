@@ -296,7 +296,11 @@ def test_context_assessor_node_returns_weights_and_emits_a_valid_event(monkeypat
 
     assert out["context_engineering"]["score"] == 6.0
     assert out["q_weights"]["guardrail_bypass"] == 1.8
-    assert [e.type for e in seen] == ["context_assessed"]
+    # No context was supplied: the node grades the harness template and says so first.
+    assert [e.type for e in seen] == ["warning", "context_assessed"]
+    assert "harness template" in seen[0].detail
+    assert out["context_engineering"]["inferred_from_template"] is True
+    seen = seen[1:]
     assert seen[0].payload["weights"]["injection_hardening" and "instruction_override"] == 1.7
 
 
@@ -327,7 +331,9 @@ def test_context_assessor_survives_a_failing_assessment(monkeypatch):
     monkeypatch.setattr(ce_mod, "assess_context_engineering", _raise)
     seen: list[Event] = []
     assert context_assessor_node({"assess_context": True, "on_event": seen.append}) == {}
-    assert [e.type for e in seen] == ["warning"]
+    # the template notice, then the failure notice
+    assert [e.type for e in seen] == ["warning", "warning"]
+    assert "unavailable" in seen[-1].detail
 
 
 def test_weights_reach_consensus_through_the_state_channel():
