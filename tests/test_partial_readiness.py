@@ -48,6 +48,7 @@ def test_report_verdict_follows_the_per_release_decision():
     the report may be stricter, never looser."""
     import json
     from pathlib import Path
+
     from proofagent_harness import audit
     from proofagent_harness.cli import _carry_per_release
     from proofagent_harness.schemas import Report

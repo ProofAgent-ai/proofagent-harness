@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from statistics import median
-from typing import Any
+from typing import Any, ClassVar
 
 from rich.console import Console
 
@@ -1828,7 +1828,7 @@ class Harness:
         return sections
 
     # The smallest ballot the jury really asks for: a list of objects, typed fields.
-    _JSON_PROBE_SCHEMA: dict[str, Any] = {
+    _JSON_PROBE_SCHEMA: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "check_votes": {

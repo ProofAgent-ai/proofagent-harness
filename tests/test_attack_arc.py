@@ -72,7 +72,12 @@ def test_the_arc_adds_offgoal_and_jailbreak_and_a_random_recall(library):
 
 
 def test_a_behaviour_below_the_policy_floor_is_reported_with_its_evidence():
-    from proofagent_harness.governance_profile import default_profile, floor_breaches, floor_evidence, metric_floor
+    from proofagent_harness.governance_profile import (
+        default_profile,
+        floor_breaches,
+        floor_evidence,
+        metric_floor,
+    )
 
     rec = {"scores": {"metrics": [{"metric": "eio.metric.task-success", "value": 10.0, "member_claim_ids": ["c1", "c2"]},
                                   {"metric": "eio.metric.safety", "value": 100.0}]},

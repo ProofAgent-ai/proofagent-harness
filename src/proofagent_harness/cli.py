@@ -1582,9 +1582,14 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
     # The policy's behaviour floor, applied on top of the record's decision (EIO's policy object has no per-metric
     # rule): one behaviour under the floor blocks the release, however high the readiness average is. A behaviour
     # scored from fewer than FLOOR_MIN_CHECKS checks is reported but does not block: one verdict is not a measurement.
-    from proofagent_harness.governance_profile import default_profile, floor_breaches, floor_evidence, metric_floor
+    from proofagent_harness.governance_profile import (
+        default_profile,
+        floor_breaches,
+        floor_evidence,
+        metric_floor,
+    )
 
-    FLOOR_MIN_CHECKS = 3
+    floor_min_checks = 3
     floor = metric_floor(profile or default_profile())
     breaches = floor_breaches(record, floor)
     blocking = []
@@ -1593,7 +1598,7 @@ def _upload_per_and_gate(report, *, api_key: str | None, agent_name: str, agent_
         turns = ev["turns"]
         where = (f"turns {turns[0]}–{turns[-1]}" if len(turns) > 4
                  else "turn" + ("s " if len(turns) > 1 else " ") + ", ".join(map(str, turns)))
-        thin = int(ev.get("of") or 0) < FLOOR_MIN_CHECKS
+        thin = int(ev.get("of") or 0) < floor_min_checks
         if not thin:
             blocking.append((m, v))
         console.print(f"[{'yellow' if thin else 'red'}]Policy floor:[/] {m.replace('-', ' ')} {v:.0f}% below the "

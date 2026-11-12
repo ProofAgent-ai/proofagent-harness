@@ -44,7 +44,6 @@ Copyright 2025-2026 ProofAI LLC. Licensed under the Apache License, Version 2.0.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 from typing import TYPE_CHECKING, Any
 

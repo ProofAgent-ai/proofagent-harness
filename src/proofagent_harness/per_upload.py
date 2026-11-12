@@ -178,7 +178,7 @@ def _attach_references(rep: dict, rows: list[dict], mask: Any) -> None:
         if row is None:
             continue
 
-        def m(text: str) -> str:
+        def m(text: str, ref=ref) -> str:
             if not text:
                 return text
             parts = text.split(ref["marker"])
@@ -229,7 +229,6 @@ def _masker():
     turns off."""
     import os
 
-    from eio_agents.evidence.redaction import redact
 
     # One ProofAgent key: a key from the platform's API keys page (pa_nano_…) also works for Nano, so with
     # PROOFAGENT_NANO_URL set, PROOFAGENT_API_KEY is enough (no second key). Masking through Nano is still
@@ -239,12 +238,9 @@ def _masker():
     key = os.environ.get("PROOFAGENT_NANO_KEY") or (api_key if api_key.startswith("pa_nano_") else "")
     url = (os.environ.get("PROOFAGENT_NANO_URL") or "").rstrip("/")
 
-    import re as _re
     # Stricter than EIO's redactor on purpose: it masks a card only when it passes the Luhn
     # check and an IBAN only without spaces, so a synthetic card or "GB82 WEST 1234 ..." went
     # through in clear.
-    card = _re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
-    iban = _re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b")
 
     def eio(text: str) -> str:
         return mask_identifiers(text)

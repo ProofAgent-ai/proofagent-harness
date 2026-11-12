@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from typing import Any
 
 # Fixed context-engineering criteria — the lenses the sub-score is built from.
@@ -491,7 +490,8 @@ def assess_context_engineering(
         # was silently withheld.
         from proofagent_harness.llm import _call_timeout
         kwargs["timeout"] = _call_timeout(str(model))
-        from proofagent_harness.llm import _local_max_tokens, _wants_json_schema as _local
+        from proofagent_harness.llm import _local_max_tokens
+        from proofagent_harness.llm import _wants_json_schema as _local
         if _local(str(model)):
             kwargs.setdefault("max_tokens", _local_max_tokens())
         from proofagent_harness.llm import _local_reasoning_off

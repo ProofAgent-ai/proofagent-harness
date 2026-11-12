@@ -11,18 +11,18 @@ passes). Uses EIO-Agents, a core dependency installed with the harness.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
-import contextlib
 import os
 import re
-
-from proofagent_harness.per_upload import mask_identifiers
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from proofagent_harness.per_upload import mask_identifiers
 
 from . import __version__ as _harness_version
 
@@ -348,7 +348,7 @@ def _bundle_and_skips(report, agent_name, agent_version, system_prompt, intake=N
                     # fix — the export rebuilt the same bundle forever (847 times in 2 minutes).
                     stage = repaired.get(id(call), 0)
                     if stage == 0:
-                        call["args"] = {k: "[withheld]" for k in (call.get("args") or {})} if isinstance(call.get("args"), dict) else {}
+                        call["args"] = dict.fromkeys(call.get("args") or {}, "[withheld]") if isinstance(call.get("args"), dict) else {}
                         call.pop("result", None)
                     elif stage == 1:
                         call["name"] = "withheld-tool"

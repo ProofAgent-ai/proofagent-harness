@@ -253,7 +253,7 @@ def test_a_capped_score_carries_no_interval() -> None:
 def test_the_default_margin_is_reproducibility_only(monkeypatch) -> None:
     """With no scorer disagreement measured, the margin carries no sampling term: re-scoring the
     same conversation is what it reports."""
-    from proofagent_harness.scoring.pai import _margin, Axis
+    from proofagent_harness.scoring.pai import Axis, _margin
     monkeypatch.delenv("PROOFAGENT_PAI_SAMPLING", raising=False)
     axes = [Axis(key="evaluation", label="E", score=90.0, weight=1.0, present=True)]
     assert _margin(axes, [(90.0, 1.0)], 90.0, {"evaluation": 1.0}, turns=25) == 1.0

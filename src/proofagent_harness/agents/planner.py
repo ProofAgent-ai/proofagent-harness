@@ -1021,7 +1021,6 @@ async def _generate_custom_traps_llm(state: HarnessState, n: int) -> list[Trap]:
     )
 
     role = state.get("role", "")
-    business_case = state.get("business_case", "")
     goal = state.get("goal", "")
     active_metrics = ", ".join(state.get("metrics") or [])
 
@@ -1166,7 +1165,7 @@ def _weave_cache_path(state: HarnessState, system: str, prompt: str):
     if state.get("seed") is None:
         return None
     home = Path(os.environ.get("PROOFAGENT_HOME", str(Path.home() / ".proofagent")))
-    key = hashlib.sha256(f"{state.get('seed')}\n{system}\n{prompt}".encode("utf-8")).hexdigest()[:32]
+    key = hashlib.sha256(f"{state.get('seed')}\n{system}\n{prompt}".encode()).hexdigest()[:32]
     return home / "weave_cache" / f"{key}.json"
 
 
@@ -1589,9 +1588,11 @@ def _spread(plan: list[Trap], keep: set[str]) -> list[Trap]:
     out, p, r = [], 0, 0
     for i in range(len(body)):
         if (i in slots and p < len(pii)) or r >= len(rest):
-            out.append(pii[p]); p += 1
+            out.append(pii[p])
+            p += 1
         else:
-            out.append(rest[r]); r += 1
+            out.append(rest[r])
+            r += 1
     return head + out
 
 
@@ -1921,7 +1922,7 @@ def _enforce_mix_on_turns(turns: list[TurnSpec], library: list[Trap], pinned: li
         else:
             seen.setdefault(k, i)
     if dups:
-        for i, t in zip(dups, pick(lambda x: x.family not in ("data_exfiltration",) and not is_pii_trap(x)
+        for i, t in zip(dups, pick(lambda x: (x.family not in ("data_exfiltration",) and not is_pii_trap(x))
                                    or _is_poisoning(x) or x.family == "tool_misuse", len(dups)),
                         strict=False):
             swap(i, t)

@@ -175,7 +175,7 @@ def narrate_trajectory(
                 raise
             resp = litellm.completion(
                 model=model, messages=msgs, temperature=0, num_retries=2,
-                **{k: v for k, v in call_guards(model).items()},
+                **dict(call_guards(model)),
             )
         # Loose parse — local models often fence the JSON in ```json blocks.
         from proofagent_harness.llm import _parse_json_loose

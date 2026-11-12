@@ -129,6 +129,11 @@ ignore = ["E501", "B008"]
 # Intentional typography in juror prompts / docstrings: en-dash, ×, − (minus).
 allowed-confusables = ["–", "×", "−"]
 
+[tool.ruff.lint.per-file-ignores]
+# Test idioms: a module aliased as P/D, UPPER-case fixture constants inside a test, one-line lambdas and statements,
+# class-level fixture data, and curly quotes copied verbatim from agent replies.
+"tests/**" = ["N806", "N812", "E731", "E702", "RUF012", "RUF001"]
+
 [tool.pyright]
 include = ["src"]
 pythonVersion = "3.10"

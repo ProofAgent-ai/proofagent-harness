@@ -61,6 +61,7 @@ def test_retests_take_at_most_half_the_exam(monkeypatch, tmp_path):
 def test_a_run_that_drops_a_stale_transcript_saves_its_own(monkeypatch, tmp_path):
     """The stale stored transcript stayed forever: every run dropped it on plan drift and saved nothing."""
     from types import SimpleNamespace
+
     from proofagent_harness import harness as H
     saved = []
     monkeypatch.setattr("proofagent_harness.calibration.save_transcript", lambda fp, turns, **k: saved.append(fp))

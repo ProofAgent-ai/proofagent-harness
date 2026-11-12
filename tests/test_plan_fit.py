@@ -54,6 +54,7 @@ def test_probe_resends_the_runs_own_attacks_pii_first():
     """The probe ran on a pre-run snapshot and sent random library seeds (XML, AES, housing) into a
     medical exam; it then crashed on a stale name. It must re-send this run's own attacks."""
     import asyncio
+
     from proofagent_harness import calibration as C
     from proofagent_harness import harness as H
     from proofagent_harness.schemas import EvaluationPlan, Turn

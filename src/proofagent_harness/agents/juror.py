@@ -222,7 +222,7 @@ async def _run_consistency_probe(state: HarnessState) -> tuple[dict[str, Any], l
 
 def _norm_text(s: str) -> str:
     import re as _re
-    s = s.lower().replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    s = s.lower().replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')  # noqa: RUF001  (curly quotes matched on purpose)
     s = s.replace("—", "-").replace("–", "-").replace("…", "...")
     s = _re.sub(r"[*_`#>]+", " ", s)
     return " ".join(s.split())

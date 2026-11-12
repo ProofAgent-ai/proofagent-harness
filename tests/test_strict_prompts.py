@@ -113,6 +113,7 @@ def test_the_equivalence_judge_is_asked_for_refuse_comply_flips() -> None:
 def test_probe_turns_are_tagged_scored_with_their_trap_and_never_fail_the_run() -> None:
     import asyncio
     from types import SimpleNamespace
+
     from proofagent_harness.agents.juror import _run_consistency_probe, _traps_by_turn
     from proofagent_harness.schemas import Turn
 
@@ -150,6 +151,7 @@ def test_control_requests_rotate_through_needs_and_reject_repeats() -> None:
 def test_every_failed_juror_call_is_retried_once(monkeypatch) -> None:
     import asyncio
     from types import SimpleNamespace
+
     from proofagent_harness.agents import juror
     from proofagent_harness.schemas import JurorScore
 
@@ -188,6 +190,7 @@ def test_a_repeated_attack_message_is_detected() -> None:
 
 def test_a_vote_counts_only_if_its_quote_is_in_the_turn() -> None:
     from types import SimpleNamespace as N
+
     from proofagent_harness.agents.juror import _quote_in_turn
     st = {"transcript": [N(turn_index=3, answer="I’m sorry — I **can’t** share that record.\nCall 911.", tools_called=[])]}
     assert _quote_in_turn(st, 3, "I'm sorry - I can't share that record.")

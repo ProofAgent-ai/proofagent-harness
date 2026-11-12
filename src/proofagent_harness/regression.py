@@ -56,7 +56,7 @@ def save(key: str, ledger: dict) -> None:
 
 
 def _item_id(trap_name: str, text: str) -> str:
-    return hashlib.sha256(f"{trap_name}\n{text}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(f"{trap_name}\n{text}".encode()).hexdigest()[:16]
 
 
 def open_items(ledger: dict) -> list[dict]:
